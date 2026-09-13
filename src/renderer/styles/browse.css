@@ -359,6 +359,11 @@
   min-height: 0;
 }
 
+/* 内容很长，滚动条默认浅显地露出来，让「可以滚」这件事有提示 */
+.media-wall__scroll::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--scrollbar-thumb) 45%, transparent);
+}
+
 .media-wall {
   --wall-min: 148px;
   display: grid;

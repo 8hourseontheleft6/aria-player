@@ -357,8 +357,12 @@ async function main () {
   document.getElementById('layer-root').appendChild(dropZone.element)
 
   // 视图切换：歌曲列表 / 专辑 / 艺人 / 媒体墙 / 设置
-  // 注意：几个视图可能共用同一个容器（专辑与艺人共用 browseView），
-  // 所以按「容器 -> 支持的视图」组织，避免同一元素被后面的分支又设回 display:none
+  // 注意两点：
+  //  1) 几个视图可能共用同一个容器（专辑与艺人共用 browseView），所以按
+  //     「容器 -> 支持的视图」组织，避免同一元素被后面的分支又设回 display:none
+  //  2) 这里只切换 display，视图自身的布局（display:flex/height:100%）由
+  //     .view-root 类提供。不要把布局写进内联 style，否则置空 display 时会被一起清掉，
+  //     里面的滚动容器就失去了高度约束（曾经导致媒体墙整页滚不动）
   const viewContainers = [
     { views: ['songs'], element: libraryView.element },
     { views: ['albums', 'artists'], element: browseView.element },

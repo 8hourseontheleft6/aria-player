@@ -157,10 +157,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   const grid = h('div', { class: 'media-wall' })
   const scroll = h('div', { class: 'media-wall__scroll scroll view-body' }, grid)
 
-  const element = h('div', {
-    class: 'content-inner',
-    style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0' }
-  }, toolbar, header, scroll)
+  const element = h('div', { class: 'content-inner view-root' }, toolbar, header, scroll)
 
   on(scroll, 'scroll', () => {
     const stuck = scroll.scrollTop > 18

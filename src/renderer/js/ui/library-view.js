@@ -117,7 +117,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
 
   const empty = h('div', { class: 'empty hidden' })
 
-  const element = h('div', { class: 'content-inner', style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0' } },
+  const element = h('div', { class: 'content-inner view-root' },
     toolbar,
     header,
     empty,

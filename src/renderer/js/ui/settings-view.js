@@ -31,7 +31,7 @@ const SHORTCUTS = [
 ]
 
 export function createSettingsView ({ store, bus, player, actions, host }) {
-  const element = h('div', { class: 'content-inner', style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0' } })
+  const element = h('div', { class: 'content-inner view-root' })
 
   const toolbar = h('div', { class: 'view-toolbar' },
     h('div', { class: 'view-toolbar__title', text: '设置' }),

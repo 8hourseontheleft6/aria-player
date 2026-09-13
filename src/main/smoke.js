@@ -574,6 +574,43 @@ async function runSmoke ({ win, ctx }) {
       `播放另一张专辑后聚焦块移到 ${wallView.afterSwitchKey?.slice(0, 14)}（order=${wallView.afterSwitchOrder}，排到首位=${wallView.afterSwitchPosition}），标题《${wallView.afterSwitchTitle}》`)
     record('媒体墙打开专辑', wallView.openedAlbum, '点击方块角标可进入专辑详情')
 
+    /* ---------- 各视图的滚动能力（曾经因为视图根节点 display 被清掉而整块滚不动） ---------- */
+
+    const scrollAudit = await evaluate(win, `
+      const { actions } = window.__aria
+      const probe = async (view, rootSelector, scrollSelector) => {
+        actions.setView(view)
+        await new Promise((r) => setTimeout(r, 520))
+        const root = document.querySelector(rootSelector)
+        const scroller = document.querySelector(scrollSelector)
+        const before = scroller ? scroller.scrollTop : null
+        if (scroller) scroller.scrollTop = 400
+        await new Promise((r) => setTimeout(r, 150))
+        const after = scroller ? scroller.scrollTop : null
+        if (scroller) scroller.scrollTop = 0
+        const rootStyle = root ? getComputedStyle(root) : null
+        return {
+          view,
+          rootDisplay: rootStyle ? rootStyle.display : null,
+          rootHeight: root ? Math.round(root.getBoundingClientRect().height) : null,
+          clientHeight: scroller ? scroller.clientHeight : null,
+          scrollHeight: scroller ? scroller.scrollHeight : null,
+          overflowY: scroller ? getComputedStyle(scroller).overflowY : null,
+          scrollable: before !== null && after !== null && after > before
+        }
+      }
+      const result = {}
+      result.songs = await probe('songs', '#content > .content-inner:nth-child(1)', '.tracklist__viewport')
+      result.wall = await probe('wall', '#content > .content-inner:nth-child(3)', '.media-wall__scroll')
+      result.settings = await probe('settings', '#content > .content-inner:nth-child(4)', '.settings')
+      result.albums = await probe('albums', '#content > .content-inner:nth-child(2)', '.browse-scroll')
+      actions.setView('songs')
+      return result`)
+    const scrollRows = Object.values(scrollAudit)
+    record('各视图可滚动',
+      scrollRows.every((row) => row.scrollable),
+      scrollRows.map((row) => `${row.view}:${row.scrollable ? '可滚' : '滚不动'}(display=${row.rootDisplay}, 容器 ${row.clientHeight}/${row.scrollHeight})`).join('　'))
+
     /* ---------- 系统集成 ---------- */
 
     const { createNoteIcon, createTransportIcon, WHITE, BLACK } = require('./util/raster')

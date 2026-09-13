@@ -175,10 +175,8 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
     artistDetail: artistDetailPage
   }
 
-  const element = h('div', {
-    class: 'content-inner',
-    style: { position: 'relative', height: '100%', minHeight: '0' }
-  }, ...Object.values(pages))
+  const element = h('div', { class: 'content-inner view-root' },
+    ...Object.values(pages))
 
   function pageHeader (title, subtitle) {
     const titleNode = h('h1', { class: 'view-header__title', text: title })

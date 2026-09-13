@@ -291,6 +291,22 @@ html[data-platform="darwin"] .titlebar {
   flex-direction: column;
 }
 
+/**
+ * 视图根容器。
+ *
+ * 注意：切换视图时 JS 会把 element.style.display 置空来恢复显示，
+ * 这会把内联的 display:flex 一并清掉。所以视图的布局必须写在这里（类），
+ * 内联样式只用于 display:none 的切换——否则根节点会退化成 block，
+ * 里面的 flex:1 滚动容器就没有高度约束，整页变成滚不动。
+ */
+.view-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
 /* ------------------------------ 视图头部（iOS 大标题） ------------------------------ */
 
 .view-toolbar {

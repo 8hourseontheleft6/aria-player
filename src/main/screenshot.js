@@ -124,6 +124,21 @@ async function runScreenshots ({ win }) {
         await player.play()
         return true`)
       await sleep(2800)
+    }],
+    ['14-wall-scrolled.png', '媒体墙（滚动一段之后）', async () => {
+      await evaluate(win, `
+        const scroller = document.querySelector('.media-wall__scroll')
+        scroller.scrollTop = 1400
+        return true`)
+      await sleep(900)
+    }],
+    ['15-wall-large.png', '媒体墙（大尺寸）', async () => {
+      await evaluate(win, `
+        document.querySelector('[data-density="l"]')?.click()
+        const scroller = document.querySelector('.media-wall__scroll')
+        scroller.scrollTop = 0
+        return true`)
+      await sleep(1200)
     }]
   ]
 
