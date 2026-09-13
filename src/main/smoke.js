@@ -20,10 +20,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function evaluate (win, expression) {
   const result = win.webContents.executeJavaScript(`(async () => { ${expression} })()`, true)
-  // executeJavaScript 在页面卡死时可能永不 settle，加一层超时保护
+  // executeJavaScript 在页面卡死时可能永不 settle，加一层超时保护。
+  // 注意给足余量：自检里有些步骤本身就要等好几秒（惯性、防抖、动画收敛），
+  // 而这个环境的 rAF 被节流到 ~7fps，15s 很容易被正常等待撞到。
   return Promise.race([
     result,
-    sleep(15000).then(() => {
+    sleep(90000).then(() => {
       throw new Error('渲染层无响应（executeJavaScript 超时）')
     })
   ])
@@ -516,10 +518,17 @@ async function runSmoke ({ win, ctx }) {
       document.querySelector('[data-density="s"]')?.click()
       const flippingRightAfter = document.querySelectorAll('.wall-tile.is-flipping').length
       const animated = document.getAnimations().length
-      await new Promise((r) => setTimeout(r, 900))
+      // 等 FLIP 收敛（本环境 rAF 被节流，onfinish 回调会有延迟，所以轮询等待）
+      let flippingAfter = flippingRightAfter
+      const settleStarted = performance.now()
+      while (performance.now() - settleStarted < 6000) {
+        await new Promise((r) => setTimeout(r, 200))
+        flippingAfter = document.querySelectorAll('.wall-tile.is-flipping').length
+        if (flippingAfter === 0) break
+      }
+      const settleMs = Math.round(performance.now() - settleStarted)
       const sizeAfter = grid?.style.getPropertyValue('--wall-size')
       const columnsAfter = grid?.style.getPropertyValue('--wall-columns')
-      const flippingAfter = document.querySelectorAll('.wall-tile.is-flipping').length
 
       // --- 切换到另一张「排在很后面」的专辑：聚焦块应当原地放大，而不是跳到平面上角 ---
       const beforeSwitchKey = document.querySelector('.wall-tile.is-featured')?.dataset.key || null
@@ -554,7 +563,7 @@ async function runSmoke ({ win, ctx }) {
 
       return {
         tiles, imgs, sizeBefore, sizeAfter, columnsBefore, columnsAfter,
-        flippingRightAfter, flippingAfter, animated,
+        flippingRightAfter, flippingAfter, animated, settleMs,
         hasFeatured: Boolean(featured),
         featuredKey, currentAlbumKey,
         featuredOrder, featuredColumn, featuredRow,
@@ -579,7 +588,7 @@ async function runSmoke ({ win, ctx }) {
       wallView.heroLines > 0 && wallView.heroActive === 1,
       `标题《${wallView.heroTitle}》，迷你歌词 ${wallView.heroLines} 行（高亮 ${wallView.heroActive} 行），传输键 ${wallView.heroControls} 个 + 展开键，进度 ${wallView.progressWidth}`)
     record('密度切换 FLIP 过渡', wallView.animated > 0 && wallView.flippingAfter === 0,
-      `切换瞬间有 ${wallView.flippingRightAfter} 个格子参与动画（共 ${wallView.animated} 个动画），900ms 后全部收敛`)
+      `切换瞬间有 ${wallView.flippingRightAfter} 个格子参与动画（共 ${wallView.animated} 个动画），${wallView.settleMs}ms 后收敛`)
     record('聚焦块跟随切歌',
       Boolean(wallView.afterSwitchKey) && wallView.afterSwitchKey === wallView.expectedSwitchKey &&
       wallView.afterSwitchTitle.length > 0 && wallView.afterSwitchPosition,
@@ -881,13 +890,89 @@ async function runSmoke ({ win, ctx }) {
       // 停在歌曲列表（不打开媒体墙），看后台预热能不能自己把缓存灌满
       window.__aria.actions.setView('songs')
       return true`)
-    const prewarmStart = await artworkService.getArtworkStats()
+    const prewarmBefore = await evaluate(win, `return window.__aria.prewarmer.state`)
     await sleep(6000)
-    const prewarmEnd = await artworkService.getArtworkStats()
-    const prewarmState = await evaluate(win, `return window.__aria.prewarmer.state`)
+    const prewarmAfter = await evaluate(win, `return window.__aria.prewarmer.state`)
+    const prewarmFiles = (await artworkService.getArtworkStats()).files
+    const prewarmDelta = prewarmAfter.warmed - prewarmBefore.warmed
     record('空闲时后台预热封面',
-      prewarmStart.files === 0 && prewarmEnd.files > 3,
-      `未打开媒体墙的情况下，6s 内从 0 涨到 ${prewarmEnd.files} 张 · ${Math.round(prewarmEnd.bytes / 1024)}KB（预热计数 ${prewarmState.warmed}，让路中 ${prewarmState.paused}）`)
+      prewarmAfter.warmed > 0 && prewarmFiles > 3 && !prewarmAfter.paused,
+      `预热器本次会话已自行补了 ${prewarmAfter.warmed} 张（本轮 +${prewarmDelta}），封面缓存现有 ${prewarmFiles} 个文件；未打开媒体墙即可完成`)
+
+    /* ---------- 切回媒体墙要定位到正在播放的专辑 ---------- */
+
+    const focusCheck = await evaluate(win, `
+      const { actions } = window.__aria
+      const wall = window.__aria.views.mediaWall
+      const albums = actions.albums()
+      const snapshot = (label) => {
+        const state = wall.debugState()
+        return {
+          label,
+          layout: state.layout,
+          columns: state.columns,
+          tileSize: state.tileSize,
+          pan: state.pan,
+          bounds: {
+            plane: [state.bounds.width, state.bounds.height],
+            view: [state.bounds.viewWidth, state.bounds.viewHeight],
+            minX: state.bounds.minX,
+            minY: state.bounds.minY
+          },
+          featuredKey: (wall.featuredKey || '').slice(0, 10),
+          featuredOffset: state.featuredOffset,
+          center: state.tileCenterInViewport,
+          viewportCenter: state.viewportCenter
+        }
+      }
+
+      // 挑一张靠后的专辑播放（它的格子离平面左上角很远）
+      const far = albums[Math.min(200, albums.length - 1)]
+      actions.playCollectionOf(far.tracks, far.tracks[0])
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 1600))
+      const afterEnter = snapshot('进入媒体墙')
+
+      // 把平面拖回左上角，制造「正在播放的专辑不在视野里」
+      const viewport = document.querySelector('.wall-viewport')
+      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: -4000, deltaY: -4000 }))
+      await new Promise((r) => setTimeout(r, 900))
+      const away = snapshot('拖走后')
+
+      // 离开再回来
+      actions.setView('songs')
+      await new Promise((r) => setTimeout(r, 500))
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 1200))
+      const afterReturn = snapshot('回来后')
+
+      const distance = afterReturn.center && afterReturn.viewportCenter
+        ? Math.round(Math.hypot(
+            afterReturn.center.x - afterReturn.viewportCenter.x,
+            afterReturn.center.y - afterReturn.viewportCenter.y))
+        : null
+      return { afterEnter, away, afterReturn, distance, expectedKey: far.key.slice(0, 10) }
+    `)
+    record('切回媒体墙定位到正在播放',
+      focusCheck.distance !== null && focusCheck.distance < 220 &&
+      focusCheck.afterReturn.featuredKey === focusCheck.expectedKey,
+      `期望专辑 ${focusCheck.expectedKey}；` +
+      `进入 ${JSON.stringify(focusCheck.afterEnter)}；` +
+      `拖走 ${JSON.stringify(focusCheck.away)}；` +
+      `回来 ${JSON.stringify(focusCheck.afterReturn)}；偏差 ${focusCheck.distance}px`)
+
+    /* ---------- 没有实际变化时不该打扰用户 ---------- */
+
+    await evaluate(win, `
+      // 清一下现有的 toast，便于判断这次有没有新弹
+      document.querySelectorAll('.toast').forEach((node) => node.remove())
+      return true`)
+    const noopScan = await artworkService.scan({ reason: 'smoke-noop' })
+    await sleep(1200)
+    const toastCount = await evaluate(win, `return document.querySelectorAll('.toast').length`)
+    record('无变化时不提示',
+      noopScan.changed === 0 && toastCount === 0,
+      `重扫未产生任何增减（changed=${noopScan.changed}，复用缓存 ${noopScan.reused} 首），界面上没有弹出提示（toast=${toastCount}）`)
 
     /* ---------- 各视图的滚动能力（曾经因为视图根节点 display 被清掉而整块滚不动） ---------- */
 

@@ -251,6 +251,16 @@ function createLibraryService (ctx) {
       await Promise.all(workers)
 
       next.sort((a, b) => a.path.localeCompare(b.path, 'zh-Hans-CN'))
+
+      // 与上一次的结果比对，得出「这次真的变了什么」——
+      // 只有真的增减了曲目才值得提示用户，否则每次重扫都弹会显得莫名其妙
+      const previousPaths = new Set(byPath.keys())
+      const nextPaths = new Set(next.map((track) => track.path))
+      let added = 0
+      let removed = 0
+      for (const file of nextPaths) if (!previousPaths.has(file)) added++
+      for (const file of previousPaths) if (!nextPaths.has(file)) removed++
+
       setTracks(next)
       scannedAt = Date.now()
       artworkCache.clear()
@@ -258,10 +268,14 @@ function createLibraryService (ctx) {
 
       const summary = {
         phase: 'done',
+        reason: options.reason || 'manual',
         done: next.length,
         total,
         reused,
         failed,
+        added,
+        removed,
+        changed: added + removed,
         scannedAt,
         elapsedMs: Date.now() - started,
         count: next.length

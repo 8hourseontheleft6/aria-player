@@ -58,11 +58,16 @@ function createWatcherService (ctx) {
     try {
       const summary = await library.scan({ reason: 'watch' })
       stats.rescans++
+      // 记录到终端：出问题时能看出到底是哪个文件在动
+      console.log(`[watcher] 重扫完成：${paths.length} 个路径变化，实际新增 ${summary.added} / 移除 ${summary.removed}` +
+        (paths.length ? `（例：${paths[0]}）` : ''))
       ctx.emit('library:watch-update', {
         paths,
         before,
         after: summary.count,
         delta: summary.count - before,
+        added: summary.added,
+        removed: summary.removed,
         scannedAt: summary.scannedAt
       })
     } catch (err) {

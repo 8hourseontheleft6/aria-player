@@ -109,10 +109,22 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     onClick: () => actions.shuffleAll()
   }, icon('shuffleAll', { className: 'icon icon--stroke' }), '随机播放')
 
+  const locateButton = h('button', {
+    class: 'btn btn--icon',
+    type: 'button',
+    title: '回到正在播放的专辑',
+    onClick: () => {
+      if (!focusFeatured()) {
+        bus.emit(EVENTS.TOAST, { message: '还没有正在播放的歌曲', type: 'info' })
+      }
+    }
+  }, icon('target', { className: 'icon icon--stroke' }))
+
   const toolbar = h('div', { class: 'view-toolbar' },
     titleNode,
     h('div', { class: 'view-toolbar__spacer' }),
     countNode,
+    locateButton,
     layoutSegmented,
     densitySegmented,
     shuffleButton,
@@ -795,7 +807,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     return tile
   }
 
-  function rebuild (list, { animateIn }) {
+  function rebuild (list, { animateIn, focus = false }) {
     clear(grid)
     tiles.clear()
     const fragment = document.createDocumentFragment()
@@ -806,6 +818,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     featuredKey = null
     applyFeatured(currentAlbumKey())
     settlePan({ reset: true })
+    // 重建后直接定位到正在播放的专辑，而不是停在平面左上角
+    if (focus) focusFeatured({ animate: false })
 
     if (animateIn && !reduceMotion()) {
       grid.classList.add('is-entering')
@@ -875,18 +889,54 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     miniLyrics.reflow()
   }
 
+  /**
+   * 把正在播放的那张专辑平移到视口中央。
+   *
+   * 这里刻意用 offsetLeft/offsetTop 而不是 getBoundingClientRect()：
+   * 定位往往紧跟在一次 FLIP 之后，而 getBoundingClientRect 会把正在跑的
+   * transform 算进去，量到的是动画中间的位置，算出来的目标就完全不对。
+   * offsetLeft/offsetTop 是布局值，不受 transform 影响。
+   */
+  function focusFeatured ({ animate = true } = {}) {
+    if (!featuredKey) return false
+    const entry = tiles.get(featuredKey)
+    if (!entry) return false
+
+    const node = entry.element
+    const width = node.offsetWidth
+    const height = node.offsetHeight
+    if (!width || !height) return false
+
+    const limit = bounds()
+    const nextX = clamp(limit.viewWidth / 2 - node.offsetLeft - width / 2, limit.minX, limit.maxX)
+    const nextY = clamp(limit.viewHeight / 2 - node.offsetTop - height / 2, limit.minY, limit.maxY)
+
+    if (Math.abs(nextX - pan.x) < 1 && Math.abs(nextY - pan.y) < 1) return true
+    if (animate && !reduceMotion()) {
+      animatePanTo(nextX, nextY, 420)
+    } else {
+      cancelAnimation()
+      pan.x = nextX
+      pan.y = nextY
+      target.x = nextX
+      target.y = nextY
+      writePan()
+    }
+    return true
+  }
+
   /* ================================================================ */
   /* 渲染                                                              */
   /* ================================================================ */
 
-  function refresh () {
+  function refresh ({ focus = false, focusAnimate = true } = {}) {
     const state = store.get()
     const list = actions.albums()
     const rebuilt = list !== albumList
     albumList = list
 
     if (rebuilt) {
-      rebuild(list, { animateIn: true })
+      rebuild(list, { animateIn: true, focus })
     } else {
       const key = currentAlbumKey()
       flip(() => {
@@ -895,6 +945,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
       })
       if (key === featuredKey && key) syncHeroContent()
       settlePan()
+      if (focus) focusFeatured({ animate: focusAnimate })
     }
 
     countNode.textContent = `${list.length} 张专辑 · ${state.library.tracks.length} 首`
@@ -937,7 +988,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   store.select((state) => state.ui.view, (view, previous) => {
     if (view === 'wall' && previous !== undefined) {
       requestAnimationFrame(() => {
-        refresh()
+        // 每次切回媒体墙都定位到正在播放的专辑，而不是回到平面左上角。
+        // 这里必须用同步定位：切视图的同一帧视口尺寸会从 0 变成实际值，
+        // ResizeObserver 随后会调 settlePan()，动画版本会被它打断。
+        refresh({ focus: true, focusAnimate: false })
         miniLyrics.reflow()
       })
     }
@@ -959,6 +1013,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   const resizeObserver = new ResizeObserver(() => {
     if (store.get().ui.view !== 'wall') return
     applyLayout()
+    // 切回媒体墙时视口尺寸会从 0 变成实际值，而「定位到正在播放」的动画
+    // 可能刚在同一帧启动 —— 这里不能调 settlePan()，否则它会 cancelAnimation()
+    // 把定位动画掐掉。applyLayout 已经刷新了几何缓存，动画下一帧就会用新边界。
+    if (animationFrame) return
     settlePan()
   })
   resizeObserver.observe(viewport)
@@ -966,6 +1024,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   return {
     element,
     refresh,
+    focusFeatured,
     get density () { return density },
     get layout () { return layout },
     get featuredKey () { return featuredKey },
@@ -973,6 +1032,22 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     /** 自检用：当前平面与平移状态 */
     debugState: () => {
       const limit = bounds()
+      const featured = featuredKey ? tiles.get(featuredKey) : null
+      let featuredOffset = null
+      let tileCenterInViewport = null
+      if (featured) {
+        const gridRect = grid.getBoundingClientRect()
+        const tileRect = featured.element.getBoundingClientRect()
+        featuredOffset = {
+          left: Math.round(tileRect.left - gridRect.left),
+          top: Math.round(tileRect.top - gridRect.top)
+        }
+        const viewportRect = viewport.getBoundingClientRect()
+        tileCenterInViewport = {
+          x: Math.round(tileRect.left + tileRect.width / 2 - viewportRect.left),
+          y: Math.round(tileRect.top + tileRect.height / 2 - viewportRect.top)
+        }
+      }
       return {
         columns,
         tileSize: Math.round(tileSize),
@@ -983,7 +1058,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         vertical: limit.minY < -1,
         dragging,
         pannable: limit.minX < -1 || limit.minY < -1,
-        lazy: lazy.state
+        lazy: lazy.state,
+        featuredOffset,
+        tileCenterInViewport,
+        viewportCenter: { x: Math.round(limit.viewWidth / 2), y: Math.round(limit.viewHeight / 2) }
       }
     },
     /**

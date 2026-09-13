@@ -73,6 +73,8 @@ npm run audit            # 视觉审计：计算样式 / 几何 / 截图位图�
 npm run shots            # 生成 docs/screenshots/ 下的界面截图
 npm run probe -- "D:\Music" 20   # 命令行探针：直接验证元数据与歌词解析（不启动 Electron）
 node scripts/check-imports.js    # 找出未使用的 import
+node scripts/check-injected.js   # 校验 smoke 里注入到渲染层的代码片段能否解析
+                                 # （注入代码写在模板字符串里，多一个括号很难肉眼发现）
 npx electron scripts/preview.js docs/screenshots/01-library.png 104
                          # 把截图转成文本预览（结构图 + 色相图），无图形界面时也能审版面
 ```

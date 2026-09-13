@@ -396,7 +396,8 @@ async function main () {
       container.element.style.display = container.views.includes(view) ? '' : 'none'
     }
     if (view === 'settings') settingsView.render()
-    if (view === 'wall') mediaWall.refresh()
+    // 媒体墙自己会监听 ui.view 并在切回时刷新 + 定位到正在播放的专辑，
+    // 这里不要再调一次 —— 它会紧跟一次 settlePan()，把刚开始的定位动画取消掉
     if (view === 'albums' || view === 'artists') browseView.render()
   })
 
@@ -497,29 +498,37 @@ async function main () {
       ...state,
       ui: { ...state.ui, scanning, scanProgress: progress }
     }))
-    if (progress.phase === 'done') {
-      loadLibrary().then(() => {
-        if (progress.total > 0) {
-          toast({
-            message: `资料库已更新：${progress.count} 首${progress.reused ? `（复用缓存 ${progress.reused} 首）` : ''}`,
-            type: 'success',
-            duration: 3000
-          })
+    if (progress.phase !== 'done') return
+
+    loadLibrary().then(() => {
+      // 只有真的增减了曲目才提示；启动时的增量刷新、什么都没变的重扫都保持安静
+      if (!progress.changed) {
+        if (progress.reason === 'watch') {
+          console.log(`[app] 目录有动静但资料库没有变化（复用缓存 ${progress.reused} 首），不提示`)
         }
-      }).catch((err) => console.error('[app] 刷新资料库失败', err))
-    }
+        return
+      }
+      const parts = []
+      if (progress.added) parts.push(`新增 ${progress.added} 首`)
+      if (progress.removed) parts.push(`移除 ${progress.removed} 首`)
+      toast({
+        message: `资料库已更新：${parts.join('、')}（共 ${progress.count} 首）`,
+        type: 'success',
+        duration: 3200
+      })
+    }).catch((err) => console.error('[app] 刷新资料库失败', err))
   })
 
-  // 目录监听：音乐文件夹有变化时主进程会自动重扫，这里给个提示
+  // 目录监听的提示同样只在真的变化时才出现
   remote.library.onWatchUpdate((payload) => {
-    const delta = payload.delta || 0
-    const detail = delta > 0 ? `新增 ${delta} 首` : delta < 0 ? `移除 ${-delta} 首` : '文件信息已更新'
-    toast({
-      message: `检测到音乐目录变化，资料库已自动刷新（${detail}）`,
-      type: 'info',
-      icon: 'refresh',
-      duration: 3200
-    })
+    if (!payload.added && !payload.removed) {
+      console.log('[app] 目录监听：检测到文件变化但曲目未变，保持安静')
+      return
+    }
+    const parts = []
+    if (payload.added) parts.push(`新增 ${payload.added} 首`)
+    if (payload.removed) parts.push(`移除 ${payload.removed} 首`)
+    toast({ message: `音乐目录有变化：${parts.join('、')}`, type: 'info', icon: 'refresh', duration: 3200 })
   })
 
   remote.library.onWatchError((payload) => {
