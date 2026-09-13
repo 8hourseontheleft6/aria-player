@@ -91,6 +91,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     // 封面配色 + 歌词并行加载
     applyArtworkTint(track)
     loadLyrics(track)
+    reportState(true)
 
     if (autoplay) {
       const ok = await engine.play()
@@ -234,6 +235,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     syncQueueState()
     remote.settings.set({ playbackMode: modeId }).catch(() => {})
     bus.emit(EVENTS.MODE_CHANGED, target)
+    reportState(true)
   }
 
   function cycleMode () {
@@ -466,6 +468,41 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     const buffered = engine.getBufferedEnd()
     bus.emit(EVENTS.TIME, { time, duration, buffered })
     updateActiveLyric(time)
+    reportState()
+  }
+
+  /**
+   * 把播放状态上报给主进程（托盘提示、任务栏进度、缩略图按钮）。
+   * 进度类信息按 ~1Hz 节流，状态变化则强制上报。
+   */
+  let lastReportAt = 0
+  function reportState (force = false) {
+    const now = Date.now()
+    if (!force && now - lastReportAt < 900) return
+    lastReportAt = now
+    const state = store.get()
+    const track = getTrack(state.playback.trackId)
+    const duration = engine.getDuration() || state.playback.duration
+    const time = engine.getTime()
+    try {
+      remote.player.reportState({
+        status: state.playback.status,
+        title: track?.title || '',
+        artist: track?.artist || '',
+        album: track?.album || '',
+        position: Math.round(time * 10) / 10,
+        duration: Math.round(duration * 10) / 10,
+        progress: duration > 0 ? time / duration : -1,
+        hasPrev: playlist.hasPrev() || Boolean(track),
+        hasNext: playlist.hasNext(),
+        mode: state.playback.mode,
+        rate: state.settings.playbackRate,
+        volume: state.settings.volume,
+        muted: state.settings.muted
+      })
+    } catch {
+      // 主进程不可用时忽略
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -505,6 +542,8 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
       startTicker()
       // 只有插件已创建过 WebAudio 接入点时才需要恢复 AudioContext
       engine.resumeTap()
+      reportState(true)
+      syncMediaSessionPosition()
     }))
 
     disposers.push(bus.on('audio:pause', () => {
@@ -513,6 +552,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
       if (status !== 'error' && status !== 'ended') syncPlaybackState({ status: 'paused' })
       stopTicker()
       emitTimeNow()
+      reportState(true)
     }))
 
     // seek 完成 / 暂停状态下拖动进度条，都要刷新进度与歌词高亮
@@ -560,21 +600,33 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
 
   function updateMediaSession (track) {
     if (!('mediaSession' in navigator)) return
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: track.title,
-        artist: track.artist,
-        album: track.album
-      })
-    } catch {
-      // MediaMetadata 不可用时忽略
-    }
+    const title = track.title
+    const artist = track.artist
+    const album = track.album
+    artwork.resolveUrl(track).then((url) => {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title,
+          artist,
+          album,
+          artwork: url ? [{ src: url, sizes: '512x512' }] : []
+        })
+      } catch {
+        // artwork 解析失败时退化为不带封面
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({ title, artist, album })
+        } catch {
+          // MediaMetadata 完全不可用时忽略
+        }
+      }
+    }).catch(() => {})
   }
 
   function configureMediaSessionHandlers () {
     if (!('mediaSession' in navigator)) return
-    // 主进程已经用全局快捷键接管媒体键时，就不再注册会话处理器，避免一次按键触发两次
-    const useGlobalKeys = store.get().settings.globalMediaKeys
+    // 这些处理器同时服务于 Windows 系统媒体弹窗（SMTC）里的按钮。
+    // 物理媒体键由主进程的全局快捷键接管（RegisterHotKey 会消费按键，
+    // 系统媒体会话收不到，因此不会一次按键触发两次）。
     const handlers = {
       play: () => play(),
       pause: () => pause(),
@@ -589,7 +641,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     }
     for (const [action, handler] of Object.entries(handlers)) {
       try {
-        navigator.mediaSession.setActionHandler(action, useGlobalKeys ? null : handler)
+        navigator.mediaSession.setActionHandler(action, handler)
       } catch {
         // 个别 action 不被支持
       }
@@ -619,6 +671,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     bindEvents()
     configureMediaSessionHandlers()
     syncPlaybackState({ mode: modeId, rate: settings.playbackRate })
+    reportState(true)
   }
 
   function dispose () {

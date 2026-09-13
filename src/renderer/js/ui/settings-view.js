@@ -251,6 +251,26 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       })
     ]))
 
+    /* ---------- 系统集成 ---------- */
+    const trayOn = settings.trayEnabled !== false
+    scroll.appendChild(group('系统集成', [
+      row({
+        title: '显示托盘图标',
+        sub: '托盘菜单可以播放/暂停、切歌、显示主窗口',
+        control: switchControl(trayOn, (value) => actions.setSetting({ trayEnabled: value }))
+      }),
+      row({
+        title: '关闭窗口时最小化到托盘',
+        sub: trayOn ? '点关闭按钮只隐藏窗口，音乐继续播放；从托盘菜单可退出' : '需要先打开「显示托盘图标」，否则关闭后将无法找回窗口',
+        control: switchControl(Boolean(settings.closeToTray) && trayOn, (value) => actions.setSetting({ closeToTray: value }))
+      }),
+      row({
+        title: '任务栏显示播放进度',
+        sub: '在任务栏图标上叠加进度条，并使用缩略图上的上一首/播放/下一首按钮',
+        control: switchControl(settings.taskbarProgress !== false, (value) => actions.setSetting({ taskbarProgress: value }))
+      })
+    ]))
+
     /* ---------- 插件 ---------- */
     const plugins = host.loaded()
     scroll.appendChild(group('插件与扩展点', [

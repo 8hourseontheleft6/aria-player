@@ -1,13 +1,72 @@
 'use strict'
 
-const { BrowserWindow, nativeTheme, shell, Menu } = require('electron')
+const { BrowserWindow, nativeTheme, shell, Menu, app } = require('electron')
 const path = require('node:path')
 
+const { createTransportIcon, WHITE } = require('./util/raster')
+
 const IS_MAC = process.platform === 'darwin'
+const IS_WINDOWS = process.platform === 'win32'
 
 const THEME_BACKGROUND = {
   dark: '#0b0b0f',
   light: '#f2f2f7'
+}
+
+/** 由 main 在退出流程里置位，避免「关闭到托盘」把退出也拦下来 */
+let quitting = false
+function markQuitting () {
+  quitting = true
+}
+
+/** 任务栏缩略图按钮的图标只生成一次 */
+let transportIcons = null
+function getTransportIcons () {
+  if (!transportIcons) {
+    transportIcons = {
+      prev: createTransportIcon('prev', WHITE),
+      play: createTransportIcon('play', WHITE),
+      pause: createTransportIcon('pause', WHITE),
+      next: createTransportIcon('next', WHITE)
+    }
+  }
+  return transportIcons
+}
+
+/**
+ * 任务栏进度 + 缩略图按钮（Windows）。
+ * @param {BrowserWindow} win
+ * @param {{ status: string, progress: number, hasPrev?: boolean, hasNext?: boolean }} state
+ * @param {{ progressEnabled?: boolean }} options
+ */
+function applyTaskbarState (win, state, options = {}) {
+  if (!win || win.isDestroyed()) return
+
+  const playing = state.status === 'playing' || state.status === 'loading' || state.status === 'buffering'
+  const showProgress = options.progressEnabled !== false && playing && Number.isFinite(state.progress)
+
+  if (IS_WINDOWS || process.platform === 'darwin') {
+    try {
+      win.setProgressBar(showProgress ? Math.min(1, Math.max(0, state.progress)) : -1)
+    } catch {
+      // 个别环境不支持，忽略
+    }
+  }
+
+  if (!IS_WINDOWS) return
+  const icons = getTransportIcons()
+  const send = (command) => {
+    if (!win.isDestroyed()) win.webContents.send('media:command', command)
+  }
+  try {
+    win.setThumbarButtons([
+      { tooltip: '上一首', icon: icons.prev, click: () => send('previous') },
+      { tooltip: playing ? '暂停' : '播放', icon: playing ? icons.pause : icons.play, click: () => send('play-pause') },
+      { tooltip: '下一首', icon: icons.next, click: () => send('next') }
+    ])
+  } catch {
+    // 缩略图按钮在部分 Windows 环境下不可用
+  }
 }
 
 /**
@@ -143,7 +202,18 @@ function createMainWindow (ctx) {
     persistGeometry()
     win.webContents.send('window:maximized', false)
   })
-  win.on('close', () => {
+  win.on('close', (event) => {
+    // 「关闭到托盘」：隐藏窗口而不是退出。托盘被关掉时这个设置无效，
+    // 否则用户会失去把窗口找回来的入口。
+    const trayAlive = ctx.has('tray') && ctx.get('tray').exists
+    if (!quitting && settings.get().closeToTray && trayAlive) {
+      event.preventDefault()
+      if (saveTimer) clearTimeout(saveTimer)
+      persistGeometry()
+      settings.flush()
+      win.hide()
+      return
+    }
     if (saveTimer) clearTimeout(saveTimer)
     persistGeometry()
     settings.flush()
@@ -161,4 +231,4 @@ function applyTheme (ctx, theme) {
   }
 }
 
-module.exports = { createMainWindow, applyTheme, IS_MAC }
+module.exports = { createMainWindow, applyTheme, applyTaskbarState, markQuitting, IS_MAC }

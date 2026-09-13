@@ -497,6 +497,58 @@ async function runSmoke ({ win, ctx }) {
     record('媒体墙密度切换', wallView.widthBefore !== wallView.widthAfter,
       `--wall-min ${wallView.widthBefore} → ${wallView.widthAfter}`)
     record('媒体墙打开专辑', wallView.openedAlbum, '点击方块角标可进入专辑详情')
+
+    /* ---------- 系统集成 ---------- */
+
+    const { createNoteIcon, createTransportIcon, WHITE, BLACK } = require('./util/raster')
+    const trayIcon = createNoteIcon(process.platform === 'darwin' ? BLACK : WHITE, 32, 2)
+    const transports = ['play', 'pause', 'prev', 'next'].map((kind) => createTransportIcon(kind, WHITE, 32, 2))
+    record('图标光栅化', !trayIcon.isEmpty() && transports.every((image) => !image.isEmpty()),
+      `托盘图标 ${JSON.stringify(trayIcon.getSize())}（逻辑 ${JSON.stringify(trayIcon.getSize())}），任务栏按钮 ${transports.length} 个`)
+
+    const tray = ctx.get('tray')
+    record('托盘创建', tray.exists, tray.exists ? '托盘图标已就绪' : '托盘未能创建（无桌面环境时会失败）')
+
+    // 播放状态应能从渲染层上报到主进程（托盘提示 / 任务栏进度依赖它）
+    await evaluate(win, `
+      const { player, actions, store } = window.__aria
+      const tracks = store.get().library.tracks
+      actions.playTrack(tracks.find((t) => t.lyricsPath) || tracks[0])
+      await new Promise((r) => setTimeout(r, 1800))
+      return true`)
+    const trayState = tray.getState()
+    record('播放状态上报', Boolean(trayState.title) && ['playing', 'paused'].includes(trayState.status),
+      `托盘收到：${trayState.status}《${trayState.title}》— ${trayState.artist}，进度 ${Math.round((trayState.progress || 0) * 100)}%`)
+
+    // 托盘 / 任务栏按钮发出的指令要能驱动播放器
+    const commandResult = await evaluate(win, `
+      const { store } = window.__aria
+      const before = store.get().playback.status
+      window.aria.media.onCommand(() => {})   // 渲染层已订阅 media:command
+      return { before }`)
+    const wasPlaying = commandResult.before
+    ctx.emit('player:command', 'play-pause')
+    await sleep(700)
+    const afterCommand = await evaluate(win, `return window.__aria.store.get().playback.status`)
+    record('播放指令链路', afterCommand !== wasPlaying,
+      `main 发出 play-pause：${wasPlaying} → ${afterCommand}`)
+
+    // 「关闭到托盘」：关闭窗口应当只隐藏
+    const winStateBefore = { visible: win.isVisible() }
+    ctx.get('settings').set({ trayEnabled: true, closeToTray: true })
+    await sleep(300)
+    win.close()
+    await sleep(600)
+    const hidden = !win.isDestroyed() && !win.isVisible()
+    const stillAlive = !win.isDestroyed()
+    ctx.get('settings').set({ closeToTray: false })
+    if (stillAlive) {
+      win.show()
+      await sleep(500)
+    }
+    record('关闭到托盘', hidden && stillAlive,
+      `关闭后窗口隐藏=${hidden}、进程仍存活=${stillAlive}（已恢复设置并重新显示窗口）`)
+    void winStateBefore
   } catch (err) {
     record('执行过程', false, err.message)
   }

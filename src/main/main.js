@@ -7,8 +7,9 @@ const { registerSchemes, registerProtocols } = require('./protocols')
 const { createSettingsService } = require('./services/settings')
 const { createLibraryService } = require('./services/library')
 const { createLyricsService } = require('./services/lyrics')
+const { createTrayService } = require('./services/tray')
 const { registerIpc } = require('./ipc')
-const { createMainWindow, applyTheme } = require('./window')
+const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = require('./window')
 
 // 播放器需要程序化播放（自动下一曲），不要求用户手势
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
@@ -42,6 +43,7 @@ async function bootstrap () {
   ctx.define('settings', createSettingsService)
   ctx.define('library', createLibraryService)
   ctx.define('lyrics', createLyricsService)
+  ctx.define('tray', createTrayService)
 
   const settings = ctx.get('settings')
   await settings.init()
@@ -51,6 +53,41 @@ async function bootstrap () {
   registerIpc(ctx)
 
   const win = createMainWindow(ctx)
+  const tray = ctx.get('tray')
+  tray.sync()
+
+  /* ---------------- 系统集成：托盘 / 任务栏 / 主进程指令 ---------------- */
+
+  const showWindow = () => {
+    if (win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+
+  ctx.on('window:show', showWindow)
+  ctx.on('window:toggle', () => {
+    if (win.isDestroyed()) return
+    if (win.isVisible() && !win.isMinimized()) win.hide()
+    else showWindow()
+  })
+  ctx.on('app:quit', () => {
+    markQuitting()
+    app.quit()
+  })
+
+  // 渲染层上报的播放状态 -> 托盘提示/菜单 + 任务栏进度与缩略图按钮
+  ctx.on('player:state', (state) => {
+    tray.update(state)
+    applyTaskbarState(win, state, { progressEnabled: settings.get().taskbarProgress !== false })
+  })
+
+  // 托盘菜单、系统媒体键、任务栏缩略图按钮发出的播放指令，统一转给渲染层
+  ctx.on('player:command', (command) => {
+    if (!win.isDestroyed()) win.webContents.send('media:command', command)
+  })
+
+  ctx.on('settings:changed', () => tray.sync())
 
   const library = ctx.get('library')
   await library.init()
@@ -113,6 +150,7 @@ async function bootstrap () {
   })
 
   app.on('before-quit', async () => {
+    markQuitting()
     await settings.flush()
   })
 

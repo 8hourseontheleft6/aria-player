@@ -32,8 +32,8 @@ function registerMediaKeys (ctx) {
   for (const [accelerator, command] of MEDIA_KEYS) {
     try {
       globalShortcut.register(accelerator, () => {
-        const win = BrowserWindow.getAllWindows()[0]
-        if (win && !win.isDestroyed()) win.webContents.send('media:command', command)
+        // 统一走 player:command，托盘 / 缩略图按钮用的也是同一条链路
+        ctx.emit('player:command', command)
       })
     } catch {
       // 某些环境（如被其他播放器占用）注册失败是可接受的
@@ -127,6 +127,13 @@ function registerIpc (ctx) {
   ]
   for (const [event, forward] of forwarders) ctx.on(event, forward)
 
+  /* ---------- 渲染层 -> 主进程的单向上报（播放状态） ---------- */
+  const onPlayerState = (event, state) => {
+    if (!state || typeof state !== 'object') return
+    ctx.emit('player:state', state)
+  }
+  ipcMain.on('player:state', onPlayerState)
+
   nativeTheme.on('updated', () => {
     broadcast('theme:changed', {
       shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
@@ -138,6 +145,7 @@ function registerIpc (ctx) {
 
   ctx.onCleanup(() => {
     globalShortcut.unregisterAll()
+    ipcMain.removeListener('player:state', onPlayerState)
     for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel)
   })
 

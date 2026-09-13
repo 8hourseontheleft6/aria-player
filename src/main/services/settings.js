@@ -21,6 +21,9 @@ const DEFAULTS = {
   globalMediaKeys: true,
   showRemainingTime: false,
   reduceMotion: false,
+  trayEnabled: true,
+  closeToTray: false,
+  taskbarProgress: true,
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
   lastTrackPath: null,
   lastView: 'songs'

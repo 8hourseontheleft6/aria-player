@@ -70,6 +70,17 @@ contextBridge.exposeInMainWorld('aria', {
     onCommand: (handler) => on('media:command', handler)
   },
 
+  /** 单向把播放状态上报给主进程（托盘提示、任务栏进度、缩略图按钮用） */
+  player: {
+    reportState: (state) => {
+      try {
+        ipcRenderer.send('player:state', state)
+      } catch {
+        // 主进程已退出时忽略
+      }
+    }
+  },
+
   theme: {
     onChanged: (handler) => on('theme:changed', handler)
   },

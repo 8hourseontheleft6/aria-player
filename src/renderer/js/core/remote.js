@@ -40,6 +40,7 @@ function createStub () {
       onMaximizedChange: noop
     },
     media: { onCommand: noop },
+    player: { reportState: () => {} },
     theme: { onChanged: noop },
     shell: { openExternal: noop }
   }

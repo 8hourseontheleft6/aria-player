@@ -607,6 +607,25 @@ async function main () {
   bus.on(EVENTS.TOAST, (payload) => toast(payload))
 
   /* ------------------------------------------------------------------ */
+  /* 系统集成指令：系统媒体键 / 托盘菜单 / 任务栏缩略图按钮               */
+  /* ------------------------------------------------------------------ */
+  function bindSystemCommands () {
+    const handlers = {
+      'play-pause': () => player.toggle(),
+      play: () => player.play(),
+      pause: () => player.pause(),
+      next: () => player.next(),
+      previous: () => player.prev(),
+      stop: () => player.pause()
+    }
+    remote.media.onCommand((command) => {
+      const handler = handlers[command]
+      if (handler) handler()
+      else console.warn('[app] 未知的播放指令:', command)
+    })
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 启动                                                               */
   /* ------------------------------------------------------------------ */
   async function boot () {
@@ -652,6 +671,7 @@ async function main () {
   }
 
   bindKeyboard()
+  bindSystemCommands()
 
   boot().catch((err) => {
     console.error('[app] 启动失败', err)
