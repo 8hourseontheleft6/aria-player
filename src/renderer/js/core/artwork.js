@@ -35,13 +35,16 @@ function rgbToHsl (r, g, b) {
   return { h: h * 360, s, l }
 }
 
-export function createArtworkService ({ bus }) {
+export function createArtworkService ({ bus, host = null }) {
   /** @type {Map<string, {url: string, blob: boolean}>} */
   const urlCache = new Map()
   /** @type {Map<string, {tint: string, tint2: string}>} */
   const colorCache = new Map()
   /** @type {Map<string, Promise<any>>} */
   const inFlight = new Map()
+  /** 在线补全相关：同一张专辑只问一次，失败的在本次会话里不再重试 */
+  const onlineInFlight = new Map()
+  const onlineFailed = new Set()
 
   /** 由 HSL 三元组生成 { tint, tint2, tintSoft } */
   const makeColor = (h, s, l) => ({
@@ -65,10 +68,55 @@ export function createArtworkService ({ bus }) {
     }
   }
 
+  /** 在线封面补全：把机会交给 artworkProvider 扩展点 */
+  function onlineKey (track) {
+    const artist = track?.albumArtist || track?.artist || ''
+    const album = track?.album || ''
+    if (!artist && !album) return null
+    return `o:${artist}|${album}`
+  }
+
+  async function resolveFromProviders (track) {
+    if (!host) return null
+    const providers = host.list('artworkProvider')
+    if (!providers.length) return null
+
+    const key = onlineKey(track)
+    if (!key) return null
+    if (urlCache.has(key)) return urlCache.get(key).url
+    if (onlineFailed.has(key)) return null
+    if (onlineInFlight.has(key)) return onlineInFlight.get(key)
+
+    const task = (async () => {
+      try {
+        const ordered = providers.slice().sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
+        for (const provider of ordered) {
+          try {
+            const result = await provider.resolve(track, { remote })
+            if (!result) continue
+            const url = result.url || (result.data ? bytesToBlobUrl(result.data, result.mime) : null)
+            if (!url) continue
+            rememberBlob(key, url)
+            return url
+          } catch (err) {
+            console.warn(`[artwork] 封面来源 ${provider.id} 失败`, err)
+          }
+        }
+        onlineFailed.add(key)
+        return null
+      } finally {
+        onlineInFlight.delete(key)
+      }
+    })()
+
+    onlineInFlight.set(key, task)
+    return task
+  }
+
   /** @returns {Promise<string|null>} */
   async function resolveUrl (track) {
     const key = artworkKey(track)
-    if (!key) return null
+    if (!key) return resolveFromProviders(track)
     if (urlCache.has(key)) return urlCache.get(key).url
 
     if (track.artworkFile) {
@@ -77,19 +125,19 @@ export function createArtworkService ({ bus }) {
       return url
     }
 
-    if (!track.artworkEmbedded) return null
+    if (!track.artworkEmbedded) return resolveFromProviders(track)
     if (inFlight.has(key)) return inFlight.get(key)
 
     const task = (async () => {
       try {
         const result = await remote.library.artwork(track.id)
-        if (!result || !result.data) return null
+        if (!result || !result.data) return resolveFromProviders(track)
         const url = bytesToBlobUrl(result.data, result.mime)
         rememberBlob(key, url)
         return url
       } catch (err) {
         console.warn('[artwork] 内嵌封面读取失败', err)
-        return null
+        return resolveFromProviders(track)
       } finally {
         inFlight.delete(key)
       }

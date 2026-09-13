@@ -25,6 +25,10 @@ const DEFAULTS = {
   closeToTray: false,
   taskbarProgress: true,
   watchFolders: true,
+  // 在线补全默认关闭：这是本项目唯一的联网功能
+  onlineFeatures: false,
+  onlineLyrics: true,
+  onlineCovers: true,
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
   lastTrackPath: null,
   lastView: 'songs'

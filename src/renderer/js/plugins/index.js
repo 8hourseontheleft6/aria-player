@@ -4,8 +4,10 @@
 
 import { trackInfoPanel } from './track-info-panel.js'
 import { quickActions } from './quick-actions.js'
+import { onlineMedia } from './online-media.js'
 
 export const BUILTIN_PLUGINS = [
   trackInfoPanel,
-  quickActions
+  quickActions,
+  onlineMedia
 ]

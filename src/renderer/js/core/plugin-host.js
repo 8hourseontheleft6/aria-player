@@ -1,11 +1,12 @@
 /**
  * 插件宿主：渲染层的扩展点注册表。
  *
- * 六个扩展点（POINTS）：
+ * 七个扩展点（POINTS）：
  *   playbackMode   播放模式      —— 决定「播完之后怎么办」
  *   panel          「正在播放」右栏的标签页
  *   trackAction    曲目动作      —— 出现在列表右键菜单里
  *   lyricsProvider 歌词来源      —— 内置歌词找不到时的兜底（在线歌词、翻译等）
+ *   artworkProvider 封面来源     —— 本地没有封面时的兜底（在线封面）
  *   themeToken     主题令牌      —— 覆盖 CSS 变量换肤
  *   audioTap       音频处理      —— 拿到 WebAudio 节点做可视化/音效
  *
@@ -32,6 +33,11 @@ export const POINTS = {
     title: '歌词来源',
     description: '内置来源没有结果时依次尝试，可返回文本或已解析的行',
     required: ['id', 'load']
+  },
+  artworkProvider: {
+    title: '封面来源',
+    description: '本地没有封面时按优先级尝试，返回图片字节或图片 URL',
+    required: ['id', 'resolve']
   },
   themeToken: {
     title: '主题令牌',

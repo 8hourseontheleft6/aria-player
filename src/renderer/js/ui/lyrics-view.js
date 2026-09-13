@@ -35,11 +35,16 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
   let resumeTimer = null
   let translateY = 0
   let lastKaraokeIndex = -1
+  /** @type {HTMLElement|null} */
+  let sourceNode = null
 
   /* ------------------------------ 渲染 ------------------------------ */
 
   function buildToolbar () {
     clear(toolbar)
+
+    const sourceLabel = h('span', { class: 'lyrics-source' })
+    sourceNode = sourceLabel
 
     const adjustButton = h('button', {
       class: 'btn btn--icon-sm',
@@ -55,7 +60,29 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
       onClick: () => player.reloadLyrics()
     }, icon('refresh', { className: 'icon icon--stroke' }))
 
-    toolbar.append(adjustButton, reloadButton)
+    toolbar.append(sourceLabel, adjustButton, reloadButton)
+    paintSource()
+  }
+
+  /** 显示歌词来源：本地文件显示文件名，在线来源显示提供方 */
+  function paintSource () {
+    if (!sourceNode) return
+    const { source, file } = store.get().lyrics
+    if (file) {
+      sourceNode.textContent = file
+      sourceNode.title = `来自本地歌词文件：${file}`
+      sourceNode.classList.remove('is-online')
+    } else if (source && !['lrc', 'txt', 'tag'].includes(source)) {
+      sourceNode.textContent = source
+      sourceNode.title = '歌词来源：在线服务'
+      sourceNode.classList.add('is-online')
+    } else if (source === 'tag') {
+      sourceNode.textContent = '内嵌歌词'
+      sourceNode.classList.remove('is-online')
+    } else {
+      sourceNode.textContent = ''
+      sourceNode.classList.remove('is-online')
+    }
   }
 
   function openDisplayPopover (anchor) {
@@ -270,6 +297,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     resumeButton.classList.remove('is-visible')
     scroller.scrollTop = 0
     render()
+    paintSource()
     // 立即对齐到当前播放位置，避免打开面板时歌词还在顶部
     const index = player.activeLyricIndex(player.getTime())
     if (index >= 0) {

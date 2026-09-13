@@ -54,7 +54,7 @@ async function main () {
     store,
     services: { engine, playlist, remote }
   })
-  const artwork = createArtworkService({ bus })
+  const artwork = createArtworkService({ bus, host })
 
   registerBuiltinModes(host)
   host.loadAll(BUILTIN_PLUGINS)

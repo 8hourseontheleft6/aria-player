@@ -63,6 +63,13 @@ contextBridge.exposeInMainWorld('aria', {
     load: (input) => ipcRenderer.invoke('lyrics:load', input)
   },
 
+  online: {
+    lyrics: (track) => ipcRenderer.invoke('online:lyrics', track),
+    cover: (track) => ipcRenderer.invoke('online:cover', track),
+    clearCache: () => ipcRenderer.invoke('online:clear-cache'),
+    stats: () => ipcRenderer.invoke('online:stats')
+  },
+
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
@@ -101,7 +108,8 @@ contextBridge.exposeInMainWorld('aria', {
   paths: {
     fromFiles: (files) => {
       const out = []
-      for (const file of files || []) {
+      // 传进来的必须是数组（FileList 无法跨 contextBridge 传递）
+      for (const file of Array.from(files || [])) {
         try {
           const path = webUtils.getPathForFile(file)
           if (path) out.push(path)

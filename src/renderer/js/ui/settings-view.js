@@ -2,8 +2,10 @@
 
 import { h, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
+import { remote } from '../core/remote.js'
 import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from '../core/format.js'
 import { createSlider } from './slider.js'
+import { toast } from './overlay.js'
 
 const THEMES = [
   { id: 'system', label: '跟随系统' },
@@ -273,6 +275,52 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         title: '自动监听音乐目录',
         sub: '目录里新增或删除音乐时自动刷新资料库（复制整张专辑时会等文件安静下来再扫一次）',
         control: switchControl(settings.watchFolders !== false, (value) => actions.setSetting({ watchFolders: value }))
+      })
+    ]))
+
+    /* ---------- 在线功能 ---------- */
+    const onlineOn = Boolean(settings.onlineFeatures)
+    const cacheLabel = h('span', { class: 'settings__row-value', text: '—' })
+    remote.online.stats().then((info) => {
+      if (!info) return
+      cacheLabel.textContent = info.files
+        ? `${info.files} 个文件 · ${formatBytes(info.size)}`
+        : '暂无缓存'
+    }).catch(() => { cacheLabel.textContent = '—' })
+
+    scroll.appendChild(group('在线功能', [
+      row({
+        title: '在线补全歌词与封面',
+        sub: '开启后会向 LRCLIB（歌词）与 Deezer / iTunes（封面）发起请求。这是本项目唯一的联网功能，默认关闭；请求全部由主进程发出，页面本身仍然不能联网。',
+        control: switchControl(onlineOn, (value) => actions.setSetting({ onlineFeatures: value }))
+      }),
+      row({
+        title: '在线歌词',
+        sub: onlineOn ? '本地没有 .lrc 时向 LRCLIB 查询（含时间轴）' : '需要先打开总开关',
+        control: switchControl(settings.onlineLyrics !== false, (value) => actions.setSetting({ onlineLyrics: value }))
+      }),
+      row({
+        title: '在线封面',
+        sub: onlineOn ? '歌曲没有内嵌封面、目录里也没有图片时，按「专辑 + 艺人」补齐 600×600 封面' : '需要先打开总开关',
+        control: switchControl(settings.onlineCovers !== false, (value) => actions.setSetting({ onlineCovers: value }))
+      }),
+      row({
+        title: '在线缓存',
+        sub: '命中的歌词与封面会缓存在本地，未命中的结果 24 小时内不会重复请求',
+        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        cacheLabel,
+        h('button', {
+          class: 'btn btn--sm btn--destructive',
+          type: 'button',
+          onClick: async () => {
+            const result = await remote.online.clearCache()
+            toast({
+              message: result?.ok ? '在线缓存已清空' : `清理失败：${result?.message || '未知错误'}`,
+              type: result?.ok ? 'success' : 'error'
+            })
+            cacheLabel.textContent = '暂无缓存'
+          }
+        }, '清空'))
       })
     ]))
 

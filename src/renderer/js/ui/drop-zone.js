@@ -67,7 +67,8 @@ export function createDropZone ({ bus, actions }) {
     hide()
 
     const files = event.dataTransfer?.files
-    const paths = remote.paths.fromFiles(files)
+    // 注意：FileList 不能通过 contextBridge 传递，必须先转成数组
+    const paths = remote.paths.fromFiles([...(files || [])])
     if (!paths.length) {
       bus.emit(EVENTS.TOAST, { message: '没能读取到文件路径（只支持从资源管理器拖入）', type: 'error' })
       return

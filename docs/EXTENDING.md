@@ -42,7 +42,7 @@ export const myPlugin = {
 
 > 开发者工具控制台里有 `window.__aria`，可以直接操作 store、播放器和插件宿主，调试很方便。
 
-### 2. 六个扩展点
+### 2. 七个扩展点
 
 #### `playbackMode` —— 播放模式
 
@@ -125,13 +125,36 @@ api.register('lyricsProvider', {
     //   null / undefined                    → 交给下一个来源
     const response = await fetch(`https://example.com/lyric?q=${encodeURIComponent(track.title)}`)
     if (!response.ok) return null
-    return { text: await response.text() }
+    return { text: await response.text(), source: '示例站点' }
   }
 })
 ```
 
-注意：渲染层的 CSP 默认只允许 `app:` / `media:`，要联网取歌词需要同时调整
-`src/renderer/index.html` 里的 `connect-src`，并在设置里给用户一个开关。
+`source` 会显示在歌词区右上角（本地歌词显示文件名，在线来源显示这里给的名字）。
+
+**渲染层不能联网**：页面的 CSP 不允许 `connect-src`，所以不要在渲染层直接 fetch 外部服务。
+正确做法是在主进程加一个服务（见下方「主进程服务」），渲染层通过 IPC 拿到**文本或字节**。
+内置的 `plugins/online-media.js` 就是这么做的：歌词走 LRCLIB、封面走 iTunes/Deezer，
+请求全部在主进程发出，结果落在 `userData/online-cache`。
+
+#### `artworkProvider` —— 封面来源
+
+本地没有内嵌封面、目录里也没有图片时，按 `priority` 依次尝试。
+
+```js
+api.register('artworkProvider', {
+  id: 'my-cover',
+  priority: 50,
+  async resolve (track, { remote }) {
+    // 返回 { url } 或 { data: Uint8Array, mime }；返回 null 表示交给下一个来源
+    const result = await remote.online.cover({ album: track.album, artist: track.artist })
+    if (!result || !result.data) return null
+    return { data: result.data, mime: result.mime }
+  }
+})
+```
+
+同一个「专辑 + 艺人」在一次会话里只会问一次，失败也会记住，因此不必自己做去重。
 
 #### `themeToken` —— 换肤
 
@@ -224,6 +247,7 @@ ctx.define('lastfm', (ctx) => {
 | 读写本地文件、调用系统能力、联网 | 主进程服务 + IPC |
 | 新的播放顺序 | `playbackMode` 扩展点 |
 | 新的歌词来源 | `lyricsProvider` 扩展点 |
+| 新的封面来源 | `artworkProvider` 扩展点 |
 | 音频可视化 / 音效 | `audioTap` 扩展点 |
 
 ---

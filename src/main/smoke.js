@@ -648,6 +648,109 @@ async function runSmoke ({ win, ctx }) {
       `拖入时浮层激活=${dropZoneResult.activeOnEnter}，松开后仍激活=${dropZoneResult.activeAfterDrop}`)
     record('路径解析桥', dropZoneResult.bridgeIsArray,
       `webUtils 桥可用（内存里的 File 没有真实路径，返回 ${dropZoneResult.bridgeCount} 条，符合预期）`)
+
+    /* ---------- 在线补全 ---------- */
+
+    const online = ctx.get('online')
+    const settingsService = ctx.get('settings')
+    const onlineTrack = libraryService.getTracks().find((track) => /imagine dragons/i.test(track.artist)) ||
+      libraryService.getTracks().find((track) => track.album && track.artist) ||
+      libraryService.getTracks()[0]
+    const sample = {
+      title: onlineTrack.title,
+      artist: onlineTrack.artist,
+      albumArtist: onlineTrack.albumArtist,
+      album: onlineTrack.album,
+      duration: onlineTrack.duration
+    }
+
+    // 默认关闭：不应该发起任何请求
+    settingsService.set({ onlineFeatures: false })
+    await sleep(200)
+    const disabled = await online.fetchLyrics(sample)
+    record('在线功能默认关闭', disabled.skipped === true,
+      '总开关关闭时不发起请求')
+
+    settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
+    await sleep(300)
+
+    const lyricResult = await online.fetchLyrics(sample)
+    const lyricOk = Boolean(lyricResult.text)
+    record('在线歌词（LRCLIB）', lyricOk,
+      lyricResult.error
+        ? `请求失败：${lyricResult.error}`
+        : lyricOk
+          ? `《${sample.artist} — ${sample.title}》取得 ${lyricResult.text.split('\n').length} 行，来源 ${lyricResult.provider}${lyricResult.synced ? '（含时间轴）' : '（纯文本）'}`
+          : '该曲目在 LRCLIB 没有收录（未命中也会缓存 24 小时）')
+
+    // 封面补全：用一首「有正式专辑名」的曲目（未知专辑在 iTunes 上匹配不到）
+    const knownAlbumTrack = libraryService.getTracks().find((track) =>
+      /imagine dragons/i.test(track.artist) && track.album && track.album !== '未知专辑') ||
+      libraryService.getTracks().find((track) =>
+        track.album && track.album !== '未知专辑' && track.artist && track.albumArtist) ||
+      libraryService.getTracks()[0]
+    const coverSample = {
+      title: knownAlbumTrack.title,
+      artist: knownAlbumTrack.artist,
+      albumArtist: knownAlbumTrack.albumArtist,
+      album: knownAlbumTrack.album
+    }
+    const coverResult = await online.fetchCover(coverSample)
+    const coverOk = Boolean(coverResult.data && coverResult.data.length > 1000)
+    record('在线封面（Deezer / iTunes）', coverOk || coverResult.data === null,
+      coverResult.error
+        ? `请求失败：${coverResult.error}`
+        : coverOk
+          ? `《${coverSample.album}》取得 ${Math.round(coverResult.data.length / 1024)} KB，来源 ${coverResult.provider}`
+          : '未匹配到可信结果（宁可不补，也不放错封面）')
+
+    const cacheStats = await online.getStats()
+    record('在线缓存落盘', cacheStats.files > 0,
+      `${cacheStats.files} 个文件 · ${Math.round(cacheStats.size / 1024)} KB · ${cacheStats.cacheRoot}`)
+
+    // 渲染层插件链路：扩展点是否真的接到了在线服务（用同一首曲目，命中刚才的缓存）
+    const providerResult = await evaluate(win, `
+      const { host, store, artwork } = window.__aria
+      const track = store.get().library.tracks.find((t) => /birds/i.test(t.title) && /imagine dragons/i.test(t.artist)) ||
+        store.get().library.tracks.find((t) => t.album && t.artist)
+      const lyricsProvider = host.list('lyricsProvider')[0]
+      const lyrics = lyricsProvider
+        ? await lyricsProvider.load(track, { settings: { ...store.get().settings, onlineFeatures: true, onlineLyrics: true } })
+        : null
+      const noCover = store.get().library.tracks.find((t) => !t.artworkEmbedded && !t.artworkFile)
+      // 用一首有正式专辑名的曲目、并清掉本地封面标记，走完整的「在线补封面」链路
+      const fakeNoCover = {
+        id: 'smoke-online-cover',
+        title: noCover?.title || track.title,
+        artist: track.artist,
+        albumArtist: track.albumArtist,
+        album: track.album,
+        artworkEmbedded: false,
+        artworkFile: null
+      }
+      const onlineCoverUrl = await artwork.resolveUrl(fakeNoCover)
+      return {
+        track: track ? track.title : '',
+        fakeAlbum: fakeNoCover.album,
+        lyricsProviders: host.list('lyricsProvider').map((p) => p.id),
+        artworkProviders: host.list('artworkProvider').map((p) => p.id),
+        lyricsText: lyrics?.text ? lyrics.text.length : 0,
+        lyricsSource: lyrics?.source || '',
+        onlineCoverUrl: onlineCoverUrl || ''
+      }`)
+    record('歌词来源扩展点接入', providerResult.lyricsProviders.length > 0 && providerResult.lyricsText > 0,
+      `来源 ${providerResult.lyricsProviders.join(', ')} → 《${providerResult.track}》${providerResult.lyricsText} 字符（${providerResult.lyricsSource}）`)
+    record('封面来源扩展点接入', providerResult.artworkProviders.length > 0 && Boolean(providerResult.onlineCoverUrl),
+      `来源 ${providerResult.artworkProviders.join(', ')} → 《${providerResult.fakeAlbum}》${providerResult.onlineCoverUrl ? '已补到封面图片' : '未能补到（缓存已清空或无匹配）'}`)
+
+    const cleared = await online.clearCache()
+    const afterClear = await online.getStats()
+    record('在线缓存清理', cleared.ok && afterClear.files === 0,
+      `清理后剩 ${afterClear.files} 个文件`)
+
+    // 恢复默认：在线功能保持关闭
+    settingsService.set({ onlineFeatures: false })
+    await sleep(200)
   } catch (err) {
     record('执行过程', false, err.message)
   }

@@ -47,6 +47,7 @@ function registerIpc (ctx) {
   const settings = ctx.get('settings')
   const library = ctx.get('library')
   const lyrics = ctx.get('lyrics')
+  const online = ctx.get('online')
 
   /** @type {Map<string, Function>} */
   const handlers = {
@@ -86,6 +87,12 @@ function registerIpc (ctx) {
 
     /* ---------- 歌词 ---------- */
     'lyrics:load': (_event, input) => lyrics.load(input || {}),
+
+    /* ---------- 在线补全 ---------- */
+    'online:lyrics': (_event, track) => online.fetchLyrics(track || {}),
+    'online:cover': (_event, track) => online.fetchCover(track || {}),
+    'online:clear-cache': () => online.clearCache(),
+    'online:stats': () => online.getStats(),
 
     /* ---------- 窗口控制（自绘标题栏） ---------- */
     'window:minimize': (event) => BrowserWindow.fromWebContents(event.sender)?.minimize(),

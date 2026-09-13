@@ -534,6 +534,32 @@ html[data-platform="darwin"] .now-playing__topbar {
   opacity: 1;
 }
 
+/* 歌词来源提示（文件名或在线提供方） */
+.lyrics-source {
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-caption);
+  color: var(--label-4);
+  padding-right: 4px;
+}
+
+.lyrics-source.is-online {
+  color: var(--accent);
+}
+
+.lyrics-source.is-online::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+}
+
 /* ------------------------------ 窄窗口：封面与歌词上下排布 ------------------------------ */
 
 @media (max-width: 1000px) {

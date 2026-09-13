@@ -35,6 +35,12 @@ function createStub () {
       onWatchError: noop
     },
     lyrics: { load: unavailable('读取歌词') },
+    online: {
+      lyrics: unavailable('在线歌词'),
+      cover: unavailable('在线封面'),
+      clearCache: unavailable('清理在线缓存'),
+      stats: unavailable('在线缓存统计')
+    },
     paths: { fromFiles: () => [] },
     window: {
       minimize: noop,

@@ -402,11 +402,19 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
           const result = await provider.load(track, { settings: store.get().settings })
           if (!result) continue
           if (result.lines?.length) {
-            payload = { source: provider.id, lines: result.lines, meta: result.meta || {} }
+            payload = {
+              source: result.source || provider.id,
+              lines: result.lines,
+              meta: result.meta || {}
+            }
             break
           }
           if (result.text) {
-            payload = { source: provider.id, text: result.text, file: result.file || null }
+            payload = {
+              source: result.source || provider.id,
+              text: result.text,
+              file: result.file || null
+            }
             break
           }
         } catch (err) {
