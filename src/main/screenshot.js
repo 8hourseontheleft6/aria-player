@@ -114,9 +114,16 @@ async function runScreenshots ({ win }) {
         return true`)
       await sleep(1600)
     }],
-    ['12-wall.png', '媒体墙', async () => {
-      await evaluate(win, `window.__aria.actions.setView('wall'); return true`)
-      await sleep(2200)
+    ['12-wall.png', '媒体墙（含正在播放聚焦块）', async () => {
+      await evaluate(win, `
+        const { actions, player, store } = window.__aria
+        actions.setView('wall')
+        // 播到歌词中段，聚焦块里的迷你歌词才有内容可显示
+        const lines = store.get().lyrics.lines
+        if (lines.length > 16) player.seek(lines[16].time + 0.4)
+        await player.play()
+        return true`)
+      await sleep(2800)
     }]
   ]
 

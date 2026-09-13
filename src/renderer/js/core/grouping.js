@@ -7,7 +7,8 @@
 
 const UNKNOWN_ALBUM = '未知专辑'
 
-function albumKeyOf (track) {
+/** 专辑的稳定标识：专辑艺人 + 专辑名。媒体墙据此把格子与「正在播放」对应起来 */
+export function albumKeyOf (track) {
   return `${track.albumArtist || track.artist || ''}\u0000${track.album || UNKNOWN_ALBUM}`
 }
 

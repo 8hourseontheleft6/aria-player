@@ -480,26 +480,98 @@ async function runSmoke ({ win, ctx }) {
 
     // 媒体墙
     const wallView = await evaluate(win, `
-      const { actions } = window.__aria
+      const { actions, store } = window.__aria
       actions.setView('wall')
-      await new Promise((r) => setTimeout(r, 900))
+      await new Promise((r) => setTimeout(r, 1100))
+
+      const grid = document.querySelector('.media-wall')
       const tiles = document.querySelectorAll('.wall-tile').length
       const imgs = document.querySelectorAll('.wall-tile__art img').length
-      const grid = document.querySelector('.media-wall')
       const widthBefore = grid?.style.getPropertyValue('--wall-min')
-      document.querySelector('[data-density="l"]')?.click()
-      await new Promise((r) => setTimeout(r, 300))
+
+      // --- 聚焦块 ---
+      // 注意：computed style 也要立刻取值，后面切换专辑时这个元素就不再是聚焦块了
+      const featured = document.querySelector('.wall-tile.is-featured')
+      const featuredStyle = featured ? getComputedStyle(featured) : null
+      const featuredOrder = featuredStyle ? featuredStyle.order : null
+      const featuredColumn = featuredStyle ? featuredStyle.gridColumnStart : null
+      const featuredRow = featuredStyle ? featuredStyle.gridRowStart : null
+      const hero = featured?.querySelector('.wall-tile__hero')
+      const heroTitle = hero?.querySelector('.hero__title')?.textContent || ''
+      const heroLines = hero ? hero.querySelectorAll('.mini-lyrics__line').length : 0
+      const heroActive = hero ? hero.querySelectorAll('.mini-lyrics__line.is-active').length : 0
+      const heroControls = hero ? hero.querySelectorAll('.hero__control').length : 0
+      const hasExpandButton = Boolean(hero?.querySelector('.hero__expand'))
+      const featuredKey = featured?.dataset.key || null
+      const currentTrack = store.get().library.byId.get(store.get().playback.trackId)
+      const currentAlbumKey = currentTrack
+        ? (currentTrack.albumArtist || currentTrack.artist || '') + '\\u0000' + (currentTrack.album || '未知专辑')
+        : null
+
+      // --- 密度切换应当用 FLIP 平滑过渡 ---
+      document.querySelector('[data-density="s"]')?.click()
+      const flippingRightAfter = document.querySelectorAll('.wall-tile.is-flipping').length
+      const animated = document.getAnimations().length
+      await new Promise((r) => setTimeout(r, 900))
       const widthAfter = grid?.style.getPropertyValue('--wall-min')
-      document.querySelector('.wall-tile .wall-tile__open')?.click()
+      const flippingAfter = document.querySelectorAll('.wall-tile.is-flipping').length
+
+      // --- 切到另一张专辑，聚焦块要跟过去 ---
+      const beforeSwitchKey = document.querySelector('.wall-tile.is-featured')?.dataset.key || null
+      const albums = window.__aria.actions.albums()
+      const other = albums.find((a) => a.key !== beforeSwitchKey) || null
+      if (other) window.__aria.actions.playCollectionOf(other.tracks, other.tracks[0])
+      await new Promise((r) => setTimeout(r, 1100))
+      const afterSwitchTile = document.querySelector('.wall-tile.is-featured')
+      const afterSwitchKey = afterSwitchTile?.dataset.key || null
+      const afterSwitchTitle = afterSwitchTile?.querySelector('.hero__title')?.textContent || ''
+      const afterSwitchOrder = afterSwitchTile ? getComputedStyle(afterSwitchTile).order : null
+      // order:-1 只影响网格排布，不改 DOM 顺序，所以看实际位置是否落在网格左上角
+      let afterSwitchPosition = false
+      if (afterSwitchTile) {
+        const gridRect = document.querySelector('.media-wall').getBoundingClientRect()
+        const tileRect = afterSwitchTile.getBoundingClientRect()
+        afterSwitchPosition = Math.abs(tileRect.left - gridRect.left) < 12 &&
+          Math.abs(tileRect.top - gridRect.top) < 12 &&
+          tileRect.width > 100
+      }
+      const progressWidth = afterSwitchTile?.querySelector('.hero__progress i')?.style.width || '0%'
+
+      // --- 打开专辑 ---
+      document.querySelector('.wall-tile:not(.is-featured) .wall-tile__open')?.click()
       await new Promise((r) => setTimeout(r, 500))
-      const openedAlbum = Boolean(window.__aria.store.get().ui.detail)
+      const openedAlbum = Boolean(store.get().ui.detail)
       actions.closeDetail()
       actions.setView('songs')
-      return { tiles, imgs, widthBefore, widthAfter, openedAlbum }`)
+
+      return {
+        tiles, imgs, widthBefore, widthAfter, flippingRightAfter, flippingAfter, animated,
+        hasFeatured: Boolean(featured),
+        featuredKey, currentAlbumKey,
+        featuredOrder, featuredColumn, featuredRow,
+        heroTitle, heroLines, heroActive, heroControls, hasExpandButton,
+        beforeSwitchKey, expectedSwitchKey: other?.key || null, afterSwitchKey, afterSwitchTitle,
+        afterSwitchPosition, afterSwitchOrder, progressWidth,
+        openedAlbum
+      }`)
     record('媒体墙', wallView.tiles > 0 && wallView.tiles === groupResult.albums,
       `${wallView.tiles} 张封面方块（= 专辑数），已加载 ${wallView.imgs} 张`)
     record('媒体墙密度切换', wallView.widthBefore !== wallView.widthAfter,
       `--wall-min ${wallView.widthBefore} → ${wallView.widthAfter}`)
+    record('媒体墙聚焦块',
+      wallView.hasFeatured && wallView.featuredKey === wallView.currentAlbumKey &&
+      wallView.featuredOrder === '-1' && wallView.featuredColumn === 'span 2',
+      `正在播放的专辑排到首位（order=${wallView.featuredOrder}，跨列 ${wallView.featuredColumn}）`)
+    record('聚焦块内容',
+      wallView.heroTitle.length > 0 && wallView.heroControls === 3 && wallView.hasExpandButton &&
+      wallView.heroLines > 0 && wallView.heroActive === 1,
+      `标题《${wallView.heroTitle}》，迷你歌词 ${wallView.heroLines} 行（高亮 ${wallView.heroActive} 行），传输键 ${wallView.heroControls} 个 + 展开键，进度 ${wallView.progressWidth}`)
+    record('密度切换 FLIP 过渡', wallView.animated > 0 && wallView.flippingAfter === 0,
+      `切换瞬间有 ${wallView.flippingRightAfter} 个格子参与动画（共 ${wallView.animated} 个动画），900ms 后全部收敛`)
+    record('聚焦块跟随切歌',
+      Boolean(wallView.afterSwitchKey) && wallView.afterSwitchKey === wallView.expectedSwitchKey &&
+      wallView.afterSwitchTitle.length > 0 && wallView.afterSwitchPosition && wallView.afterSwitchOrder === '-1',
+      `播放另一张专辑后聚焦块移到 ${wallView.afterSwitchKey?.slice(0, 14)}（order=${wallView.afterSwitchOrder}，排到首位=${wallView.afterSwitchPosition}），标题《${wallView.afterSwitchTitle}》`)
     record('媒体墙打开专辑', wallView.openedAlbum, '点击方块角标可进入专辑详情')
 
     /* ---------- 系统集成 ---------- */

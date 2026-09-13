@@ -373,6 +373,12 @@
   overflow: hidden;
   border-radius: 2px;
   background: var(--fill-quaternary);
+  cursor: default;
+  transition: box-shadow var(--dur) var(--ease-ios);
+}
+
+/* 入场动画只在整个列表重建时播放，密度切换/聚焦块换位走 FLIP */
+.media-wall.is-entering .wall-tile {
   animation: wall-in var(--dur-slow) var(--ease-out) backwards;
 }
 
@@ -385,6 +391,16 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* FLIP 进行中：交给 transform 动画，别再叠加悬停效果 */
+.wall-tile.is-flipping {
+  will-change: transform;
+  z-index: 1;
+}
+
+.wall-tile.is-flipping .wall-tile__art img {
+  transition: none;
 }
 
 .wall-tile__art {
@@ -472,9 +488,248 @@
   background: var(--accent);
 }
 
+/* ------------------------------ 正在播放的聚焦块 ------------------------------ */
+
+.wall-tile.is-featured {
+  order: -1; /* 永远排在最前面，滚到顶部就能看到 */
+  grid-column: span 2;
+  grid-row: span 2;
+  aspect-ratio: auto;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  z-index: 2;
+  /* 让内部文字用 cqw 跟随格子尺寸缩放 */
+  container-type: size;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34), 0 0 0 0.5px var(--separator);
+}
+
+.wall-tile.is-featured .wall-tile__info,
+.wall-tile.is-featured .wall-tile__open {
+  display: none;
+}
+
+.wall-tile.is-featured .wall-tile__art img {
+  transform: scale(1.04);
+  filter: brightness(0.74) saturate(1.06);
+}
+
+.wall-tile.is-featured:hover .wall-tile__art img {
+  transform: scale(1.07);
+}
+
+.wall-tile__hero {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  color: #ffffff;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+.hero__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top,
+      rgba(0, 0, 0, 0.88) 0%,
+      rgba(0, 0, 0, 0.62) 38%,
+      rgba(0, 0, 0, 0.18) 70%,
+      rgba(0, 0, 0, 0) 100%);
+  pointer-events: none;
+}
+
+.hero__content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4.2cqw 4.6cqw 6cqw;
+  min-height: 0;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.hero__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: clamp(9px, 2.6cqw, 12px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 2px;
+}
+
+.hero__badge .bars {
+  width: 10px;
+  height: 11px;
+}
+
+.hero__badge .bars span {
+  background: #ffffff;
+}
+
+.hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(13px, 5cqw, 26px);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+}
+
+.hero__artist {
+  font-size: clamp(10px, 3.1cqw, 15px);
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.hero__lyrics {
+  position: relative;
+  flex: 1;
+  min-height: 2.6em;
+  margin-top: 3px;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18%, #000 82%, transparent 100%);
+}
+
+.hero__controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.hero__control {
+  width: clamp(26px, 8cqw, 40px);
+  height: clamp(26px, 8cqw, 40px);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: background var(--dur-fast) var(--ease-ios), transform var(--dur-fast) var(--ease-ios);
+}
+
+.hero__control:hover {
+  background: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+.hero__control:active {
+  transform: scale(0.92);
+}
+
+.hero__control--main {
+  background: #ffffff;
+  color: #12121a;
+}
+
+.hero__control--main:hover {
+  background: rgba(255, 255, 255, 0.86);
+  color: #12121a;
+}
+
+.hero__control .icon {
+  width: clamp(11px, 3.4cqw, 18px);
+  height: clamp(11px, 3.4cqw, 18px);
+}
+
+.hero__expand {
+  margin-left: auto;
+  width: clamp(24px, 7cqw, 34px);
+  height: clamp(24px, 7cqw, 34px);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.75);
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+
+.hero__expand:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.hero__expand .icon {
+  width: clamp(12px, 3.4cqw, 18px);
+  height: clamp(12px, 3.4cqw, 18px);
+}
+
+.hero__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  z-index: 2;
+}
+
+.hero__progress i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #ffffff;
+  transition: width 200ms linear;
+}
+
+/* 暂停时跳动条静止 */
+.wall-tile__hero.is-paused .hero__badge .bars span {
+  animation-play-state: paused;
+}
+
+/* ------------------------------ 迷你歌词 ------------------------------ */
+
+.mini-lyrics {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+.mini-lyrics__inner {
+  transition: transform 480ms var(--ease-ios);
+  will-change: transform;
+}
+
+.mini-lyrics__line {
+  padding: 0.8cqw 0;
+  font-family: var(--font-display);
+  font-size: clamp(10px, 3.2cqw, 17px);
+  font-weight: 600;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.42);
+  transition: color var(--dur) var(--ease-ios), opacity var(--dur) var(--ease-ios);
+}
+
+.mini-lyrics__line.is-near {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mini-lyrics__line.is-active {
+  color: #ffffff;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.45);
+}
+
+.mini-lyrics__empty {
+  font-size: clamp(10px, 3cqw, 15px);
+  color: rgba(255, 255, 255, 0.42);
+}
+
 /* 媒体墙在窄窗口下缩小密度 */
 @media (max-width: 900px) {
   .media-wall {
     --wall-min: 108px;
+  }
+}
+
+/* 窗口太窄时聚焦块退回单列，避免撑破网格 */
+@media (max-width: 620px) {
+  .wall-tile.is-featured {
+    grid-column: span 1;
+    grid-row: span 3;
   }
 }
