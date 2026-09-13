@@ -509,11 +509,14 @@ async function runSmoke ({ win, ctx }) {
         : null
 
       // --- 密度切换应当用 FLIP 平滑过渡 ---
+      const sizeBefore = grid?.style.getPropertyValue('--wall-size')
+      const columnsBefore = grid?.style.getPropertyValue('--wall-columns')
       document.querySelector('[data-density="s"]')?.click()
       const flippingRightAfter = document.querySelectorAll('.wall-tile.is-flipping').length
       const animated = document.getAnimations().length
       await new Promise((r) => setTimeout(r, 900))
-      const widthAfter = grid?.style.getPropertyValue('--wall-min')
+      const sizeAfter = grid?.style.getPropertyValue('--wall-size')
+      const columnsAfter = grid?.style.getPropertyValue('--wall-columns')
       const flippingAfter = document.querySelectorAll('.wall-tile.is-flipping').length
 
       // --- 切到另一张专辑，聚焦块要跟过去 ---
@@ -545,7 +548,8 @@ async function runSmoke ({ win, ctx }) {
       actions.setView('songs')
 
       return {
-        tiles, imgs, widthBefore, widthAfter, flippingRightAfter, flippingAfter, animated,
+        tiles, imgs, sizeBefore, sizeAfter, columnsBefore, columnsAfter,
+        flippingRightAfter, flippingAfter, animated,
         hasFeatured: Boolean(featured),
         featuredKey, currentAlbumKey,
         featuredOrder, featuredColumn, featuredRow,
@@ -556,8 +560,8 @@ async function runSmoke ({ win, ctx }) {
       }`)
     record('媒体墙', wallView.tiles > 0 && wallView.tiles === groupResult.albums,
       `${wallView.tiles} 张封面方块（= 专辑数），已加载 ${wallView.imgs} 张`)
-    record('媒体墙密度切换', wallView.widthBefore !== wallView.widthAfter,
-      `--wall-min ${wallView.widthBefore} → ${wallView.widthAfter}`)
+    record('媒体墙密度切换', wallView.sizeBefore !== wallView.sizeAfter,
+      `格子 ${wallView.sizeBefore}→${wallView.sizeAfter}，列数 ${wallView.columnsBefore}→${wallView.columnsAfter}`)
     record('媒体墙聚焦块',
       wallView.hasFeatured && wallView.featuredKey === wallView.currentAlbumKey &&
       wallView.featuredOrder === '-1' && wallView.featuredColumn === 'span 2',
@@ -573,6 +577,121 @@ async function runSmoke ({ win, ctx }) {
       wallView.afterSwitchTitle.length > 0 && wallView.afterSwitchPosition && wallView.afterSwitchOrder === '-1',
       `播放另一张专辑后聚焦块移到 ${wallView.afterSwitchKey?.slice(0, 14)}（order=${wallView.afterSwitchOrder}，排到首位=${wallView.afterSwitchPosition}），标题《${wallView.afterSwitchTitle}》`)
     record('媒体墙打开专辑', wallView.openedAlbum, '点击方块角标可进入专辑详情')
+
+    /* ---------- 媒体墙的自由拖动（2D 画布） ---------- */
+
+    const panCheck = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 1300))
+
+      const wall = window.__aria.views.mediaWall
+      const viewport = document.querySelector('.wall-viewport')
+      const rect = viewport.getBoundingClientRect()
+      const cx = Math.round(rect.left + rect.width / 2)
+      const cy = Math.round(rect.top + rect.height / 2)
+
+      const pointer = (type, x, y, init = {}) => viewport.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, isPrimary: true, pointerId: 7, pointerType: 'mouse',
+        clientX: x, clientY: y, ...init
+      }))
+
+      const initial = wall.debugState()
+
+      // ① 中键斜向拖动：两个轴都应该动
+      pointer('pointerdown', cx, cy, { button: 1, buttons: 4 })
+      for (let i = 1; i <= 12; i++) pointer('pointermove', cx - i * 14, cy - i * 7, { button: 1, buttons: 4 })
+      const duringMiddle = wall.debugState().pan
+      pointer('pointerup', cx - 168, cy - 84, { button: 1, buttons: 0 })
+      await new Promise((r) => setTimeout(r, 460))
+      const afterMiddle = wall.debugState().pan
+      const inertia = { x: afterMiddle.x - duringMiddle.x, y: afterMiddle.y - duringMiddle.y }
+
+      // ② Alt + 左键往回拖
+      const beforeAlt = wall.debugState().pan
+      pointer('pointerdown', cx, cy, { button: 0, buttons: 1, altKey: true })
+      for (let i = 1; i <= 12; i++) pointer('pointermove', cx + i * 12, cy + i * 5, { button: 0, buttons: 1, altKey: true })
+      pointer('pointerup', cx + 144, cy + 60, { button: 0, buttons: 0, altKey: true })
+      await new Promise((r) => setTimeout(r, 520))
+      const afterAlt = wall.debugState().pan
+
+      // ③ 滚轮直接平移（含横向）
+      const beforeWheel = wall.debugState().pan
+      viewport.dispatchEvent(new WheelEvent('wheel', {
+        bubbles: true, cancelable: true, deltaX: 160, deltaY: 240
+      }))
+      await new Promise((r) => setTimeout(r, 150))
+      const afterWheel = wall.debugState().pan
+
+      // ④ 位置指示器：平移量非零时，内部视口框的位置应当等于 -pan*scale
+      const minimap = document.querySelector('.wall-minimap')
+      const mapBox = minimap?.querySelector('.wall-minimap__viewport')
+      const mapRect = minimap?.getBoundingClientRect()
+      const boxRect = mapBox?.getBoundingClientRect()
+      const scale = Number(minimap?.dataset.scale) || 1
+      const mapState = {
+        visible: Boolean(minimap && !minimap.hidden),
+        size: mapRect ? [Math.round(mapRect.width), Math.round(mapRect.height)] : null,
+        scale,
+        panX: afterWheel.x,
+        panY: afterWheel.y,
+        expectX: Math.round(-afterWheel.x * scale),
+        actualX: Math.round((boxRect?.left || 0) - (mapRect?.left || 0)),
+        expectY: Math.round(-afterWheel.y * scale),
+        actualY: Math.round((boxRect?.top || 0) - (mapRect?.top || 0))
+      }
+
+      // ⑤ 使劲往边界外拖，松手后必须回到边界内
+      pointer('pointerdown', cx, cy, { button: 1, buttons: 4 })
+      for (let i = 1; i <= 30; i++) pointer('pointermove', cx + i * 60, cy + i * 60, { button: 1, buttons: 4 })
+      pointer('pointerup', cx + 1800, cy + 1800, { button: 1, buttons: 0 })
+      await new Promise((r) => setTimeout(r, 700))
+      const afterOverdrag = wall.debugState()
+      const withinBounds = afterOverdrag.pan.x <= 0 && afterOverdrag.pan.y <= 0 &&
+        afterOverdrag.pan.x >= afterOverdrag.bounds.minX - 1 &&
+        afterOverdrag.pan.y >= afterOverdrag.bounds.minY - 1
+
+      // ⑥ 切到「适应宽度」：横向不再可拖；切回画布：横向恢复可拖
+      document.querySelector('[data-layout="fit"]')?.click()
+      await new Promise((r) => setTimeout(r, 800))
+      const fitState = wall.debugState()
+      document.querySelector('[data-layout="canvas"]')?.click()
+      await new Promise((r) => setTimeout(r, 800))
+      const canvasState = wall.debugState()
+
+      return {
+        initial, duringMiddle, afterMiddle, inertia, beforeAlt, afterAlt,
+        beforeWheel, afterWheel, afterOverdrag, withinBounds, mapState, fitState, canvasState
+      }`)
+    const pan = panCheck
+    record('媒体墙二维画布',
+      pan.initial.horizontal && pan.initial.vertical &&
+      pan.initial.bounds.width > pan.initial.bounds.viewWidth &&
+      pan.initial.bounds.height > pan.initial.bounds.viewHeight,
+      `平面 ${pan.initial.bounds.width}×${pan.initial.bounds.height} vs 视口 ${pan.initial.bounds.viewWidth}×${pan.initial.bounds.viewHeight}，${pan.initial.columns} 列 × ${pan.initial.tileSize}px`)
+    record('中键斜向拖动',
+      pan.duringMiddle.x !== 0 && pan.duringMiddle.y !== 0 &&
+      Math.sign(pan.duringMiddle.x) === -1 && Math.sign(pan.duringMiddle.y) === -1,
+      `拖动中位移 x=${pan.duringMiddle.x} y=${pan.duringMiddle.y}（横竖都在动）`)
+    record('松手带惯性',
+      Math.abs(pan.inertia.x) > 0 || Math.abs(pan.inertia.y) > 0,
+      `松手后又滑行 x=${pan.inertia.x} y=${pan.inertia.y}`)
+    record('Alt + 左键拖动',
+      pan.afterAlt.x !== pan.beforeAlt.x && pan.afterAlt.y !== pan.beforeAlt.y,
+      `x ${pan.beforeAlt.x} → ${pan.afterAlt.x}，y ${pan.beforeAlt.y} → ${pan.afterAlt.y}`)
+    record('滚轮平移（含横向）',
+      pan.afterWheel.x !== pan.beforeWheel.x && pan.afterWheel.y !== pan.beforeWheel.y,
+      `滚轮后 x ${pan.beforeWheel.x} → ${pan.afterWheel.x}，y ${pan.beforeWheel.y} → ${pan.afterWheel.y}`)
+    record('越界回弹与钳制', pan.withinBounds,
+      `猛拖后落在边界内：x=${pan.afterOverdrag.pan.x}∈[${pan.afterOverdrag.bounds.minX},0]，y=${pan.afterOverdrag.pan.y}∈[${pan.afterOverdrag.bounds.minY},0]`)
+    record('位置指示器',
+      pan.mapState.visible && pan.mapState.panX !== 0 &&
+      Math.abs(pan.mapState.expectX - pan.mapState.actualX) <= 3 &&
+      Math.abs(pan.mapState.expectY - pan.mapState.actualY) <= 3,
+      `指示器 ${pan.mapState.size?.join('×')}，平移 (${pan.mapState.panX},${pan.mapState.panY}) 时内部视口框实测 (${pan.mapState.actualX},${pan.mapState.actualY}) = 换算值 (${pan.mapState.expectX},${pan.mapState.expectY})`)
+    record('布局切换',
+      !pan.fitState.horizontal && pan.canvasState.horizontal && pan.fitState.layout === 'fit' && pan.canvasState.layout === 'canvas',
+      `适应宽度：横向不可拖（${pan.fitState.bounds.width}≈视口 ${pan.fitState.bounds.viewWidth}）；自由画布：横向可拖（${pan.canvasState.bounds.width} vs ${pan.canvasState.bounds.viewWidth}）`)
 
     /* ---------- 各视图的滚动能力（曾经因为视图根节点 display 被清掉而整块滚不动） ---------- */
 
@@ -601,13 +720,12 @@ async function runSmoke ({ win, ctx }) {
       }
       const result = {}
       result.songs = await probe('songs', '#content > .content-inner:nth-child(1)', '.tracklist__viewport')
-      result.wall = await probe('wall', '#content > .content-inner:nth-child(3)', '.media-wall__scroll')
       result.settings = await probe('settings', '#content > .content-inner:nth-child(4)', '.settings')
       result.albums = await probe('albums', '#content > .content-inner:nth-child(2)', '.browse-scroll')
       actions.setView('songs')
       return result`)
     const scrollRows = Object.values(scrollAudit)
-    record('各视图可滚动',
+    record('各视图可滚动（媒体墙改为 2D 平移，单独校验）',
       scrollRows.every((row) => row.scrollable),
       scrollRows.map((row) => `${row.view}:${row.scrollable ? '可滚' : '滚不动'}(display=${row.rootDisplay}, 容器 ${row.clientHeight}/${row.scrollHeight})`).join('　'))
 

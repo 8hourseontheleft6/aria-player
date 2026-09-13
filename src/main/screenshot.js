@@ -125,18 +125,27 @@ async function runScreenshots ({ win }) {
         return true`)
       await sleep(2800)
     }],
-    ['14-wall-scrolled.png', '媒体墙（滚动一段之后）', async () => {
+    ['14-wall-scrolled.png', '媒体墙（斜向拖到中段）', async () => {
       await evaluate(win, `
-        const scroller = document.querySelector('.media-wall__scroll')
-        scroller.scrollTop = 1400
+        // 用滚轮事件做一次斜向平移，验证二维画布
+        const viewport = document.querySelector('.wall-viewport')
+        viewport.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true, cancelable: true, deltaX: 700, deltaY: 900
+        }))
         return true`)
       await sleep(900)
     }],
-    ['15-wall-large.png', '媒体墙（大尺寸）', async () => {
+    ['15-wall-large.png', '媒体墙（大尺寸 + 回到起点）', async () => {
       await evaluate(win, `
         document.querySelector('[data-density="l"]')?.click()
-        const scroller = document.querySelector('.media-wall__scroll')
-        scroller.scrollTop = 0
+        return true`)
+      await sleep(600)
+      await evaluate(win, `
+        // 回到平面左上角：反向滚轮等量抵消
+        const viewport = document.querySelector('.wall-viewport')
+        viewport.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true, cancelable: true, deltaX: -4000, deltaY: -4000
+        }))
         return true`)
       await sleep(1200)
     }]

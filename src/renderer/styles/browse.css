@@ -354,22 +354,69 @@
 
 /* ------------------------------ 媒体墙 ------------------------------ */
 
-.media-wall__scroll {
+/**
+ * 画布视口：内容（.media-wall）是一块比视口大的平面，靠 transform 平移，
+ * 所以这里是 overflow:hidden 而不是原生滚动 —— 这样才能横竖斜任意方向拖动。
+ */
+.wall-viewport {
   flex: 1;
   min-height: 0;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+  background: var(--bg-window);
 }
 
-/* 内容很长，滚动条默认浅显地露出来，让「可以滚」这件事有提示 */
-.media-wall__scroll::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--scrollbar-thumb) 45%, transparent);
+.wall-viewport.is-panning {
+  cursor: grabbing;
+}
+
+/* 拖动过程中不要有悬停反馈与原生 tooltip */
+.wall-viewport.is-panning .wall-tile {
+  pointer-events: none;
 }
 
 .media-wall {
-  --wall-min: 148px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--wall-min), 1fr));
+  grid-template-columns: repeat(var(--wall-columns, 6), var(--wall-size, 148px));
   gap: 3px;
-  padding: 3px 3px 20px;
+  padding: 3px;
+  width: max-content;
+  will-change: transform;
+}
+
+/* 右下角位置指示器：内容比视口大时才显示 */
+.wall-minimap {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-popover) 70%, transparent);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 0 0 0.5px var(--separator);
+  overflow: hidden;
+  cursor: grab;
+}
+
+.wall-minimap[hidden] {
+  display: none;
+}
+
+.wall-minimap:active {
+  cursor: grabbing;
+}
+
+.wall-minimap__viewport {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 42%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 75%, transparent);
+  transition: transform 90ms linear;
 }
 
 .wall-tile {
@@ -722,13 +769,6 @@
 .mini-lyrics__empty {
   font-size: clamp(10px, 3cqw, 15px);
   color: rgba(255, 255, 255, 0.42);
-}
-
-/* 媒体墙在窄窗口下缩小密度 */
-@media (max-width: 900px) {
-  .media-wall {
-    --wall-min: 108px;
-  }
 }
 
 /* 窗口太窄时聚焦块退回单列，避免撑破网格 */

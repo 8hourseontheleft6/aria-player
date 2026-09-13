@@ -21,6 +21,7 @@ const DEFAULTS = {
   globalMediaKeys: true,
   showRemainingTime: false,
   reduceMotion: false,
+  wallLayout: 'canvas',
   trayEnabled: true,
   closeToTray: false,
   taskbarProgress: true,

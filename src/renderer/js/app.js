@@ -716,7 +716,11 @@ async function main () {
   })
 
   /* 调试与二次开发入口：开发者工具控制台里可以直接用 window.__aria */
-  window.__aria = { bus, store, player, engine, playlist, host, artwork, actions, EVENTS }
+  window.__aria = {
+    bus, store, player, engine, playlist, host, artwork, actions, EVENTS,
+    // 视图组件：自检与调试会用到（例如媒体墙的 debugState / 平移）
+    views: { libraryView, browseView, mediaWall, settingsView, playerBar, nowPlayingPanel, queuePanel }
+  }
 }
 
 main().catch((err) => {
