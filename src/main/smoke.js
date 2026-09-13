@@ -808,6 +808,87 @@ async function runSmoke ({ win, ctx }) {
       perfCheck.dragAverage < Math.max(34, perfCheck.idleAverage * 1.8),
       `空载帧间隔 ${perfCheck.idleAverage}ms，拖动时 ${perfCheck.dragAverage}ms（最大 ${perfCheck.dragMax}ms）；注：本环境 rAF 本身被节流到约 ${Math.round(1000 / perfCheck.idleAverage)}fps，故只看相对值`)
 
+    /* ---------- 首屏封面加载：并发节流 + 磁盘缓存 ---------- */
+
+    // 1) 建 DOM 的耗时（打开媒体墙时的首屏成本）
+    const rebuildCheck = await evaluate(win, `
+      const wall = window.__aria.views.mediaWall
+      return wall.debugRebuild()`)
+    record('媒体墙建 DOM 耗时', rebuildCheck.elapsedMs < 400,
+      `${rebuildCheck.tiles} 个格子、${rebuildCheck.nodes} 个 DOM 节点，耗时 ${rebuildCheck.elapsedMs}ms`)
+
+    // 2) 清掉封面缓存后重新打开媒体墙，观察封面请求的并发上限
+    const artworkService = ctx.get('library')
+    await artworkService.clearArtworkCache()
+    const throttleCheck = await evaluate(win, `
+      const { actions } = window.__aria
+      const lazy = window.__aria.views.mediaWall.debugState().lazy
+      void lazy
+      // 切走再切回来，触发一次完整的封面加载
+      actions.setView('songs')
+      await new Promise((r) => setTimeout(r, 400))
+      actions.setView('wall')
+      const samples = { active: 0, queued: 0 }
+      const started = performance.now()
+      while (performance.now() - started < 4000) {
+        await new Promise((r) => requestAnimationFrame(r))
+        const state = window.__aria.views.mediaWall.debugState().lazy
+        samples.active = Math.max(samples.active, state.active)
+        samples.queued = Math.max(samples.queued, state.queued)
+      }
+      const finalState = window.__aria.views.mediaWall.debugState().lazy
+      const wallArt = [...document.querySelectorAll('.wall-tile__art')]
+      return {
+        peakActive: samples.active,
+        peakQueued: samples.queued,
+        remaining: finalState.pending,
+        wallPending: wallArt.filter((node) => !node.querySelector('img')).length,
+        images: wallArt.filter((node) => node.querySelector('img')).length
+      }`)
+    record('封面加载并发受控', throttleCheck.peakActive <= 4 && throttleCheck.peakQueued > 20,
+      `峰值在途 ${throttleCheck.peakActive}（上限 4），峰值排队 ${throttleCheck.peakQueued}；4s 内媒体墙已出图 ${throttleCheck.images} 张，还剩 ${throttleCheck.wallPending} 张待加载`)
+
+    const artworkStats = await artworkService.getArtworkStats()
+    record('封面落盘缓存', artworkStats.files > 0,
+      `${artworkStats.files} 张 · ${Math.round(artworkStats.bytes / 1024)} KB · ${artworkStats.dir}`)
+
+    // 3) 冷读（要解析音频内嵌图并缩放）vs 热读（直接读小文件）
+    const artworkTrack = artworkService.getTracks().find((track) => track.artworkEmbedded)
+    if (artworkTrack) {
+      await artworkService.clearArtworkCache()
+      const coldStart = Date.now()
+      const cold = await artworkService.getArtwork(artworkTrack.id)
+      const coldMs = Date.now() - coldStart
+
+      // 只清内存缓存，保留磁盘缓存 —— 再取一次应当走磁盘
+      await artworkService.clearArtworkCache({ memory: true, disk: false })
+      const warmStart = Date.now()
+      const warm = await artworkService.getArtwork(artworkTrack.id)
+      const warmMs = Date.now() - warmStart
+
+      record('封面冷读与热读',
+        Boolean(cold?.data) && Boolean(warm?.data) && cold.data.length === warm.data.length &&
+        warm.source === 'disk',
+        `冷读 ${coldMs}ms（${Math.round(cold.data.length / 1024)}KB，${cold.source}）→ 热读 ${warmMs}ms（${warm.source}）`)
+      record('内嵌封面已缩放', warm.mime === 'image/jpeg' && warm.data.length < 200 * 1024,
+        `输出 ${warm.mime}，${Math.round(warm.data.length / 1024)}KB（限 480px / 质量 82）`)
+    }
+
+    /* ---------- 后台预热：让下次打开媒体墙秒出图 ---------- */
+
+    await artworkService.clearArtworkCache()
+    await evaluate(win, `
+      // 停在歌曲列表（不打开媒体墙），看后台预热能不能自己把缓存灌满
+      window.__aria.actions.setView('songs')
+      return true`)
+    const prewarmStart = await artworkService.getArtworkStats()
+    await sleep(6000)
+    const prewarmEnd = await artworkService.getArtworkStats()
+    const prewarmState = await evaluate(win, `return window.__aria.prewarmer.state`)
+    record('空闲时后台预热封面',
+      prewarmStart.files === 0 && prewarmEnd.files > 3,
+      `未打开媒体墙的情况下，6s 内从 0 涨到 ${prewarmEnd.files} 张 · ${Math.round(prewarmEnd.bytes / 1024)}KB（预热计数 ${prewarmState.warmed}，让路中 ${prewarmState.paused}）`)
+
     /* ---------- 各视图的滚动能力（曾经因为视图根节点 display 被清掉而整块滚不动） ---------- */
 
     const scrollAudit = await evaluate(win, `
@@ -863,7 +944,7 @@ async function runSmoke ({ win, ctx }) {
       await new Promise((r) => setTimeout(r, 1800))
       return true`)
     const trayState = tray.getState()
-    record('播放状态上报', Boolean(trayState.title) && ['playing', 'paused'].includes(trayState.status),
+    record('播放状态上报', Boolean(trayState.title) && ['playing', 'paused', 'loading'].includes(trayState.status),
       `托盘收到：${trayState.status}《${trayState.title}》— ${trayState.artist}，进度 ${Math.round((trayState.progress || 0) * 100)}%`)
 
     // 托盘 / 任务栏按钮发出的指令要能驱动播放器

@@ -79,6 +79,8 @@ function registerIpc (ctx) {
     'library:remove-folder': (_event, dir) => library.removeFolder(dir),
     'library:pick-folders': () => library.pickFolders(),
     'library:artwork': (_event, trackId) => library.getArtwork(trackId),
+    'library:artwork-stats': () => library.getArtworkStats(),
+    'library:clear-artwork-cache': (_event, options) => library.clearArtworkCache(options || {}),
     'library:handle-drop': (_event, paths, options) => library.resolveDrop(paths, options || {}),
     'library:reveal': (_event, filePath) => {
       if (typeof filePath === 'string' && filePath) library.revealInFolder(filePath)

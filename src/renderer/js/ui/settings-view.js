@@ -290,6 +290,40 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         : '暂无缓存'
     }).catch(() => { cacheLabel.textContent = '—' })
 
+    const artworkCacheLabel = h('span', { class: 'settings__row-value', text: '—' })
+    remote.library.artworkStats().then((info) => {
+      if (!info) return
+      artworkCacheLabel.textContent = info.files
+        ? `${info.files} 张 · ${formatBytes(info.bytes)}`
+        : '暂无缓存'
+    }).catch(() => { artworkCacheLabel.textContent = '—' })
+
+    scroll.appendChild(group('封面缓存', [
+      row({
+        title: '磁盘封面缓存',
+        sub: '首次读取内嵌封面时会缩到 480px 并存到本地，之后打开专辑或媒体墙只读小文件（源文件变化后自动失效）',
+        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        artworkCacheLabel,
+        h('button', {
+          class: 'btn btn--sm btn--destructive',
+          type: 'button',
+          onClick: async () => {
+            const result = await remote.library.clearArtworkCache()
+            toast({
+              message: result?.ok ? '封面缓存已清空' : `清理失败：${result?.message || '未知错误'}`,
+              type: result?.ok ? 'success' : 'error'
+            })
+            artworkCacheLabel.textContent = '暂无缓存'
+          }
+        }, '清空'))
+      }),
+      row({
+        title: '空闲时预热封面',
+        sub: '后台一张一张地把封面读进缓存（界面正在加载封面时会自动让路），这样打开媒体墙基本是秒出',
+        control: switchControl(settings.prewarmArtwork !== false, (value) => actions.setSetting({ prewarmArtwork: value }))
+      })
+    ]))
+
     scroll.appendChild(group('在线功能', [
       row({
         title: '在线补全歌词与封面',

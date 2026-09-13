@@ -22,6 +22,7 @@ import { createArtworkService } from './core/artwork.js'
 import { createPlayerController } from './core/player-controller.js'
 import { createLibraryIndex } from './core/grouping.js'
 import { selectVisibleTracks } from './core/selectors.js'
+import { createArtworkPrewarmer } from './core/artwork-prewarm.js'
 
 import { createTitlebar } from './ui/titlebar.js'
 import { createSidebar } from './ui/sidebar.js'
@@ -84,6 +85,25 @@ async function main () {
   function index () {
     return libraryIndex.get(visibleTracks())
   }
+
+  /** 封面后台预热：空闲时把封面灌进主进程的磁盘缓存，让媒体墙秒出图 */
+  let lazyArtwork = null
+  const prewarmer = createArtworkPrewarmer({
+    bus,
+    remote,
+    settings: {
+      get: () => store.get().settings
+    },
+    actions: { albums: () => index().albumList },
+    isBusy: () => {
+      // 界面正在加载封面时让路
+      const state = lazyArtwork?.state
+      if (state && (state.active > 0 || state.queued > 0)) return true
+      // 切歌时的加载/缓冲窗口也让路，别和播放启动抢主进程
+      const status = store.get().playback.status
+      return status === 'loading' || status === 'buffering'
+    }
+  })
 
   /* ------------------------------------------------------------------ */
   /* DOM 容器                                                            */
@@ -340,7 +360,7 @@ async function main () {
   const trackMenu = createTrackMenu({ store, bus, player, host, actions })
   const libraryView = createLibraryView({ store, bus, player, artwork, actions })
   // 封面懒加载器由 app 统一持有：专辑网格、艺人列表、媒体墙共用同一个 IntersectionObserver
-  const lazyArtwork = createLazyArtwork(artwork)
+  lazyArtwork = createLazyArtwork(artwork)
   const browseView = createBrowseView({ store, bus, player, artwork, actions, lazy: lazyArtwork })
   const mediaWall = createMediaWall({ store, bus, player, actions, lazy: lazyArtwork })
   const settingsView = createSettingsView({ store, bus, player, actions, host })
@@ -705,6 +725,9 @@ async function main () {
     if (!tracks.length && !settings.folders.length) {
       actions.setView('settings')
     }
+
+    // 资料库就绪后开始后台预热封面（会在界面忙时自动让路）
+    if (tracks.length) prewarmer.start()
   }
 
   bindKeyboard()
@@ -717,7 +740,7 @@ async function main () {
 
   /* 调试与二次开发入口：开发者工具控制台里可以直接用 window.__aria */
   window.__aria = {
-    bus, store, player, engine, playlist, host, artwork, actions, EVENTS,
+    bus, store, player, engine, playlist, host, artwork, actions, EVENTS, prewarmer,
     // 视图组件：自检与调试会用到（例如媒体墙的 debugState / 平移）
     views: { libraryView, browseView, mediaWall, settingsView, playerBar, nowPlayingPanel, queuePanel }
   }

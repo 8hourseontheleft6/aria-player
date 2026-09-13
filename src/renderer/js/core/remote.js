@@ -28,6 +28,8 @@ function createStub () {
       removeFolder: unavailable('移除目录'),
       pickFolders: unavailable('选择目录'),
       artwork: unavailable('读取封面'),
+      artworkStats: unavailable('封面缓存统计'),
+      clearArtworkCache: unavailable('清理封面缓存'),
       reveal: unavailable('在文件夹中显示'),
       handleDrop: unavailable('处理拖入的文件'),
       onScanProgress: noop,

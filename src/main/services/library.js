@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, dialog, shell, BrowserWindow } = require('electron')
+const { app, dialog, shell, BrowserWindow, nativeImage } = require('electron')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 
@@ -11,6 +11,9 @@ const { readMetadata, readEmbeddedArtwork } = require('./metadata')
 const CACHE_VERSION = 3
 const SCAN_CONCURRENCY = 6
 const ARTWORK_CACHE_LIMIT = 64
+/** 封面落盘缓存的边长：媒体墙最大格子 2×220px，480 足够且文件小得多 */
+const ARTWORK_MAX_SIZE = 480
+const ARTWORK_JPEG_QUALITY = 82
 
 /**
  * 资料库服务：目录管理、递归扫描、元数据缓存、封面读取。
@@ -276,22 +279,98 @@ function createLibraryService (ctx) {
 
   /* ---------------- 对外读取 ---------------- */
 
+  /**
+   * 封面落盘缓存。
+   *
+   * 媒体墙一屏就有上百张封面，如果每次都从音频文件里重新解析内嵌图，
+   * 主进程会被解析任务压满（首次打开媒体墙的卡顿就来自这里）。
+   * 所以第一次提取后顺手缩到 480px、转成 JPEG 存到 userData/artwork-cache，
+   * 之后只读一个小文件即可。缓存按源文件 mtime 判断是否过期。
+   */
+  const artworkCacheDir = path.join(app.getPath('userData'), 'artwork-cache')
+
+  function artworkCacheFile (track) {
+    return path.join(artworkCacheDir, `${track.id}.jpg`)
+  }
+
+  /** 缩放 + 转 JPEG；失败或没变小就返回原图 */
+  function optimizeArtwork (source) {
+    try {
+      const image = nativeImage.createFromBuffer(source.data)
+      if (image.isEmpty()) return source
+      const size = image.getSize()
+      const longest = Math.max(size.width, size.height)
+      const alreadySmall = longest <= ARTWORK_MAX_SIZE && source.data.length < 150 * 1024
+      if (alreadySmall) return source
+
+      const scale = Math.min(1, ARTWORK_MAX_SIZE / longest)
+      const resized = image.resize({
+        width: Math.max(1, Math.round(size.width * scale)),
+        height: Math.max(1, Math.round(size.height * scale)),
+        quality: 'good'
+      })
+      const jpeg = resized.toJPEG(ARTWORK_JPEG_QUALITY)
+      if (!jpeg || !jpeg.length || jpeg.length >= source.data.length) return source
+      return { mime: 'image/jpeg', data: jpeg }
+    } catch (err) {
+      console.warn('[library] 封面缩放失败，使用原图:', err.message)
+      return source
+    }
+  }
+
+  async function readArtworkFromDisk (track) {
+    const file = artworkCacheFile(track)
+    try {
+      const stat = await fsp.stat(file)
+      // 源文件更新过就作废缓存
+      if (stat.mtimeMs < track.mtimeMs) return null
+      const data = await fsp.readFile(file)
+      if (!data.length) return null
+      return { mime: 'image/jpeg', data, source: 'disk' }
+    } catch {
+      return null
+    }
+  }
+
+  async function writeArtworkToDisk (track, result) {
+    if (result.mime !== 'image/jpeg') return
+    try {
+      await fsp.mkdir(artworkCacheDir, { recursive: true })
+      await fsp.writeFile(artworkCacheFile(track), result.data)
+    } catch (err) {
+      console.warn('[library] 封面缓存写入失败:', err.message)
+    }
+  }
+
   async function getArtwork (trackId) {
-    if (artworkCache.has(trackId)) return artworkCache.get(trackId)
+    const memory = artworkCache.get(trackId)
+    if (memory) return memory
+
     const track = byId.get(trackId)
     if (!track) return null
 
-    let result = null
-    try {
-      if (track.artworkFile) {
-        const data = await fsp.readFile(track.artworkFile)
-        result = { mime: `image/${path.extname(track.artworkFile).slice(1).replace('jpg', 'jpeg')}`, data }
-      } else if (track.artworkEmbedded) {
-        result = await readEmbeddedArtwork(track.path)
+    // 1) 磁盘缓存
+    let result = await readArtworkFromDisk(track)
+
+    // 2) 回源：同名图片直接读，内嵌图交给 metadata 解析
+    if (!result) {
+      try {
+        let source = null
+        if (track.artworkFile) {
+          const data = await fsp.readFile(track.artworkFile)
+          const ext = path.extname(track.artworkFile).slice(1).toLowerCase()
+          source = { mime: `image/${ext === 'jpg' ? 'jpeg' : ext}`, data }
+        } else if (track.artworkEmbedded) {
+          source = await readEmbeddedArtwork(track.path)
+        }
+        if (source) {
+          result = { ...optimizeArtwork(source), source: 'extracted' }
+          await writeArtworkToDisk(track, result)
+        }
+      } catch (err) {
+        console.warn(`[library] 封面读取失败 ${track.file}: ${err.message}`)
+        result = null
       }
-    } catch (err) {
-      console.warn(`[library] 封面读取失败 ${track.file}: ${err.message}`)
-      result = null
     }
 
     if (result) {
@@ -301,6 +380,39 @@ function createLibraryService (ctx) {
       }
     }
     return result
+  }
+
+  async function getArtworkStats () {
+    const stats = { dir: artworkCacheDir, files: 0, bytes: 0, memory: artworkCache.size }
+    try {
+      const entries = await fsp.readdir(artworkCacheDir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isFile()) continue
+        const stat = await fsp.stat(path.join(artworkCacheDir, entry.name))
+        stats.files++
+        stats.bytes += stat.size
+      }
+    } catch {
+      // 目录还不存在
+    }
+    return stats
+  }
+
+  /**
+   * @param {{ memory?: boolean, disk?: boolean }} [options]
+   * memory 只清内存里已解码的封面；disk 连落盘缓存一起删
+   */
+  async function clearArtworkCache (options = {}) {
+    const memory = options.memory !== false
+    const disk = options.disk !== false
+    if (memory) artworkCache.clear()
+    if (!disk) return { ok: true, memory, disk }
+    try {
+      await fsp.rm(artworkCacheDir, { recursive: true, force: true })
+      return { ok: true, memory, disk }
+    } catch (err) {
+      return { ok: false, message: err.message }
+    }
   }
 
   async function init () {
@@ -435,6 +547,8 @@ function createLibraryService (ctx) {
     getTrackById: (id) => byId.get(id) || null,
     getTrackByPath: (p) => byPath.get(p) || null,
     getArtwork,
+    getArtworkStats,
+    clearArtworkCache,
     resolveDrop,
     getStats: () => ({ count: tracks.length, scannedAt, folders: getFolders().length, scanning: Boolean(scanningPromise) }),
     revealInFolder: (filePath) => shell.showItemInFolder(filePath),

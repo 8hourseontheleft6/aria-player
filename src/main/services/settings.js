@@ -22,6 +22,7 @@ const DEFAULTS = {
   showRemainingTime: false,
   reduceMotion: false,
   wallLayout: 'canvas',
+  prewarmArtwork: true,
   trayEnabled: true,
   closeToTray: false,
   taskbarProgress: true,

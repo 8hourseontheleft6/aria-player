@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld('aria', {
     removeFolder: (dir) => ipcRenderer.invoke('library:remove-folder', dir),
     pickFolders: () => ipcRenderer.invoke('library:pick-folders'),
     artwork: (trackId) => ipcRenderer.invoke('library:artwork', trackId),
+    artworkStats: () => ipcRenderer.invoke('library:artwork-stats'),
+    clearArtworkCache: () => ipcRenderer.invoke('library:clear-artwork-cache'),
     reveal: (filePath) => ipcRenderer.invoke('library:reveal', filePath),
     handleDrop: (paths, options) => ipcRenderer.invoke('library:handle-drop', paths, options),
     onScanProgress: (handler) => on('library:scan-progress', handler),

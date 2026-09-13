@@ -743,7 +743,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
 
   function createTile (album, index) {
     const art = h('div', { class: 'wall-tile__art' })
-    lazy.observe(art, album.artworkTrack, 'disc')
+    // 媒体墙有几百个格子，占位图标改用 CSS 画，省下几百个 SVG 节点
+    lazy.observe(art, album.artworkTrack, null)
 
     const tile = h('div', {
       class: 'wall-tile',
@@ -999,6 +1000,17 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
       }
       flushPan(false)
       return { x: pan.x, y: pan.y }
+    },
+
+    /** 自检用：重新构建整面墙并返回耗时（首屏卡顿主要来自这里） */
+    debugRebuild: () => {
+      const started = performance.now()
+      rebuild(albumList, { animateIn: false })
+      return {
+        elapsedMs: Math.round((performance.now() - started) * 100) / 100,
+        tiles: tiles.size,
+        nodes: grid.querySelectorAll('*').length
+      }
     }
   }
 }

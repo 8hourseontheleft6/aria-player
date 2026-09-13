@@ -484,6 +484,21 @@
   height: 32px;
 }
 
+/* 还没拿到封面时用 CSS 画一个音符占位：几百个格子时省下几百个 SVG 节点 */
+.wall-tile__art:empty::after {
+  content: "";
+  width: 26px;
+  height: 26px;
+  background: currentColor;
+  opacity: 0.3;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20.4 3.1c0-.8-.7-1.4-1.5-1.2L8.6 4.5c-.6.1-1 .7-1 1.3v10.4a4 4 0 1 0 1.9 3.4V7.7l9.4-2.3v7.4a4 4 0 1 0 1.5 3.1V3.1z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M20.4 3.1c0-.8-.7-1.4-1.5-1.2L8.6 4.5c-.6.1-1 .7-1 1.3v10.4a4 4 0 1 0 1.9 3.4V7.7l9.4-2.3v7.4a4 4 0 1 0 1.5 3.1V3.1z'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
 .wall-tile:hover .wall-tile__art img {
   transform: scale(1.09);
 }
