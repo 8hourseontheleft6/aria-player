@@ -268,6 +268,11 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         title: '任务栏显示播放进度',
         sub: '在任务栏图标上叠加进度条，并使用缩略图上的上一首/播放/下一首按钮',
         control: switchControl(settings.taskbarProgress !== false, (value) => actions.setSetting({ taskbarProgress: value }))
+      }),
+      row({
+        title: '自动监听音乐目录',
+        sub: '目录里新增或删除音乐时自动刷新资料库（复制整张专辑时会等文件安静下来再扫一次）',
+        control: switchControl(settings.watchFolders !== false, (value) => actions.setSetting({ watchFolders: value }))
       })
     ]))
 

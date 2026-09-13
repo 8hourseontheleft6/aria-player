@@ -1,6 +1,6 @@
 'use strict'
 
-const { app, dialog, shell } = require('electron')
+const { app, dialog, shell, BrowserWindow } = require('electron')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 
@@ -308,6 +308,121 @@ function createLibraryService (ctx) {
     return { loaded, count: tracks.length, scannedAt }
   }
 
+  /* ---------------- 拖拽导入 ---------------- */
+
+  function isInsideRoots (filePath, roots) {
+    const resolved = path.resolve(filePath)
+    return roots.some((root) => {
+      const rel = path.relative(root, resolved)
+      return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+    })
+  }
+
+  async function confirm (message, detail) {
+    const parent = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null
+    const result = await dialog.showMessageBox(parent, {
+      type: 'question',
+      buttons: ['加入资料库', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      message,
+      detail
+    })
+    return result.response === 0
+  }
+
+  /**
+   * 处理拖进窗口的路径。
+   *
+   * 目录 -> 询问后加入资料库；资料库内的音频 -> 直接播放；
+   * 资料库外的音频 -> 询问后把所在文件夹加入资料库，再播放。
+   *
+   * @param {string[]} paths
+   * @param {{ assumeYes?: boolean }} [options] assumeYes 跳过确认弹窗（自检用）
+   */
+  async function resolveDrop (paths, options = {}) {
+    const list = (Array.isArray(paths) ? paths : [paths]).filter((item) => typeof item === 'string' && item)
+    if (!list.length) return { action: 'none', reason: 'empty' }
+
+    const roots = getAllowedRoots()
+    const folders = []
+    const insideFiles = []
+    const outsideFiles = []
+    const rejected = []
+
+    for (const item of list) {
+      let stat
+      try {
+        stat = await fsp.stat(item)
+      } catch {
+        rejected.push({ path: item, reason: 'missing' })
+        continue
+      }
+      if (stat.isDirectory()) {
+        folders.push(path.resolve(item))
+      } else if (!isAudioFile(item)) {
+        rejected.push({ path: item, reason: 'not-audio' })
+      } else if (isInsideRoots(item, roots)) {
+        insideFiles.push(path.resolve(item))
+      } else {
+        outsideFiles.push(path.resolve(item))
+      }
+    }
+
+    const added = []
+
+    // 1) 拖进来的文件夹
+    for (const dir of folders) {
+      const ok = options.assumeYes || await confirm(
+        `把「${path.basename(dir)}」加入资料库？`,
+        `Aria 会递归扫描其中的音乐文件。\n${dir}`
+      )
+      if (!ok) continue
+      const result = await addFolder(dir)
+      if (result.ok) added.push(dir)
+    }
+
+    // 2) 资料库外的音频：把所在文件夹加入资料库
+    if (outsideFiles.length) {
+      const dirs = [...new Set(outsideFiles.map((file) => path.dirname(file)))]
+        .filter((dir) => !isInsideRoots(dir, getAllowedRoots()))
+      if (dirs.length) {
+        const detail = dirs.length === 1
+          ? `这些歌曲不在资料库目录中，需要先把所在文件夹加入资料库：\n${dirs[0]}`
+          : `这些歌曲不在资料库目录中，需要先把 ${dirs.length} 个文件夹加入资料库：\n${dirs.slice(0, 5).join('\n')}${dirs.length > 5 ? '\n…' : ''}`
+        const ok = options.assumeYes || await confirm('把拖入歌曲所在的文件夹加入资料库？', detail)
+        if (ok) {
+          for (const dir of dirs) {
+            const result = await addFolder(dir)
+            if (result.ok) added.push(dir)
+          }
+        }
+      }
+    }
+
+    if (added.length) {
+      await scan({ reason: 'drop' })
+      settings.set({ folders: getFolders() }, { immediate: true })
+    }
+
+    // 3) 找出可以播放的曲目
+    const candidates = [...insideFiles, ...outsideFiles]
+    const trackIds = []
+    for (const file of candidates) {
+      const track = byPath.get(file)
+      if (track) trackIds.push(track.id)
+    }
+
+    return {
+      action: trackIds.length ? 'play' : (added.length ? 'added' : 'none'),
+      trackIds,
+      added,
+      rejected,
+      folders: getFolders()
+    }
+  }
+
   return {
     init,
     scan,
@@ -320,6 +435,7 @@ function createLibraryService (ctx) {
     getTrackById: (id) => byId.get(id) || null,
     getTrackByPath: (p) => byPath.get(p) || null,
     getArtwork,
+    resolveDrop,
     getStats: () => ({ count: tracks.length, scannedAt, folders: getFolders().length, scanning: Boolean(scanningPromise) }),
     revealInFolder: (filePath) => shell.showItemInFolder(filePath),
     invalidateDirIndex

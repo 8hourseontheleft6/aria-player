@@ -29,9 +29,13 @@ function createStub () {
       pickFolders: unavailable('选择目录'),
       artwork: unavailable('读取封面'),
       reveal: unavailable('在文件夹中显示'),
-      onScanProgress: noop
+      handleDrop: unavailable('处理拖入的文件'),
+      onScanProgress: noop,
+      onWatchUpdate: noop,
+      onWatchError: noop
     },
     lyrics: { load: unavailable('读取歌词') },
+    paths: { fromFiles: () => [] },
     window: {
       minimize: noop,
       toggleMaximize: noop,

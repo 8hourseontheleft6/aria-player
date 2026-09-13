@@ -24,6 +24,7 @@ const DEFAULTS = {
   trayEnabled: true,
   closeToTray: false,
   taskbarProgress: true,
+  watchFolders: true,
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
   lastTrackPath: null,
   lastView: 'songs'

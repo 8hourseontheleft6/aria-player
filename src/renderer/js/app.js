@@ -33,6 +33,7 @@ import { createPlayerBar } from './ui/player-bar.js'
 import { createNowPlayingPanel } from './ui/now-playing-panel.js'
 import { createQueuePanel } from './ui/queue-panel.js'
 import { createTrackMenu } from './ui/track-menu.js'
+import { createDropZone } from './ui/drop-zone.js'
 import { createLazyArtwork } from './ui/artwork-node.js'
 import { toast, closeAllLayers } from './ui/overlay.js'
 
@@ -307,6 +308,20 @@ async function main () {
       trackMenu.open(track, event)
     },
 
+    /** 拖入歌曲后播放（主进程已经完成路径校验与资料库归属判断） */
+    playDroppedTracks (trackIds) {
+      const ids = (trackIds || []).filter(Boolean)
+      if (!ids.length) return
+      player.playCollection(ids, ids[0])
+      const first = store.get().library.byId.get(ids[0])
+      toast({
+        message: ids.length > 1
+          ? `已加入队列并播放：${first?.title || ''} 等 ${ids.length} 首`
+          : `正在播放：${first?.title || ''}`,
+        type: 'success'
+      })
+    },
+
     setTheme (theme) {
       actions.setSetting({ theme })
     },
@@ -332,12 +347,14 @@ async function main () {
   const playerBar = createPlayerBar({ store, bus, player, artwork, actions })
   const nowPlayingPanel = createNowPlayingPanel({ store, bus, player, artwork, host, actions })
   const queuePanel = createQueuePanel({ store, bus, player, artwork, actions })
+  const dropZone = createDropZone({ bus, actions })
 
   dom.titlebar.replaceWith(titlebar.element)
   dom.sidebar.replaceWith(sidebar.element)
   dom.content.append(libraryView.element, browseView.element, mediaWall.element, settingsView.element, queuePanel.element)
   dom.playerBar.replaceWith(playerBar.element)
   dom.nowPlaying.replaceWith(nowPlayingPanel.element)
+  document.getElementById('layer-root').appendChild(dropZone.element)
 
   // 视图切换：歌曲列表 / 专辑 / 艺人 / 媒体墙 / 设置
   // 注意：几个视图可能共用同一个容器（专辑与艺人共用 browseView），
@@ -467,6 +484,22 @@ async function main () {
         }
       }).catch((err) => console.error('[app] 刷新资料库失败', err))
     }
+  })
+
+  // 目录监听：音乐文件夹有变化时主进程会自动重扫，这里给个提示
+  remote.library.onWatchUpdate((payload) => {
+    const delta = payload.delta || 0
+    const detail = delta > 0 ? `新增 ${delta} 首` : delta < 0 ? `移除 ${-delta} 首` : '文件信息已更新'
+    toast({
+      message: `检测到音乐目录变化，资料库已自动刷新（${detail}）`,
+      type: 'info',
+      icon: 'refresh',
+      duration: 3200
+    })
+  })
+
+  remote.library.onWatchError((payload) => {
+    console.warn('[app] 目录监听异常:', payload)
   })
 
   /* ------------------------------------------------------------------ */

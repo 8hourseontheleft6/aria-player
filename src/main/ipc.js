@@ -6,6 +6,8 @@ const { ipcMain, BrowserWindow, app, globalShortcut, nativeTheme, shell } = requ
 const EVENT_CHANNELS = [
   'settings:changed',
   'library:scan-progress',
+  'library:watch-update',
+  'library:watch-error',
   'window:maximized',
   'media:command',
   'theme:changed'
@@ -76,6 +78,7 @@ function registerIpc (ctx) {
     'library:remove-folder': (_event, dir) => library.removeFolder(dir),
     'library:pick-folders': () => library.pickFolders(),
     'library:artwork': (_event, trackId) => library.getArtwork(trackId),
+    'library:handle-drop': (_event, paths, options) => library.resolveDrop(paths, options || {}),
     'library:reveal': (_event, filePath) => {
       if (typeof filePath === 'string' && filePath) library.revealInFolder(filePath)
       return true
@@ -123,7 +126,9 @@ function registerIpc (ctx) {
   /* ---------- 主进程事件 -> 渲染层 ---------- */
   const forwarders = [
     ['settings:changed', (payload) => broadcast('settings:changed', payload)],
-    ['library:scan-progress', (payload) => broadcast('library:scan-progress', payload)]
+    ['library:scan-progress', (payload) => broadcast('library:scan-progress', payload)],
+    ['library:watch-update', (payload) => broadcast('library:watch-update', payload)],
+    ['library:watch-error', (payload) => broadcast('library:watch-error', payload)]
   ]
   for (const [event, forward] of forwarders) ctx.on(event, forward)
 

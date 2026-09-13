@@ -8,6 +8,7 @@ const { createSettingsService } = require('./services/settings')
 const { createLibraryService } = require('./services/library')
 const { createLyricsService } = require('./services/lyrics')
 const { createTrayService } = require('./services/tray')
+const { createWatcherService } = require('./services/watcher')
 const { registerIpc } = require('./ipc')
 const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = require('./window')
 
@@ -44,6 +45,7 @@ async function bootstrap () {
   ctx.define('library', createLibraryService)
   ctx.define('lyrics', createLyricsService)
   ctx.define('tray', createTrayService)
+  ctx.define('watcher', createWatcherService)
 
   const settings = ctx.get('settings')
   await settings.init()
@@ -87,10 +89,22 @@ async function bootstrap () {
     if (!win.isDestroyed()) win.webContents.send('media:command', command)
   })
 
-  ctx.on('settings:changed', () => tray.sync())
-
   const library = ctx.get('library')
+  const watcher = ctx.get('watcher')
   await library.init()
+
+  /** 监听目录 / 开关的指纹，只有它变了才需要重建 watcher */
+  let watchSignature = `${settings.get().watchFolders !== false}|${library.getFolders().join('\u0000')}`
+  const watchResult = watcher.start()
+
+  ctx.on('settings:changed', () => {
+    tray.sync()
+    const signature = `${settings.get().watchFolders !== false}|${library.getFolders().join('\u0000')}`
+    if (signature !== watchSignature) {
+      watchSignature = signature
+      watcher.start()
+    }
+  })
 
   win.webContents.once('did-finish-load', () => {
     // 启动后台增量刷新：文件没变的话只做 stat，很快
@@ -159,4 +173,7 @@ async function bootstrap () {
   })
 
   console.log(`[main] Aria 已启动 (Electron ${process.versions.electron}, 用户数据目录: ${app.getPath('userData')})`)
+  if (watchResult.watching) {
+    console.log(`[main] 目录监听已开启（${watchResult.watching} 个根目录）`)
+  }
 }

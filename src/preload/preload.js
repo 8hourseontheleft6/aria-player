@@ -5,12 +5,14 @@
  * 只暴露白名单方法，渲染层拿不到 Node 能力。
  */
 
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 /** 主 -> 渲染 的频道白名单，必须与 src/main/ipc.js 保持一致 */
 const EVENT_CHANNELS = new Set([
   'settings:changed',
   'library:scan-progress',
+  'library:watch-update',
+  'library:watch-error',
   'window:maximized',
   'media:command',
   'theme:changed'
@@ -51,7 +53,10 @@ contextBridge.exposeInMainWorld('aria', {
     pickFolders: () => ipcRenderer.invoke('library:pick-folders'),
     artwork: (trackId) => ipcRenderer.invoke('library:artwork', trackId),
     reveal: (filePath) => ipcRenderer.invoke('library:reveal', filePath),
-    onScanProgress: (handler) => on('library:scan-progress', handler)
+    handleDrop: (paths, options) => ipcRenderer.invoke('library:handle-drop', paths, options),
+    onScanProgress: (handler) => on('library:scan-progress', handler),
+    onWatchUpdate: (handler) => on('library:watch-update', handler),
+    onWatchError: (handler) => on('library:watch-error', handler)
   },
 
   lyrics: {
@@ -87,5 +92,24 @@ contextBridge.exposeInMainWorld('aria', {
 
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:open-external', url)
+  },
+
+  /**
+   * 把拖进窗口的 File 对象解析成本地路径。
+   * Electron 32 起 File.path 被移除，必须经由 webUtils。
+   */
+  paths: {
+    fromFiles: (files) => {
+      const out = []
+      for (const file of files || []) {
+        try {
+          const path = webUtils.getPathForFile(file)
+          if (path) out.push(path)
+        } catch {
+          // 非真实文件（例如从网页拖来的内存 Blob）拿不到路径，跳过
+        }
+      }
+      return out
+    }
   }
 })

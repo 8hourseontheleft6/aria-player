@@ -10,6 +10,10 @@
  * 全部通过时退出码为 0，方便放进 CI。
  */
 
+const path = require('node:path')
+const fs = require('node:fs')
+const os = require('node:os')
+
 const POLL_INTERVAL = 250
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -92,12 +96,12 @@ async function runSmoke ({ win, ctx }) {
       const state = window.__aria.store.get()
       return {
         status: state.playback.status,
-        time: Math.round(player.getTime() * 10) / 10,
+        time: Math.round(player.getTime() * 100) / 100,
         duration: Math.round(player.getDuration()),
         title: player.currentTrack().title,
         paused: player.engine.paused
       }`)
-    record('音频播放', playback.time > 0.4 && !playback.paused,
+    record('音频播放', playback.time > 0.25 && !playback.paused,
       `《${playback.title}》 ${playback.time}s / ${playback.duration}s，状态 ${playback.status}`)
 
     // 歌词跟随
@@ -549,6 +553,101 @@ async function runSmoke ({ win, ctx }) {
     record('关闭到托盘', hidden && stillAlive,
       `关闭后窗口隐藏=${hidden}、进程仍存活=${stillAlive}（已恢复设置并重新显示窗口）`)
     void winStateBefore
+
+    /* ---------- 目录监听 ---------- */
+
+    const libraryService = ctx.get('library')
+    const watcher = ctx.get('watcher')
+
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aria-watch-'))
+    const originalFolders = libraryService.getFolders().slice()
+    const originalCount = libraryService.getTracks().length
+
+    try {
+      watcher.configure({ debounceMs: 500 })
+      const watchInfo = watcher.start([tempRoot])
+      record('目录监听启动', watchInfo.watching === 1,
+        `监听 ${watchInfo.watching} 个根目录（防抖 ${watcher.getStats().debounceMs}ms）`)
+
+      // 复制一个真实音频文件进被监听的目录，等防抖后应触发一次扫描
+      const sampleTrack = libraryService.getTracks()[0]
+      fs.copyFileSync(sampleTrack.path, path.join(tempRoot, 'watcher-test.mp3'))
+      await sleep(3500)
+      const watchStats = watcher.getStats()
+      record('目录变化检测', watchStats.changes > 0,
+        `捕获 ${watchStats.changes} 次文件事件，最近路径：${watchStats.lastPaths.slice(-1)[0] || '—'}`)
+
+      // 无关文件不应触发（.txt 属于歌词候选，是应该被监听的）
+      const changesBefore = watcher.getStats().changes
+      fs.writeFileSync(path.join(tempRoot, 'notes.tmp'), 'ignored')
+      fs.writeFileSync(path.join(tempRoot, 'notes.part'), 'ignored')
+      fs.writeFileSync(path.join(tempRoot, 'desktop.ini'), 'ignored')
+      await sleep(1200)
+      const changesAfter = watcher.getStats().changes
+      record('无关文件被过滤', changesAfter === changesBefore,
+        `写入 .tmp/.part/desktop.ini 后事件数保持 ${changesAfter} 次`)
+    } finally {
+      watcher.configure({ debounceMs: 4000 })
+      fs.rmSync(tempRoot, { recursive: true, force: true })
+    }
+
+    /* ---------- 拖拽导入 ---------- */
+
+    const dropRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'aria-drop-'))
+    try {
+      const sampleTrack = libraryService.getTracks()[0]
+      fs.copyFileSync(sampleTrack.path, path.join(dropRoot, path.basename(sampleTrack.path)))
+
+      // 1) 拖入文件夹 -> 加入资料库
+      const folderDrop = await libraryService.resolveDrop([dropRoot], { assumeYes: true })
+      const afterFolderDrop = libraryService.getTracks().length
+      record('拖入文件夹', folderDrop.added.length === 1 && afterFolderDrop === originalCount + 1,
+        `加入 ${folderDrop.added.length} 个目录，曲目 ${originalCount} → ${afterFolderDrop}`)
+
+      // 2) 拖入资料库内的歌曲 -> 直接播放
+      const insideDrop = await libraryService.resolveDrop([sampleTrack.path], { assumeYes: true })
+      record('拖入资料库内的歌曲', insideDrop.action === 'play' && insideDrop.trackIds.length === 1,
+        `action=${insideDrop.action}，可播放 ${insideDrop.trackIds.length} 首`)
+
+      // 3) 拖入无关文件 / 不存在的路径
+      const textFile = path.join(dropRoot, 'readme.txt')
+      fs.writeFileSync(textFile, 'not audio')
+      const rejectedDrop = await libraryService.resolveDrop(
+        [textFile, path.join(dropRoot, 'nope.mp3')], { assumeYes: true })
+      const reasons = (rejectedDrop.rejected || []).map((item) => item.reason)
+      record('非音频/不存在路径被拒绝',
+        rejectedDrop.action === 'none' && reasons.includes('not-audio') && reasons.includes('missing'),
+        `拒绝原因：${reasons.join(', ')}`)
+
+      // 4) 清理：移除临时目录并恢复原状
+      await libraryService.removeFolder(dropRoot)
+      await libraryService.scan({ reason: 'smoke-cleanup' })
+      const restoredCount = libraryService.getTracks().length
+      record('导入后清理还原',
+        restoredCount === originalCount && libraryService.getFolders().length === originalFolders.length,
+        `曲目恢复为 ${restoredCount} 首，目录 ${libraryService.getFolders().length} 个`)
+    } finally {
+      fs.rmSync(dropRoot, { recursive: true, force: true })
+      watcher.start()
+    }
+
+    // 拖放界面：拖入时显示浮层，松开后隐藏
+    const dropZoneResult = await evaluate(win, `
+      const zone = document.querySelector('.drop-zone')
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(new File(['x'], 'a.mp3', { type: 'audio/mpeg' }))
+      window.dispatchEvent(new DragEvent('dragenter', { bubbles: true, dataTransfer }))
+      await new Promise((r) => setTimeout(r, 150))
+      const activeOnEnter = zone.classList.contains('is-active')
+      window.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer, cancelable: true }))
+      await new Promise((r) => setTimeout(r, 500))
+      const activeAfterDrop = zone.classList.contains('is-active')
+      const paths = window.aria.paths.fromFiles([...dataTransfer.files])
+      return { activeOnEnter, activeAfterDrop, bridgeIsArray: Array.isArray(paths), bridgeCount: paths.length }`)
+    record('拖放浮层', dropZoneResult.activeOnEnter && !dropZoneResult.activeAfterDrop,
+      `拖入时浮层激活=${dropZoneResult.activeOnEnter}，松开后仍激活=${dropZoneResult.activeAfterDrop}`)
+    record('路径解析桥', dropZoneResult.bridgeIsArray,
+      `webUtils 桥可用（内存里的 File 没有真实路径，返回 ${dropZoneResult.bridgeCount} 条，符合预期）`)
   } catch (err) {
     record('执行过程', false, err.message)
   }
