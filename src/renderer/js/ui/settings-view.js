@@ -197,6 +197,11 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         title: '减少动画',
         sub: '关闭所有过渡与弹簧动画',
         control: switchControl(Boolean(settings.reduceMotion), (value) => actions.setSetting({ reduceMotion: value }))
+      }),
+      row({
+        title: '显示帧率',
+        sub: '在右下角显示实时帧率与帧耗时（最近两秒平均 · 最差）。拖动媒体墙、开合视图时可以直观看到数字，方便确认卡顿是否真的消失',
+        control: switchControl(settings.showFps === true, (value) => actions.setSetting({ showFps: value }))
       })
     ]))
 

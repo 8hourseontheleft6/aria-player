@@ -144,6 +144,19 @@ async function bootstrap () {
     })
   }
 
+  // 帧率诊断模式：分档测量 rAF 间隔（npm run perf）
+  if (process.argv.includes('--perf')) {
+    const { runPerf } = require('./perf')
+    win.webContents.once('did-finish-load', () => {
+      runPerf({ win, ctx })
+        .then(() => app.exit(0))
+        .catch((err) => {
+          console.error('[perf] 执行异常:', err)
+          app.exit(1)
+        })
+    })
+  }
+
   // 视觉审计模式：计算样式 + 几何 + 位图统计（npm run audit）
   if (process.argv.includes('--audit')) {
     const { runVisualAudit } = require('./visual-audit')

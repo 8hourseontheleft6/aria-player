@@ -737,6 +737,66 @@ async function runSmoke ({ win, ctx }) {
       !pan.fitState.horizontal && pan.canvasState.horizontal && pan.fitState.layout === 'fit' && pan.canvasState.layout === 'canvas',
       `适应宽度：横向不可拖（${pan.fitState.bounds.width}≈视口 ${pan.fitState.bounds.viewWidth}）；自由画布：横向可拖（${pan.canvasState.bounds.width} vs ${pan.canvasState.bounds.viewWidth}）`)
 
+    /* ---------- 窗口取景框：拖到任何位置，内容都必须在、且不错位 ----------
+     *
+     * 媒体墙为了帧率做了「视口大小的窗口负责平移、网格反向滚动」这套结构
+     * （见 browse.css 顶部注释）。它有两个容易写错的地方，所以专门盯着测：
+     *   · 两层 transform 没有严丝合缝地合成 pan → 整墙会整体错位；
+     *   · 窗口取景框没有跟着平移滚动 → 拖到别处就只剩空白（这个 bug 真的出现过）。
+     */
+    const windowCheck = await evaluate(win, `
+      const wall = window.__aria.views.mediaWall
+      const base = wall.debugState()
+      const points = [
+        [0, 0],
+        [Math.round(base.bounds.minX / 2), Math.round(base.bounds.minY / 2)],
+        [base.bounds.minX, base.bounds.minY],
+        [Math.round(base.bounds.minX * 0.83), Math.round(base.bounds.minY * 0.17)],
+        [Math.round(base.bounds.minX * 0.17), Math.round(base.bounds.minY * 0.83)]
+      ]
+      const stops = []
+      for (const [x, y] of points) {
+        wall.debugApplyPan(x, y)
+        await new Promise((r) => requestAnimationFrame(r))
+        const verify = wall.debugVerifyWindow()
+        const state = wall.debugState()
+        stops.push({
+          pan: state.pan,
+          positionError: verify.positionError,
+          visible: verify.visible,
+          covered: verify.covered,
+          coverage: verify.coverage,
+          originInRange: verify.originInRange,
+          originOffset: verify.originOffset,
+          windowBox: verify.windowBox,
+          planeScroll: state.planeScroll,
+          plane: { width: Math.round(state.bounds.width), height: Math.round(state.bounds.height) }
+        })
+      }
+      wall.debugApplyPan(0, 0)
+      await new Promise((r) => requestAnimationFrame(r))
+      return { stops }`)
+
+    const windowStops = windowCheck.stops
+    const windowError = Math.max(...windowStops.map((stop) => stop.positionError))
+    const windowVisible = Math.min(...windowStops.map((stop) => stop.visible))
+    const windowCoverage = Math.min(...windowStops.flatMap((stop) => Object.values(stop.coverage)))
+    const windowOriginOk = windowStops.every((stop) => stop.originInRange)
+    record('平移后窗口取景框不错位',
+      windowError <= 0.5 && windowVisible > 20 && windowCoverage >= -0.5 &&
+      windowOriginOk && windowStops.every((stop) => stop.covered),
+      `${windowStops.length} 个停靠点（含四角）：最大坐标误差 ${windowError}px，最少可见格子 ${windowVisible} 个，` +
+      `窗口盒 ${windowStops[0].windowBox.width}×${windowStops[0].windowBox.height} 覆盖视口余量 ${windowCoverage}px，` +
+      `原点偏移 ${windowStops.map((stop) => `${stop.originOffset.x},${stop.originOffset.y}`).join(' / ')}（都应在 0~步长内）`)
+    const planeDrift = Math.max(...windowStops.flatMap((stop) => [
+      Math.abs(stop.planeScroll.width - stop.plane.width),
+      Math.abs(stop.planeScroll.height - stop.plane.height)
+    ]))
+    record('平面尺寸与网格内容一致',
+      planeDrift <= 8,
+      `按列数算出的平面 ${windowStops[0].plane.width}×${windowStops[0].plane.height}，` +
+      `网格实际内容范围 ${windowStops[0].planeScroll.width}×${windowStops[0].planeScroll.height}（相差 ${planeDrift}px）`)
+
     /* ---------- 平移的每帧开销（曾经每帧强制两次重排，导致一卡一卡） ---------- */
 
     const perfCheck = await evaluate(win, `
@@ -791,14 +851,15 @@ async function runSmoke ({ win, ctx }) {
 
       // 对照微基准：如果每帧照旧读 DOM（offsetWidth / getBoundingClientRect），代价是多少。
       // 这不是被测代码，只是用来量化「缓存几何」省下了什么。
-      const grid = document.querySelector('.media-wall')
+      // 注意写的是 .wall-window 的 transform：它每帧都会被 writePan 重写，不会留下脏状态。
+      const stage = document.querySelector('.wall-window')
       const minimap = document.querySelector('.wall-minimap')
       const domRounds = 100
       const domStarted = performance.now()
       for (let i = 0; i < domRounds; i++) {
-        void grid.offsetWidth
+        void stage.offsetWidth
         void minimap.getBoundingClientRect()
-        grid.style.transform = 'translate3d(' + (-i) + 'px,' + (-i) + 'px,0)'
+        stage.style.transform = 'translate3d(' + (-i) + 'px,' + (-i) + 'px,0)'
       }
       const domElapsed = performance.now() - domStarted
 
@@ -817,6 +878,29 @@ async function runSmoke ({ win, ctx }) {
     record('拖动不额外拖慢帧率',
       perfCheck.dragAverage < Math.max(34, perfCheck.idleAverage * 1.8),
       `空载帧间隔 ${perfCheck.idleAverage}ms，拖动时 ${perfCheck.dragAverage}ms（最大 ${perfCheck.dragMax}ms）；注：本环境 rAF 本身被节流到约 ${Math.round(1000 / perfCheck.idleAverage)}fps，故只看相对值`)
+
+    /* ---------- 帧率浮层：让用户自己量，而不是靠感觉 ---------- */
+
+    const fpsCheck = await evaluate(win, `
+      const overlay = document.querySelector('.fps-overlay')
+      if (!overlay) return { missing: true }
+      const before = { hidden: overlay.hidden, text: overlay.textContent.trim() }
+      window.__aria.actions.setSetting({ showFps: true })
+      await new Promise((r) => setTimeout(r, 1100))
+      const on = { hidden: overlay.hidden, text: overlay.textContent.trim() }
+      window.__aria.actions.setSetting({ showFps: false })
+      await new Promise((r) => setTimeout(r, 400))
+      const off = { hidden: overlay.hidden }
+      window.__aria.actions.setSetting({ showFps: false })
+      return { before, on, off }`)
+    const fpsValue = Number((fpsCheck.on?.text.match(/(\d+) fps/) || [])[1])
+    record('帧率浮层可开关',
+      !fpsCheck.missing && fpsCheck.before.hidden === true && fpsCheck.on.hidden === false &&
+      fpsCheck.off.hidden === true && Number.isFinite(fpsValue) && fpsValue > 0,
+      fpsCheck.missing
+        ? '未找到 .fps-overlay'
+        : `默认隐藏（"${fpsCheck.before.text}"）→ 打开后显示 "${fpsCheck.on.text}" → 关闭后再次隐藏`)
+
 
     /* ---------- 首屏封面加载：并发节流 + 磁盘缓存 ---------- */
 

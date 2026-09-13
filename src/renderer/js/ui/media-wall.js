@@ -210,9 +210,18 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   on(hero, 'click', (event) => event.stopPropagation())
   on(hero, 'dblclick', (event) => event.stopPropagation())
 
-  /* ---------------- 平面与视口 ---------------- */
+  /* ---------------- 平面、窗口与视口 ---------------- */
+  /*
+   * 三层结构（详见 browse.css 顶部注释）：
+   *   viewport   视口大小、overflow:hidden —— 真正裁剪的地方
+   *     window   视口 + 一个窗口步长，被 translate(pan + origin) 平移
+   *       grid   整个平面的网格，用 translate(-origin) 在窗口里滚动
+   * 被平移的窗口只有视口那么大，栅格化范围因此被限制住；
+   * 而网格仍是完整的平面，拖到任何位置都有内容。
+   */
   const grid = h('div', { class: 'media-wall' })
-  const viewport = h('div', { class: 'wall-viewport' }, grid)
+  const wallWindow = h('div', { class: 'wall-window' }, grid)
+  const viewport = h('div', { class: 'wall-viewport' }, wallWindow)
 
   // 右下角位置指示器：内容比视口大时才出现
   const minimapViewport = h('div', { class: 'wall-minimap__viewport' })
@@ -227,6 +236,18 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   const pan = { x: 0, y: 0 }      // 已应用的位移
   const target = { x: 0, y: 0 }   // 目标位移：拖动 / 滚轮 / 惯性都往这里写
   const velocity = { x: 0, y: 0 }
+
+  /**
+   * 窗口原点：网格在窗口内的偏移量（取窗口步长的整数倍）。
+   *
+   * 平移一个「视口大小」的窗口，网格再用 -origin 在窗口里反向滚动，
+   * 两者相加正好等于 pan，所以屏幕位置依旧是 平面坐标 + pan，一格都不会错位。
+   * origin 只取步长整数倍，因此拖动过程中绝大多数帧只需要写一次 transform。
+   */
+  const windowOrigin = { x: 0, y: 0 }
+  let windowStep = 320
+  let windowStepOverride = 0
+  let windowPainted = ''
 
   /**
    * 几何缓存。
@@ -258,10 +279,26 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
 
   /** 只在布局变化时调用：这里会读 DOM，属于少数几次可接受的强制重排 */
   function measureGeometry () {
-    geometry.planeWidth = grid.offsetWidth
-    geometry.planeHeight = grid.offsetHeight
     geometry.viewWidth = viewport.clientWidth
     geometry.viewHeight = viewport.clientHeight
+    /*
+     * 平面尺寸不能再从 grid.offsetWidth 读 —— 网格的盒子现在被收成了窗口大小
+     * （见 browse.css 的说明），它的轨道仍然横跨整面墙。所以宽度直接按
+     * 「列数 × 格子 + 间距 + 内边距」算，高度取最后一张格子的位置加尺寸：
+     * 网格是顺序自动填充（没有 dense），最后一张必然落在最后一行。
+     */
+    const last = grid.lastElementChild
+    geometry.planeWidth = PAD * 2 + columns * tileSize + Math.max(0, columns - 1) * GAP
+    // offsetTop 是相对网格内边距的边缘算的（已经含了上内边距），所以这里只需再补一个下内边距
+    geometry.planeHeight = last
+      ? last.offsetTop + last.offsetHeight + PAD
+      : Math.max(1, geometry.viewHeight)
+
+    // 窗口比视口大出一个步长：可见格子在窗口内的偏移量落在
+    // [0, view + step) 区间内，所以它们一定在窗口盒子里，不会被自己裁掉。
+    // （读 DOM 已经读完，这里再写样式不会有额外强制重排。）
+    wallWindow.style.width = `${Math.max(1, geometry.viewWidth + windowStep)}px`
+    wallWindow.style.height = `${Math.max(1, geometry.viewHeight + windowStep)}px`
 
     const scale = Math.min(
       MINIMAP_MAX.width / Math.max(1, geometry.planeWidth),
@@ -305,9 +342,25 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     return value
   }
 
-  /** 只写样式、不算边界（调用方保证 pan 已经合法） */
+  /**
+   * 只写样式、不算边界（调用方保证 pan 已经合法）。
+   *
+   * 每帧只写窗口的 transform —— 那是唯一被合成器搬运的元素，而且只有视口大小。
+   * 网格的 transform 只在「跨过一格步长」时才需要重写（拖动 300px 才一次）。
+   */
   function writePan () {
-    grid.style.transform = `translate3d(${pan.x}px, ${pan.y}px, 0)`
+    const step = Math.max(1, windowStep)
+    const originX = Math.floor(-pan.x / step) * step
+    const originY = Math.floor(-pan.y / step) * step
+    // 窗口位移 + 网格反向位移 = pan，屏幕位置始终等于 平面坐标 + pan
+    wallWindow.style.transform = `translate3d(${pan.x + originX}px, ${pan.y + originY}px, 0)`
+    const key = `${originX}|${originY}`
+    if (key !== windowPainted) {
+      windowPainted = key
+      windowOrigin.x = originX
+      windowOrigin.y = originY
+      grid.style.transform = `translate3d(${-originX}px, ${-originY}px, 0)`
+    }
     paintMinimap()
   }
 
@@ -633,10 +686,17 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     const next = computeLayout(albumList.length)
     columns = next.columns
     tileSize = next.size
+    /*
+     * 窗口步长：窗口原点只能取步长的整数倍，而窗口盒子又必须能装下「视口 + 一个步长」，
+     * 所以步长越小，每帧要栅格化的层就越小（代价 ∝ 层面积），但网格 transform
+     * 的改写就越频繁。实测这一步比想象中值钱，见 perf 输出里的步长对照。
+     */
+    windowStep = windowStepOverride > 0 ? windowStepOverride : Math.max(64, Math.round(tileSize / 2))
     grid.style.setProperty('--wall-columns', String(columns))
     grid.style.setProperty('--wall-size', `${tileSize}px`)
-    // 平面尺寸变了，几何缓存必须跟着刷新（这里的一次强制重排是必要开销）
+    // 平面尺寸 / 窗口尺寸都变了，几何缓存必须跟着刷新（这里的一次强制重排是必要开销）
     measureGeometry()
+    windowPainted = ''
   }
 
   /** 布局 / 尺寸变化后重新收敛平移状态（reset=true 时回到平面左上角） */
@@ -702,11 +762,13 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   function measure () {
     const map = new Map()
     const origin = grid.getBoundingClientRect()
-    const viewportBottom = window.innerHeight + 500
+    // 只有「墙视口附近」的格子值得做 FLIP；其余的在窗口裁剪之外，看不见也动不到
+    const box = viewport.getBoundingClientRect()
     let near = 0
     for (const child of grid.children) {
       const rect = child.getBoundingClientRect()
-      const visible = rect.bottom > -200 && rect.top < viewportBottom
+      const visible = rect.bottom > box.top - 200 && rect.top < box.bottom + 200 &&
+        rect.right > box.left - 200 && rect.left < box.right + 200
       map.set(child, {
         left: rect.left - origin.left,
         top: rect.top - origin.top,
@@ -871,6 +933,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
       // 当前专辑不在墙上（例如被文件夹 / 搜索过滤掉了），当作没有聚焦块
       featuredKey = null
     }
+    // 聚焦块占 2×2，会改变总槽位数 → 平面尺寸与位置指示器都要跟着刷新
+    measureGeometry()
   }
 
   /** 让聚焦块跟上当前播放的专辑 */
@@ -896,6 +960,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
    * 定位往往紧跟在一次 FLIP 之后，而 getBoundingClientRect 会把正在跑的
    * transform 算进去，量到的是动画中间的位置，算出来的目标就完全不对。
    * offsetLeft/offsetTop 是布局值，不受 transform 影响。
+   *
+   * 但布局值和屏幕位置之间还差一个窗口原点：格子的屏幕位置 =
+   * 视口 + pan + windowOrigin + offsetLeft（见 .wall-window 那套结构），
+   * 所以换算目标位移时必须把 windowOrigin 减掉，否则会差 0~一个步长的偏差。
    */
   function focusFeatured ({ animate = true } = {}) {
     if (!featuredKey) return false
@@ -908,8 +976,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     if (!width || !height) return false
 
     const limit = bounds()
-    const nextX = clamp(limit.viewWidth / 2 - node.offsetLeft - width / 2, limit.minX, limit.maxX)
-    const nextY = clamp(limit.viewHeight / 2 - node.offsetTop - height / 2, limit.minY, limit.maxY)
+    const nextX = clamp(limit.viewWidth / 2 - windowOrigin.x - node.offsetLeft - width / 2, limit.minX, limit.maxX)
+    const nextY = clamp(limit.viewHeight / 2 - windowOrigin.y - node.offsetTop - height / 2, limit.minY, limit.maxY)
 
     if (Math.abs(nextX - pan.x) < 1 && Math.abs(nextY - pan.y) < 1) return true
     if (animate && !reduceMotion()) {
@@ -1053,6 +1121,13 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         tileSize: Math.round(tileSize),
         layout,
         pan: { x: Math.round(pan.x), y: Math.round(pan.y) },
+        // 窗口原点与步长：可见的平面范围由 pan 决定，窗口只是绘制范围的优化，
+        // 它必须始终覆盖可见范围（窗口盒 = 视口 + 一个步长）
+        windowOrigin: { x: windowOrigin.x, y: windowOrigin.y },
+        windowStep,
+        windowBox: { width: Math.round(wallWindow.offsetWidth), height: Math.round(wallWindow.offsetHeight) },
+        // 平面尺寸是算出来的（网格盒子已经收成窗口大小），这里读一次 DOM 内容范围做交叉验证
+        planeScroll: { width: grid.scrollWidth, height: grid.scrollHeight },
         bounds: limit,
         horizontal: limit.minX < -1,
         vertical: limit.minY < -1,
@@ -1062,6 +1137,63 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         featuredOffset,
         tileCenterInViewport,
         viewportCenter: { x: Math.round(limit.viewWidth / 2), y: Math.round(limit.viewHeight / 2) }
+      }
+    },
+    /**
+     * 自检用：改窗口步长（0 = 按格子尺寸自动），用来给「拖动帧率」做 A/B。
+     * 步长会同时改窗口盒子大小，所以必须走 applyLayout + flushPan 这一条正路。
+     */
+    debugSetWindowStep: (value) => {
+      windowStepOverride = Math.max(0, Math.round(Number(value) || 0))
+      applyLayout()
+      flushPan(false)
+      return { step: windowStep, origin: { x: windowOrigin.x, y: windowOrigin.y } }
+    },
+    /**
+     * 自检用：验证「窗口 + 网格反向位移」这套取景框是否严丝合缝。
+     *
+     * 三个不变量：
+     *  1. 格子的实际屏幕位置 === 网格左边缘 + 它的布局偏移
+     *     （两层 transform 恰好合成 pan，平面坐标没有被窗口原点污染）；
+     *  2. 窗口原点偏移量必须落在 [0, 步长] 之内 —— 超出就说明吸附算错了；
+     *  3. 窗口盒子必须完整覆盖视口 —— 否则被窗口裁掉的就是用户看得见的内容，
+     *     表现正是「拖到某处突然一块空白」。
+     *     （贴在窗口左/上边缘的格子本身被裁掉是正常的：那部分本来就在视口外。）
+     */
+    debugVerifyWindow: () => {
+      const box = viewport.getBoundingClientRect()
+      const winRect = wallWindow.getBoundingClientRect()
+      const gridRect = grid.getBoundingClientRect()
+      let worst = 0
+      let visible = 0
+      for (const tile of tiles.values()) {
+        const rect = tile.element.getBoundingClientRect()
+        worst = Math.max(
+          worst,
+          Math.abs(rect.left - (gridRect.left + tile.element.offsetLeft)),
+          Math.abs(rect.top - (gridRect.top + tile.element.offsetTop))
+        )
+        if (rect.right > box.left && rect.left < box.right &&
+          rect.bottom > box.top && rect.top < box.bottom) visible++
+      }
+      const round = (value) => Math.round(value * 10) / 10
+      const coverage = {
+        left: round(box.left - winRect.left),
+        top: round(box.top - winRect.top),
+        right: round(winRect.right - box.right),
+        bottom: round(winRect.bottom - box.bottom)
+      }
+      const originOffset = { x: round(-pan.x - windowOrigin.x), y: round(-pan.y - windowOrigin.y) }
+      return {
+        positionError: round(worst),
+        visible,
+        covered: coverage.left >= -0.5 && coverage.top >= -0.5 &&
+          coverage.right >= -0.5 && coverage.bottom >= -0.5,
+        coverage,
+        originInRange: originOffset.x >= -0.5 && originOffset.x <= windowStep + 0.5 &&
+          originOffset.y >= -0.5 && originOffset.y <= windowStep + 0.5,
+        originOffset,
+        windowBox: { width: wallWindow.offsetWidth, height: wallWindow.offsetHeight }
       }
     },
     /**

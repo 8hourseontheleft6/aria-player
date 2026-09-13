@@ -14,6 +14,7 @@
     "check": "node scripts/check-imports.js && node scripts/check-injected.js && node --check src/main/main.js",
     "shots": "electron . --shots",
     "audit": "electron . --audit",
+    "perf": "electron . --perf",
     "probe": "node scripts/probe-library.js"
   },
   "dependencies": {

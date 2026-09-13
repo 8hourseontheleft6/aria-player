@@ -95,6 +95,7 @@ export function initialState () {
       lyricOffsetMs: 0,
       lyricFontScale: 1,
       showRowArtwork: true,
+      showFps: false,
       globalMediaKeys: true,
       showRemainingTime: false
     },

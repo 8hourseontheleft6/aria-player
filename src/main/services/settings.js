@@ -21,6 +21,7 @@ const DEFAULTS = {
   globalMediaKeys: true,
   showRemainingTime: false,
   reduceMotion: false,
+  showFps: false,
   wallLayout: 'canvas',
   prewarmArtwork: true,
   trayEnabled: true,

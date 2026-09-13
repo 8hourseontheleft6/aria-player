@@ -31,6 +31,32 @@ async function waitFor (win, condition, { timeout = 120000, label = '条件' } =
   throw new Error(`等待超时：${label}`)
 }
 
+/**
+ * 等媒体墙把封面真正加载完再截图。
+ *
+ * 关键是「连续 1s 出图数量不再增长」，而不是「懒加载队列空了」：
+ * 移动整面墙之后，新露出来的格子要等 IntersectionObserver 下一帧回调才会入队，
+ * 所以刚平移完的那一刻队列本来就是空的，用队列判断会立刻返回，
+ * 截出来的就是一整面浅灰占位图（曾经真的截出过一张几乎全白的「媒体墙」）。
+ */
+const WAIT_COVERS = `
+  {
+    let lastCount = -1
+    let stableSince = performance.now()
+    const deadline = performance.now() + 15000
+    while (performance.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 400))
+      const count = document.querySelectorAll('.wall-tile img[src]').length
+      if (count !== lastCount) {
+        lastCount = count
+        stableSince = performance.now()
+      } else if (performance.now() - stableSince > 1000) {
+        break
+      }
+    }
+    await new Promise((r) => setTimeout(r, 300))
+  }`
+
 async function runScreenshots ({ win }) {
   await fsp.mkdir(OUTPUT_DIR, { recursive: true })
   await waitFor(win, 'window.__aria && window.__aria.store.get().library.loaded === true', { label: '资料库' })
@@ -145,8 +171,9 @@ async function runScreenshots ({ win }) {
         viewport.dispatchEvent(new WheelEvent('wheel', {
           bubbles: true, cancelable: true, deltaX: 700, deltaY: 900
         }))
+        ${WAIT_COVERS}
         return true`)
-      await sleep(900)
+      await sleep(600)
     }],
     ['15-wall-large.png', '媒体墙（大尺寸 + 回到起点）', async () => {
       await evaluate(win, `
@@ -159,8 +186,9 @@ async function runScreenshots ({ win }) {
         viewport.dispatchEvent(new WheelEvent('wheel', {
           bubbles: true, cancelable: true, deltaX: -4000, deltaY: -4000
         }))
+        ${WAIT_COVERS}
         return true`)
-      await sleep(1200)
+      await sleep(600)
     }]
   ]
 

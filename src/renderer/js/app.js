@@ -37,6 +37,7 @@ import { createTrackMenu } from './ui/track-menu.js'
 import { createDropZone } from './ui/drop-zone.js'
 import { createLazyArtwork } from './ui/artwork-node.js'
 import { toast, closeAllLayers } from './ui/overlay.js'
+import { createFpsOverlay } from './ui/fps-overlay.js'
 
 import { BUILTIN_PLUGINS } from './plugins/index.js'
 
@@ -368,6 +369,7 @@ async function main () {
   const nowPlayingPanel = createNowPlayingPanel({ store, bus, player, artwork, host, actions })
   const queuePanel = createQueuePanel({ store, bus, player, artwork, actions })
   const dropZone = createDropZone({ bus, actions })
+  const fpsOverlay = createFpsOverlay({ store })
 
   dom.titlebar.replaceWith(titlebar.element)
   dom.sidebar.replaceWith(sidebar.element)
@@ -375,6 +377,7 @@ async function main () {
   dom.playerBar.replaceWith(playerBar.element)
   dom.nowPlaying.replaceWith(nowPlayingPanel.element)
   document.getElementById('layer-root').appendChild(dropZone.element)
+  document.getElementById('layer-root').appendChild(fpsOverlay.element)
 
   // 视图切换：歌曲列表 / 专辑 / 艺人 / 媒体墙 / 设置
   // 注意两点：
