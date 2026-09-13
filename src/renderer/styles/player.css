@@ -1,0 +1,215 @@
+/* ==========================================================================
+   底部播放条
+   ========================================================================== */
+
+.player-bar {
+  position: relative;
+  height: var(--playerbar-h);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  background: var(--bg-bar);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  border-top: 0.5px solid var(--separator);
+  z-index: 25;
+}
+
+/* 顶部细进度条：可点击/拖动 seek */
+.player-bar__progress {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  z-index: 2;
+}
+
+.player-bar__progress .slider {
+  height: 12px;
+}
+
+.player-bar__progress .slider__track {
+  height: 2.5px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.player-bar__progress .slider:hover .slider__track {
+  background: var(--fill-quaternary);
+}
+
+.player-bar__progress .slider__fill {
+  border-radius: 0;
+  background: color-mix(in srgb, var(--accent) 78%, transparent);
+}
+
+.player-bar__progress .slider:hover .slider__fill,
+.player-bar__progress .slider.is-dragging .slider__fill {
+  background: var(--accent);
+}
+
+.player-bar__progress .slider__thumb {
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  margin-top: -3px;
+}
+
+/* ---------------- 左侧：当前曲目 ---------------- */
+
+.player-bar__now {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.player-bar__art {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  flex: none;
+  background: var(--fill-quaternary);
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+  transition: transform var(--dur) var(--ease-ios);
+}
+
+.player-bar__art:hover {
+  transform: scale(1.04);
+}
+
+.player-bar__art:active {
+  transform: scale(0.97);
+}
+
+.player-bar__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.player-bar__art .icon {
+  width: 22px;
+  height: 22px;
+}
+
+.player-bar__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.player-bar__title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--label);
+  line-height: 1.2;
+}
+
+.player-bar__artist {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+}
+
+.player-bar__nav {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 2px;
+}
+
+/* ---------------- 中间：传输控件 ---------------- */
+
+.player-bar__controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-bar__controls .btn--icon {
+  width: 34px;
+  height: 34px;
+}
+
+.player-bar__controls .btn--transport {
+  margin: 0 6px;
+}
+
+.player-bar__time {
+  grid-column: 2;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 6px;
+  font-size: var(--text-caption);
+  color: var(--label-4);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* ---------------- 右侧：工具区 ---------------- */
+
+.player-bar__tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.player-bar__rate {
+  min-width: 46px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-quaternary);
+  color: var(--label-2);
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+
+.player-bar__rate:hover {
+  background: var(--fill-tertiary);
+  color: var(--label);
+}
+
+.player-bar__rate.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.player-bar__volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.player-bar__volume .btn--icon-sm {
+  color: var(--label-3);
+}
+
+/* 无曲目时的占位 */
+.player-bar__idle {
+  font-size: var(--text-subhead);
+  color: var(--label-4);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-bar__idle .icon {
+  width: 18px;
+  height: 18px;
+}

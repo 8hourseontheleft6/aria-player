@@ -1,0 +1,157 @@
+/* ==========================================================================
+   设置页：iOS「分组列表」样式
+   ========================================================================== */
+
+.settings {
+  padding: 0 20px 40px;
+  max-width: 720px;
+}
+
+.settings__group {
+  margin-bottom: 26px;
+}
+
+.settings__group-title {
+  padding: 0 4px 7px;
+  font-size: var(--text-footnote);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--label-3);
+  text-transform: none;
+}
+
+.settings__card {
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 0.5px var(--separator), 0 1px 2px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.settings__row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 46px;
+  padding: 10px 14px;
+  position: relative;
+}
+
+.settings__row + .settings__row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 0;
+  height: 0.5px;
+  background: var(--separator);
+}
+
+.settings__row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings__row-title {
+  font-size: var(--text-body);
+  color: var(--label);
+}
+
+.settings__row-sub {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  line-height: 1.5;
+  user-select: text;
+}
+
+.settings__row-value {
+  font-size: var(--text-body);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings__row-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.settings__row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.settings__folder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+}
+
+.settings__folder .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  flex: none;
+}
+
+.settings__folder-path {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-subhead);
+  color: var(--label-2);
+  user-select: text;
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings__empty {
+  padding: 16px 14px;
+  font-size: var(--text-subhead);
+  color: var(--label-3);
+  line-height: 1.6;
+}
+
+.settings__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+}
+
+.settings__about {
+  padding: 14px;
+  font-size: var(--text-subhead);
+  color: var(--label-3);
+  line-height: 1.7;
+  user-select: text;
+}
+
+.settings__about b {
+  color: var(--label-2);
+  font-weight: 600;
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--fill-quaternary);
+  box-shadow: 0 1px 0 var(--separator-strong);
+  font-size: var(--text-caption);
+  font-family: var(--font-ui);
+  color: var(--label-2);
+}

@@ -1,0 +1,401 @@
+/* ==========================================================================
+   歌曲列表（虚拟滚动）
+   ========================================================================== */
+
+.tracklist {
+  --col-index: 46px;
+  --col-album: minmax(120px, 1fr);
+  --col-duration: 68px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.tracklist__head {
+  display: grid;
+  grid-template-columns: var(--col-index) minmax(200px, 2.2fr) var(--col-album) var(--col-duration);
+  align-items: center;
+  gap: 12px;
+  height: 30px;
+  padding: 0 20px;
+  font-size: var(--text-footnote);
+  font-weight: 500;
+  color: var(--label-3);
+  border-bottom: 0.5px solid var(--separator);
+  flex: none;
+}
+
+.tracklist__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  color: var(--label-3);
+  font-size: var(--text-footnote);
+  font-weight: 500;
+}
+
+.tracklist__sort:hover {
+  color: var(--label);
+  background: var(--bg-hover);
+}
+
+.tracklist__sort.is-active {
+  color: var(--accent);
+}
+
+.tracklist__sort .icon {
+  width: 10px;
+  height: 10px;
+  stroke-width: 2.6;
+  opacity: 0;
+}
+
+.tracklist__sort.is-active .icon {
+  opacity: 1;
+}
+
+.tracklist__viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  padding-bottom: 24px;
+}
+
+.tracklist__canvas {
+  position: relative;
+  width: 100%;
+}
+
+.track-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--row-h);
+  display: grid;
+  grid-template-columns: var(--col-index) minmax(200px, 2.2fr) var(--col-album) var(--col-duration);
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  border-radius: 0;
+  contain: layout style;
+}
+
+.track-row::after {
+  content: "";
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--separator);
+}
+
+.track-row:hover {
+  background: var(--bg-hover);
+}
+
+.track-row.is-current {
+  background: var(--accent-soft);
+}
+
+.track-row.is-current .track-row__title {
+  color: var(--accent);
+}
+
+.track-row.is-current .track-row__artist,
+.track-row.is-current .track-row__album,
+.track-row.is-current .track-row__index {
+  color: color-mix(in srgb, var(--accent) 72%, transparent);
+}
+
+.track-row.is-current::after,
+.track-row:hover::after {
+  opacity: 0.4;
+}
+
+.track-row__index {
+  display: grid;
+  place-items: center;
+  font-size: var(--text-subhead);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+
+.track-row__play {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  color: var(--label);
+}
+
+.track-row:hover .track-row__play {
+  display: grid;
+}
+
+.track-row:hover .track-row__num {
+  visibility: hidden;
+}
+
+.track-row__play .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.track-row:hover .track-row__play.is-playing {
+  display: none;
+}
+
+.track-row__main {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.track-row__art {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-xs);
+  flex: none;
+  overflow: hidden;
+  background: var(--fill-quaternary);
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.track-row__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.track-row__art .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.track-row__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.track-row__title {
+  font-size: var(--text-body);
+  font-weight: 500;
+  color: var(--label);
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.track-row__artist {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  line-height: 1.3;
+}
+
+.track-row__badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--fill-quaternary);
+  color: var(--label-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.track-row__badge .icon {
+  width: 9px;
+  height: 9px;
+}
+
+.track-row__album {
+  font-size: var(--text-subhead);
+  color: var(--label-3);
+}
+
+.track-row__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.track-row__duration {
+  font-size: var(--text-subhead);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.track-row__more {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--label-3);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-ios);
+}
+
+.track-row:hover .track-row__more {
+  opacity: 1;
+}
+
+.track-row__more:hover {
+  background: var(--bg-pressed);
+  color: var(--label);
+}
+
+.track-row__more .icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* 正在播放时的跳动条 */
+.track-row__bars {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+/* ------------------------------ 队列视图 ------------------------------ */
+
+.queue-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-bar);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  border-left: 0.5px solid var(--separator);
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.18);
+  animation: queue-in var(--dur) var(--ease-ios);
+}
+
+/* 作者样式里的 display:flex 会盖过 [hidden] 的 UA 规则，必须显式补一条 */
+.queue-panel[hidden] {
+  display: none;
+}
+
+@keyframes queue-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.queue-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 0.5px solid var(--separator);
+  flex: none;
+}
+
+.queue-panel__title {
+  font-size: var(--text-headline);
+  font-weight: 600;
+}
+
+.queue-panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px 16px;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.queue-item:hover {
+  background: var(--bg-hover);
+}
+
+.queue-item.is-current {
+  background: var(--accent-soft);
+}
+
+.queue-item__art {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  flex: none;
+  background: var(--fill-quaternary);
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+}
+
+.queue-item__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.queue-item__art .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.queue-item__text {
+  min-width: 0;
+  flex: 1;
+}
+
+.queue-item__title {
+  font-size: var(--text-subhead);
+  font-weight: 500;
+  color: var(--label);
+}
+
+.queue-item.is-current .queue-item__title {
+  color: var(--accent);
+}
+
+.queue-item__artist {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+
+.queue-item__duration {
+  font-size: var(--text-caption);
+  color: var(--label-4);
+  font-variant-numeric: tabular-nums;
+}

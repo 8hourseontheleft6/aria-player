@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self' app:; script-src 'self' app:; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: media: data: blob:; media-src 'self' app: media: blob:; font-src 'self' app: data:; connect-src 'self' app: media:; object-src 'none'; base-uri 'none'"
+  />
+  <title>Aria</title>
+  <link rel="stylesheet" href="./styles/tokens.css" />
+  <link rel="stylesheet" href="./styles/base.css" />
+  <link rel="stylesheet" href="./styles/components.css" />
+  <link rel="stylesheet" href="./styles/shell.css" />
+  <link rel="stylesheet" href="./styles/library.css" />
+  <link rel="stylesheet" href="./styles/player.css" />
+  <link rel="stylesheet" href="./styles/nowplaying.css" />
+  <link rel="stylesheet" href="./styles/settings.css" />
+</head>
+<body>
+  <!-- 背景光晕：颜色跟随当前封面，营造 iOS 的材质感 -->
+  <div class="backdrop" aria-hidden="true">
+    <div class="backdrop__glow backdrop__glow--a"></div>
+    <div class="backdrop__glow backdrop__glow--b"></div>
+  </div>
+
+  <div class="app" id="app">
+    <header class="titlebar" id="titlebar"></header>
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="stage">
+      <section class="content" id="content"></section>
+      <footer class="player-bar" id="player-bar"></footer>
+    </main>
+
+    <!-- 正在播放：全屏覆盖层 -->
+    <section class="now-playing" id="now-playing" hidden></section>
+  </div>
+
+  <!-- 浮层：toast / 右键菜单 / 弹出面板 -->
+  <div class="layer-root" id="layer-root"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# 统一行尾：系统 gitconfig 里 autocrlf=true 会把文本转成 CRLF，这里固定成 LF
+* text=auto eol=lf
+
+# 二进制资源不做任何转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary

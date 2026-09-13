@@ -1,0 +1,393 @@
+/* ==========================================================================
+   外壳布局：标题栏 / 侧边栏 / 内容舞台
+   窗口无边框（Windows）或 hiddenInset（macOS），顶栏全部自绘。
+   ========================================================================== */
+
+.app {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
+  height: 100vh;
+  transition: grid-template-columns var(--dur) var(--ease-ios);
+}
+
+.app.is-sidebar-hidden {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+html[data-platform="darwin"] {
+  --titlebar-h: 46px;
+}
+
+/* ------------------------------ 标题栏 ------------------------------ */
+
+.titlebar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 20;
+}
+
+html[data-platform="darwin"] .titlebar {
+  padding-left: 84px;
+}
+
+.titlebar > * {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.titlebar__spacer {
+  flex: 1;
+  min-width: 12px;
+  -webkit-app-region: drag;
+}
+
+.titlebar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.titlebar__app {
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  color: var(--label-3);
+  letter-spacing: 0.01em;
+}
+
+.titlebar__scan {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.titlebar__scan-bar {
+  width: 78px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-quaternary);
+  overflow: hidden;
+}
+
+.titlebar__scan-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width 180ms linear;
+}
+
+/* Windows / Linux 自绘窗口按钮 */
+.win-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.win-controls__btn {
+  width: 34px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--label-3);
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+
+.win-controls__btn:hover {
+  background: var(--bg-hover);
+  color: var(--label);
+}
+
+.win-controls__btn--close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.win-controls__btn .icon {
+  width: 11px;
+  height: 11px;
+  stroke-width: 1.4;
+}
+
+/* ------------------------------ 侧边栏 ------------------------------ */
+
+.sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg-sidebar);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  border-right: 0.5px solid var(--separator);
+  transition: opacity var(--dur) var(--ease-ios);
+}
+
+.app.is-sidebar-hidden .sidebar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar__scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 10px 10px;
+}
+
+.sidebar__section {
+  margin-top: 14px;
+}
+
+.sidebar__section:first-child {
+  margin-top: 4px;
+}
+
+.sidebar__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 8px 5px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--label-3);
+}
+
+.sidebar__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-callout);
+  font-weight: 500;
+  color: var(--label-2);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+
+.sidebar__row .icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--label-3);
+  transition: color var(--dur-fast) var(--ease-ios);
+}
+
+.sidebar__row:hover {
+  background: var(--bg-hover);
+  color: var(--label);
+}
+
+.sidebar__row.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sidebar__row.is-selected .icon {
+  color: var(--accent);
+}
+
+.sidebar__row .truncate {
+  flex: 1;
+}
+
+.sidebar__row-count {
+  font-size: var(--text-caption);
+  color: var(--label-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar__row.is-selected .sidebar__row-count {
+  color: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.sidebar__row-action {
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: var(--label-3);
+}
+
+.sidebar__row:hover .sidebar__row-action {
+  opacity: 1;
+}
+
+.sidebar__row-action:hover {
+  background: var(--bg-pressed);
+  color: var(--label);
+}
+
+.sidebar__row-action .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.sidebar__footer {
+  padding: 8px 10px 10px;
+  border-top: 0.5px solid var(--separator);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar__hint {
+  padding: 0 8px 4px;
+  font-size: var(--text-caption);
+  color: var(--label-4);
+  line-height: 1.5;
+}
+
+/* ------------------------------ 内容舞台 ------------------------------ */
+
+.stage {
+  grid-column: 2;
+  grid-row: 2;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-content);
+  backdrop-filter: blur(calc(var(--blur) * 0.6));
+  -webkit-backdrop-filter: blur(calc(var(--blur) * 0.6));
+}
+
+.content {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------ 视图头部（iOS 大标题） ------------------------------ */
+
+.view-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 20px;
+  background: color-mix(in srgb, var(--bg-content) 80%, transparent);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  border-bottom: 0.5px solid transparent;
+  transition: border-color var(--dur) var(--ease-ios);
+}
+
+.view-toolbar.is-stuck {
+  border-bottom-color: var(--separator);
+}
+
+.view-toolbar__title {
+  font-size: var(--text-headline);
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--dur) var(--ease-ios), transform var(--dur) var(--ease-ios);
+  white-space: nowrap;
+}
+
+.view-toolbar.is-stuck .view-toolbar__title {
+  opacity: 1;
+  transform: none;
+}
+
+.view-toolbar__spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.view-toolbar__meta {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.view-header {
+  padding: 4px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 140px;
+  overflow: hidden;
+  transition: max-height var(--dur) var(--ease-ios), opacity var(--dur-fast) var(--ease-ios),
+    padding var(--dur) var(--ease-ios);
+}
+
+/* 滚动后大标题收起，只保留工具栏里的紧凑标题 */
+.view-header.is-collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.view-header__row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.view-header__title {
+  font-family: var(--font-display);
+  font-size: var(--text-large-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.view-header__subtitle {
+  margin-top: 4px;
+  font-size: var(--text-callout);
+  color: var(--label-3);
+}
+
+.view-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+/* 视图主体滚动容器 */
+.view-body {
+  flex: 1;
+  min-height: 0;
+}

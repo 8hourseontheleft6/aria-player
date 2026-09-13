@@ -1,0 +1,147 @@
+'use strict'
+
+const { ipcMain, BrowserWindow, app, globalShortcut, nativeTheme, shell } = require('electron')
+
+/** 主 -> 渲染的频道白名单（preload 也依赖这份清单，保持同步） */
+const EVENT_CHANNELS = [
+  'settings:changed',
+  'library:scan-progress',
+  'window:maximized',
+  'media:command',
+  'theme:changed'
+]
+
+const MEDIA_KEYS = [
+  ['MediaPlayPause', 'play-pause'],
+  ['MediaNextTrack', 'next'],
+  ['MediaPreviousTrack', 'previous'],
+  ['MediaStop', 'stop']
+]
+
+function broadcast (channel, payload) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(channel, payload)
+  }
+}
+
+/** 系统级媒体键（需要设置里开启，默认开启） */
+function registerMediaKeys (ctx) {
+  const settings = ctx.get('settings')
+  globalShortcut.unregisterAll()
+  if (!settings.get().globalMediaKeys) return
+  for (const [accelerator, command] of MEDIA_KEYS) {
+    try {
+      globalShortcut.register(accelerator, () => {
+        const win = BrowserWindow.getAllWindows()[0]
+        if (win && !win.isDestroyed()) win.webContents.send('media:command', command)
+      })
+    } catch {
+      // 某些环境（如被其他播放器占用）注册失败是可接受的
+    }
+  }
+}
+
+function registerIpc (ctx) {
+  const settings = ctx.get('settings')
+  const library = ctx.get('library')
+  const lyrics = ctx.get('lyrics')
+
+  /** @type {Map<string, Function>} */
+  const handlers = {
+    /* ---------- 设置 ---------- */
+    'settings:get': () => settings.get(),
+    'settings:set': (_event, patch) => {
+      const next = settings.set(patch || {})
+      if (patch && Object.prototype.hasOwnProperty.call(patch, 'theme')) {
+        require('./window').applyTheme(ctx, patch.theme)
+      }
+      if (patch && Object.prototype.hasOwnProperty.call(patch, 'globalMediaKeys')) {
+        registerMediaKeys(ctx)
+      }
+      return next
+    },
+    'settings:reset': () => {
+      const { DEFAULTS } = require('./services/settings')
+      return settings.set({ ...DEFAULTS, window: settings.get().window, folders: settings.get().folders })
+    },
+
+    /* ---------- 资料库 ---------- */
+    'library:state': () => ({
+      folders: library.getFolders(),
+      stats: library.getStats()
+    }),
+    'library:tracks': () => library.getTracks(),
+    'library:scan': (_event, options) => library.scan(options || {}),
+    'library:add-folder': (_event, dir) => library.addFolder(dir),
+    'library:remove-folder': (_event, dir) => library.removeFolder(dir),
+    'library:pick-folders': () => library.pickFolders(),
+    'library:artwork': (_event, trackId) => library.getArtwork(trackId),
+    'library:reveal': (_event, filePath) => {
+      if (typeof filePath === 'string' && filePath) library.revealInFolder(filePath)
+      return true
+    },
+
+    /* ---------- 歌词 ---------- */
+    'lyrics:load': (_event, input) => lyrics.load(input || {}),
+
+    /* ---------- 窗口控制（自绘标题栏） ---------- */
+    'window:minimize': (event) => BrowserWindow.fromWebContents(event.sender)?.minimize(),
+    'window:toggle-maximize': (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return false
+      if (win.isMaximized()) win.unmaximize()
+      else win.maximize()
+      return win.isMaximized()
+    },
+    'window:close': (event) => BrowserWindow.fromWebContents(event.sender)?.close(),
+    'window:state': (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return { maximized: Boolean(win?.isMaximized()), fullScreen: Boolean(win?.isFullScreen()) }
+    },
+
+    /* ---------- 其它 ---------- */
+    'app:info': () => ({
+      name: app.getName(),
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      userData: app.getPath('userData'),
+      isMac: process.platform === 'darwin'
+    }),
+    'shell:open-external': (_event, url) => {
+      if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url)
+      return true
+    }
+  }
+
+  for (const [channel, handler] of Object.entries(handlers)) {
+    ipcMain.handle(channel, handler)
+  }
+
+  /* ---------- 主进程事件 -> 渲染层 ---------- */
+  const forwarders = [
+    ['settings:changed', (payload) => broadcast('settings:changed', payload)],
+    ['library:scan-progress', (payload) => broadcast('library:scan-progress', payload)]
+  ]
+  for (const [event, forward] of forwarders) ctx.on(event, forward)
+
+  nativeTheme.on('updated', () => {
+    broadcast('theme:changed', {
+      shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+      themeSource: nativeTheme.themeSource
+    })
+  })
+
+  registerMediaKeys(ctx)
+
+  ctx.onCleanup(() => {
+    globalShortcut.unregisterAll()
+    for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel)
+  })
+
+  return { EVENT_CHANNELS }
+}
+
+module.exports = { registerIpc, EVENT_CHANNELS, broadcast }

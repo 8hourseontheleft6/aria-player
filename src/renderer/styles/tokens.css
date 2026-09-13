@@ -1,0 +1,144 @@
+/* ==========================================================================
+   Aria 设计令牌 —— 对齐 iOS / macOS 的取值习惯
+   - 颜色：使用 iOS 系统色（systemBlue 等）与 label/fill 层级
+   - 字体：SF Pro 优先，中文回退苹方/微软雅黑
+   - 动效：iOS 的弹簧曲线 cubic-bezier(0.32, 0.72, 0, 1)
+   ========================================================================== */
+
+:root {
+  /* ---- 字体 ---- */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", "Segoe UI Variable Text", "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display",
+    "PingFang SC", "Microsoft YaHei UI", sans-serif;
+
+  /* iOS 字号阶梯 */
+  --text-large-title: 34px;
+  --text-title1: 28px;
+  --text-title2: 22px;
+  --text-title3: 20px;
+  --text-headline: 17px;
+  --text-body: 15px;
+  --text-callout: 14px;
+  --text-subhead: 13px;
+  --text-footnote: 12px;
+  --text-caption: 11px;
+
+  /* ---- 圆角（连续圆角的近似） ---- */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+  --radius-pill: 999px;
+
+  /* ---- 动效 ---- */
+  --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-instant: 90ms;
+  --dur-fast: 150ms;
+  --dur: 260ms;
+  --dur-slow: 420ms;
+
+  /* ---- 布局尺寸 ---- */
+  --sidebar-w: 248px;
+  --titlebar-h: 40px;
+  --playerbar-h: 78px;
+  --row-h: 54px;
+  --blur: 34px;
+
+  /* ---- 动态色调（由封面取色写入） ---- */
+  --tint: #0a84ff;
+  --tint-2: #5e5ce6;
+  --tint-soft: rgba(10, 132, 255, 0.18);
+}
+
+/* ============================ 深色（默认） ============================ */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-window: #0a0a0c;
+  --bg-content: rgba(14, 14, 17, 0.72);
+  --bg-sidebar: rgba(20, 20, 24, 0.68);
+  --bg-bar: rgba(22, 22, 27, 0.72);
+  --bg-elevated: rgba(40, 40, 46, 0.94);
+  --bg-popover: rgba(44, 44, 50, 0.96);
+  --bg-hover: rgba(255, 255, 255, 0.055);
+  --bg-pressed: rgba(255, 255, 255, 0.11);
+  --bg-selected: rgba(255, 255, 255, 0.09);
+  --bg-input: rgba(120, 120, 128, 0.20);
+
+  --fill-quaternary: rgba(120, 120, 128, 0.14);
+  --fill-tertiary: rgba(120, 120, 128, 0.24);
+  --fill-secondary: rgba(120, 120, 128, 0.32);
+
+  --separator: rgba(255, 255, 255, 0.085);
+  --separator-strong: rgba(255, 255, 255, 0.16);
+
+  --label: rgba(255, 255, 255, 0.96);
+  --label-2: rgba(235, 235, 245, 0.62);
+  --label-3: rgba(235, 235, 245, 0.38);
+  --label-4: rgba(235, 235, 245, 0.22);
+
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.20);
+  --accent-label: #ffffff;
+  --danger: #ff453a;
+  --success: #30d158;
+  --warning: #ff9f0a;
+
+  --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-artwork: 0 34px 64px -16px rgba(0, 0, 0, 0.8), 0 10px 28px rgba(0, 0, 0, 0.5);
+  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, 0.4);
+
+  --scrollbar-thumb: rgba(255, 255, 255, 0.20);
+}
+
+/* ============================ 浅色 ============================ */
+html[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-window: #ffffff;
+  --bg-content: rgba(255, 255, 255, 0.72);
+  --bg-sidebar: rgba(242, 242, 247, 0.76);
+  --bg-bar: rgba(250, 250, 252, 0.78);
+  --bg-elevated: rgba(255, 255, 255, 0.97);
+  --bg-popover: rgba(255, 255, 255, 0.98);
+  --bg-hover: rgba(0, 0, 0, 0.042);
+  --bg-pressed: rgba(0, 0, 0, 0.08);
+  --bg-selected: rgba(0, 0, 0, 0.055);
+  --bg-input: rgba(120, 120, 128, 0.12);
+
+  --fill-quaternary: rgba(120, 120, 128, 0.08);
+  --fill-tertiary: rgba(120, 120, 128, 0.16);
+  --fill-secondary: rgba(120, 120, 128, 0.24);
+
+  --separator: rgba(60, 60, 67, 0.13);
+  --separator-strong: rgba(60, 60, 67, 0.24);
+
+  --label: rgba(0, 0, 0, 0.92);
+  --label-2: rgba(60, 60, 67, 0.62);
+  --label-3: rgba(60, 60, 67, 0.4);
+  --label-4: rgba(60, 60, 67, 0.24);
+
+  --accent: #007aff;
+  --accent-soft: rgba(0, 122, 255, 0.14);
+  --accent-label: #ffffff;
+  --danger: #ff3b30;
+  --success: #34c759;
+  --warning: #ff9500;
+
+  --shadow-popover: 0 16px 40px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-artwork: 0 30px 56px -18px rgba(0, 0, 0, 0.45), 0 8px 22px rgba(0, 0, 0, 0.16);
+  --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.22);
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+}
+
+/* 用户关闭动画时（设置项 / 系统偏好） */
+html[data-reduce-motion="true"] * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
