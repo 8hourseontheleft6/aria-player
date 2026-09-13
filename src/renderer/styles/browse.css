@@ -377,6 +377,12 @@
   pointer-events: none;
 }
 
+/* 拖动期间关掉聚焦块上的毛玻璃，少一层每帧重绘 */
+.wall-viewport.is-panning .hero__control {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .media-wall {
   display: grid;
   grid-template-columns: repeat(var(--wall-columns, 6), var(--wall-size, 148px));
@@ -393,12 +399,12 @@
   bottom: 14px;
   z-index: 5;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-popover) 70%, transparent);
-  backdrop-filter: blur(12px) saturate(160%);
-  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  /* 不用 backdrop-filter：它会在每帧都重新模糊移动中的背景，是平移掉帧的主因之一 */
+  background: color-mix(in srgb, var(--bg-popover) 88%, transparent);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 0 0 0.5px var(--separator);
   overflow: hidden;
   cursor: grab;
+  contain: strict;
 }
 
 .wall-minimap[hidden] {
@@ -427,6 +433,8 @@
   background: var(--fill-quaternary);
   cursor: default;
   transition: box-shadow var(--dur) var(--ease-ios);
+  /* 布局隔离：474 个格子时能省下可观的布局开销 */
+  contain: layout paint;
 }
 
 /* 入场动画只在整个列表重建时播放，密度切换/聚焦块换位走 FLIP */
@@ -542,8 +550,11 @@
 
 /* ------------------------------ 正在播放的聚焦块 ------------------------------ */
 
+/**
+ * 正在播放的那张专辑：就在原地放大成 2×2，后面的格子顺延让路。
+ * （早先是 order:-1 固定排到首位，平移到别处再播放时会「跳」到左上角，很难受。）
+ */
 .wall-tile.is-featured {
-  order: -1; /* 永远排在最前面，滚到顶部就能看到 */
   grid-column: span 2;
   grid-row: span 2;
   aspect-ratio: auto;
@@ -552,6 +563,8 @@
   z-index: 2;
   /* 让内部文字用 cqw 跟随格子尺寸缩放 */
   container-type: size;
+  /* 不能用 contain:paint，否则会把自身的投影裁掉 */
+  contain: layout;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34), 0 0 0 0.5px var(--separator);
 }
 

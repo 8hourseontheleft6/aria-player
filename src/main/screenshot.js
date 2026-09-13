@@ -118,12 +118,25 @@ async function runScreenshots ({ win }) {
       await evaluate(win, `
         const { actions, player, store } = window.__aria
         actions.setView('wall')
-        // 播到歌词中段，聚焦块里的迷你歌词才有内容可显示
         const lines = store.get().lyrics.lines
         if (lines.length > 16) player.seek(lines[16].time + 0.4)
         await player.play()
+        await new Promise((r) => setTimeout(r, 2200))
+
+        // 聚焦块现在留在专辑自己的位置上，可能不在首屏 —— 把它平移到画面中央
+        const tile = document.querySelector('.wall-tile.is-featured')
+        const viewport = document.querySelector('.wall-viewport')
+        if (tile && viewport) {
+          const vr = viewport.getBoundingClientRect()
+          const tr = tile.getBoundingClientRect()
+          const dx = (vr.left + vr.width / 2) - (tr.left + tr.width / 2)
+          const dy = (vr.top + vr.height / 2) - (tr.top + tr.height / 2)
+          viewport.dispatchEvent(new WheelEvent('wheel', {
+            bubbles: true, cancelable: true, deltaX: -dx, deltaY: -dy
+          }))
+        }
         return true`)
-      await sleep(2800)
+      await sleep(1400)
     }],
     ['14-wall-scrolled.png', '媒体墙（斜向拖到中段）', async () => {
       await evaluate(win, `

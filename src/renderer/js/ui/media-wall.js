@@ -212,35 +212,75 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   /* 2D 画布：平移、惯性、橡皮筋、位置指示器                            */
   /* ================================================================ */
 
-  const pan = { x: 0, y: 0 }
+  const pan = { x: 0, y: 0 }      // 已应用的位移
+  const target = { x: 0, y: 0 }   // 目标位移：拖动 / 滚轮 / 惯性都往这里写
   const velocity = { x: 0, y: 0 }
+
+  /**
+   * 几何缓存。
+   *
+   * 平移过程中绝对不能读 DOM —— grid.offsetWidth 或 getBoundingClientRect() 都会
+   * 强制同步重排，在一帧里做两次就会明显掉帧。所以平面尺寸、视口尺寸、指示器尺寸
+   * 全部在这里算好，只在「布局真的变了」的时候刷新（重建、改尺寸/布局、窗口缩放）。
+   */
+  const geometry = {
+    planeWidth: 0, planeHeight: 0,
+    viewWidth: 0, viewHeight: 0,
+    mapScale: 1, mapWidth: 0, mapHeight: 0
+  }
+  const MINIMAP_MAX = { width: 108, height: 74 }
+
   let dragging = false
-  let inertiaFrame = null
+  let animationFrame = null   // 惯性 / 回弹动画
+  let panFrame = null         // 每帧一次平移落地的合流帧
+  let elasticPending = false
   let suppressClick = false
   let lastPointer = { x: 0, y: 0, time: 0 }
+  let minimapSizePainted = ''
+  let minimapBoxPainted = ''
 
   function reduceMotion () {
     return store.get().settings.reduceMotion === true ||
       document.documentElement.dataset.reduceMotion === 'true'
   }
 
-  function planeSize () {
-    return { width: grid.offsetWidth, height: grid.offsetHeight }
+  /** 只在布局变化时调用：这里会读 DOM，属于少数几次可接受的强制重排 */
+  function measureGeometry () {
+    geometry.planeWidth = grid.offsetWidth
+    geometry.planeHeight = grid.offsetHeight
+    geometry.viewWidth = viewport.clientWidth
+    geometry.viewHeight = viewport.clientHeight
+
+    const scale = Math.min(
+      MINIMAP_MAX.width / Math.max(1, geometry.planeWidth),
+      MINIMAP_MAX.height / Math.max(1, geometry.planeHeight)
+    )
+    geometry.mapScale = scale
+    geometry.mapWidth = Math.max(30, Math.round(geometry.planeWidth * scale))
+    geometry.mapHeight = Math.max(24, Math.round(geometry.planeHeight * scale))
+
+    const sizeKey = `${geometry.mapWidth}x${geometry.mapHeight}`
+    if (sizeKey !== minimapSizePainted) {
+      minimapSizePainted = sizeKey
+      minimap.style.width = `${geometry.mapWidth}px`
+      minimap.style.height = `${geometry.mapHeight}px`
+    }
+    minimap.dataset.scale = String(scale)
+    minimapBoxPainted = ''
+    paintMinimap()
   }
 
+  /** 全部走缓存，没有 DOM 读取 */
   function bounds () {
-    const { width, height } = planeSize()
-    const viewWidth = viewport.clientWidth
-    const viewHeight = viewport.clientHeight
     return {
-      minX: Math.min(0, viewWidth - width),
+      minX: Math.min(0, geometry.viewWidth - geometry.planeWidth),
       maxX: 0,
-      minY: Math.min(0, viewHeight - height),
+      minY: Math.min(0, geometry.viewHeight - geometry.planeHeight),
       maxY: 0,
-      width,
-      height,
-      viewWidth,
-      viewHeight
+      width: geometry.planeWidth,
+      height: geometry.planeHeight,
+      viewWidth: geometry.viewWidth,
+      viewHeight: geometry.viewHeight
     }
   }
 
@@ -253,94 +293,183 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     return value
   }
 
-  function applyPan (x, y, { elastic = false } = {}) {
-    const limit = bounds()
-    pan.x = elastic ? rubber(x, limit.minX, limit.maxX) : clamp(x, limit.minX, limit.maxX)
-    pan.y = elastic ? rubber(y, limit.minY, limit.maxY) : clamp(y, limit.minY, limit.maxY)
+  /** 只写样式、不算边界（调用方保证 pan 已经合法） */
+  function writePan () {
     grid.style.transform = `translate3d(${pan.x}px, ${pan.y}px, 0)`
-    paintMinimap(limit)
+    paintMinimap()
   }
 
-  /** 只取消正在跑的惯性帧，不动速度（惯性启动时要先取消旧帧再读速度） */
-  function cancelInertiaFrame () {
-    if (inertiaFrame) {
-      cancelAnimationFrame(inertiaFrame)
-      inertiaFrame = null
+  /** 把 target 落成 pan 并写 DOM */
+  function flushPan (elastic = elasticPending) {
+    elasticPending = false
+    const limit = bounds()
+    pan.x = elastic ? rubber(target.x, limit.minX, limit.maxX) : clamp(target.x, limit.minX, limit.maxX)
+    pan.y = elastic ? rubber(target.y, limit.minY, limit.maxY) : clamp(target.y, limit.minY, limit.maxY)
+    writePan()
+  }
+
+  /** 一帧最多落地一次：一次手势事件可能触发多次 pointermove/wheel */
+  function scheduleFlush () {
+    if (panFrame) return
+    panFrame = requestAnimationFrame(() => {
+      panFrame = null
+      flushPan()
+    })
+  }
+
+  /**
+   * 手势期间暂停封面懒加载观察。
+   * 几百个观察目标 + 每帧都在变的容器位置 = 每帧几十毫秒的相交性重算，
+   * 这是平移卡顿的主因；松手后再整体挂回去。
+   */
+  let resumeTimer = null
+  function beginGesture () {
+    if (resumeTimer) {
+      clearTimeout(resumeTimer)
+      resumeTimer = null
     }
+    lazy.suspend()
+  }
+
+  function endGestureSoon () {
+    if (resumeTimer) clearTimeout(resumeTimer)
+    resumeTimer = setTimeout(() => {
+      resumeTimer = null
+      // 惯性还在滑行就继续等，等整面墙彻底停稳再恢复观察
+      if (animationFrame) {
+        endGestureSoon()
+        return
+      }
+      lazy.resume()
+    }, 180)
+  }
+
+  function setPan (x, y, { elastic = false } = {}) {
+    target.x = x
+    target.y = y
+    if (elastic) elasticPending = true
+    scheduleFlush()
+  }
+
+  /** 取消惯性 / 回弹动画，并把 target 对齐到当前实际位置 */
+  function cancelAnimation () {
+    if (animationFrame) {
+      cancelAnimationFrame(animationFrame)
+      animationFrame = null
+    }
+    target.x = pan.x
+    target.y = pan.y
   }
 
   function stopInertia () {
-    cancelInertiaFrame()
+    cancelAnimation()
+
     velocity.x = 0
     velocity.y = 0
   }
 
   /** 松手后的惯性滑行：撞到边界就停，不留回弹 */
   function startInertia () {
-    cancelInertiaFrame()
-    let vx = velocity.x
-    let vy = velocity.y
+    cancelAnimation()
+    let vx = clamp(velocity.x, -INERTIA_MAX_VELOCITY, INERTIA_MAX_VELOCITY)
+    let vy = clamp(velocity.y, -INERTIA_MAX_VELOCITY, INERTIA_MAX_VELOCITY)
     velocity.x = 0
     velocity.y = 0
     if (reduceMotion() || (Math.abs(vx) < 0.4 && Math.abs(vy) < 0.4)) {
-      applyPan(pan.x, pan.y)
+      target.x = pan.x
+      target.y = pan.y
       return
     }
-    const step = () => {
-      vx *= INERTIA_DECAY
-      vy *= INERTIA_DECAY
+    let previous = performance.now()
+    const step = (now) => {
+      // 按真实时间衰减：衰减率与位移都换算成「相当于多少帧」，
+      // 这样低帧率机器上不会出现「滑行持续十几秒」的诡异手感
+      const delta = Math.min(50, Math.max(1, now - previous))
+      previous = now
+      const frames = delta / 16.667
+      const decay = Math.pow(INERTIA_DECAY, frames)
+      vx *= decay
+      vy *= decay
+
       const limit = bounds()
-      const nextX = clamp(pan.x + vx, limit.minX, limit.maxX)
-      const nextY = clamp(pan.y + vy, limit.minY, limit.maxY)
+      const nextX = clamp(pan.x + vx * frames, limit.minX, limit.maxX)
+      const nextY = clamp(pan.y + vy * frames, limit.minY, limit.maxY)
       if (nextX === limit.minX || nextX === limit.maxX) vx = 0
       if (nextY === limit.minY || nextY === limit.maxY) vy = 0
-      applyPan(nextX, nextY)
+      pan.x = nextX
+      pan.y = nextY
+      target.x = nextX
+      target.y = nextY
+      writePan()
       if (Math.abs(vx) < INERTIA_MIN && Math.abs(vy) < INERTIA_MIN) {
-        inertiaFrame = null
+        animationFrame = null
         return
       }
-      inertiaFrame = requestAnimationFrame(step)
+      animationFrame = requestAnimationFrame(step)
     }
-    inertiaFrame = requestAnimationFrame(step)
+    animationFrame = requestAnimationFrame(step)
+  }
+
+  /** 橡皮筋回弹：用 easeOutCubic 近似 iOS 的弹簧，比直接吸附自然 */
+  function animatePanTo (x, y, duration = 280) {
+    cancelAnimation()
+    const startX = pan.x
+    const startY = pan.y
+    const started = performance.now()
+    if (reduceMotion() || (Math.abs(x - startX) < 0.5 && Math.abs(y - startY) < 0.5)) {
+      pan.x = x
+      pan.y = y
+      writePan()
+      return
+    }
+    const step = (now) => {
+      const progress = Math.min(1, (now - started) / duration)
+      const eased = 1 - (1 - progress) ** 3
+      pan.x = startX + (x - startX) * eased
+      pan.y = startY + (y - startY) * eased
+      target.x = pan.x
+      target.y = pan.y
+      writePan()
+      if (progress < 1) animationFrame = requestAnimationFrame(step)
+      else animationFrame = null
+    }
+    animationFrame = requestAnimationFrame(step)
   }
 
   /* ---------------- 位置指示器 ---------------- */
 
-  function paintMinimap (limit = bounds()) {
+  /** 只写样式，尺寸取自几何缓存，绝不读 DOM */
+  function paintMinimap () {
+    const limit = bounds()
     const pannable = limit.minX < -1 || limit.minY < -1
     minimap.hidden = !pannable
     if (!pannable) return
 
-    const maxWidth = 108
-    const maxHeight = 74
-    const scale = Math.min(maxWidth / limit.width, maxHeight / limit.height)
-    const mapWidth = Math.max(30, Math.round(limit.width * scale))
-    const mapHeight = Math.max(24, Math.round(limit.height * scale))
-    minimap.style.width = `${mapWidth}px`
-    minimap.style.height = `${mapHeight}px`
+    const { mapScale, mapWidth, mapHeight } = geometry
+    const boxWidth = clamp(Math.round(limit.viewWidth * mapScale), 12, mapWidth)
+    const boxHeight = clamp(Math.round(limit.viewHeight * mapScale), 12, mapHeight)
+    const boxKey = `${boxWidth}x${boxHeight}`
+    if (boxKey !== minimapBoxPainted) {
+      minimapBoxPainted = boxKey
+      minimapViewport.style.width = `${boxWidth}px`
+      minimapViewport.style.height = `${boxHeight}px`
+    }
 
-    const boxWidth = clamp(Math.round(limit.viewWidth * scale), 12, mapWidth)
-    const boxHeight = clamp(Math.round(limit.viewHeight * scale), 12, mapHeight)
-    const boxX = clamp(Math.round(-pan.x * scale), 0, mapWidth - boxWidth)
-    const boxY = clamp(Math.round(-pan.y * scale), 0, mapHeight - boxHeight)
-
-    minimap.dataset.scale = String(scale)
-    minimapViewport.style.width = `${boxWidth}px`
-    minimapViewport.style.height = `${boxHeight}px`
+    const boxX = clamp(Math.round(-pan.x * mapScale), 0, mapWidth - boxWidth)
+    const boxY = clamp(Math.round(-pan.y * mapScale), 0, mapHeight - boxHeight)
     minimapViewport.style.transform = `translate3d(${boxX}px, ${boxY}px, 0)`
   }
 
   /** 点/拖指示器：把视口中心移到对应位置 */
   function panFromMinimap (event) {
     const rect = minimap.getBoundingClientRect()
-    const scale = Number(minimap.dataset.scale) || 1
     const localX = clamp(event.clientX - rect.left, 0, rect.width)
     const localY = clamp(event.clientY - rect.top, 0, rect.height)
     const limit = bounds()
-    const targetX = -(localX / scale) + limit.viewWidth / 2
-    const targetY = -(localY / scale) + limit.viewHeight / 2
+    const nextX = -(localX / geometry.mapScale) + limit.viewWidth / 2
+    const nextY = -(localY / geometry.mapScale) + limit.viewHeight / 2
     stopInertia()
-    applyPan(targetX, targetY)
+    setPan(nextX, nextY)
   }
 
   on(minimap, 'pointerdown', (event) => {
@@ -379,6 +508,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     if (!isPanGesture(event)) return
     event.preventDefault()
     stopInertia()
+    beginGesture()
     dragging = true
     suppressClick = false
     viewport.classList.add('is-panning')
@@ -401,7 +531,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     velocity.x = clamp((dx / elapsed) * 16, -INERTIA_MAX_VELOCITY, INERTIA_MAX_VELOCITY)
     velocity.y = clamp((dy / elapsed) * 16, -INERTIA_MAX_VELOCITY, INERTIA_MAX_VELOCITY)
     lastPointer = { x: event.clientX, y: event.clientY, time: now }
-    applyPan(pan.x + dx, pan.y + dy, { elastic: true })
+    // 累加到 target（而不是已应用的 pan），否则同一帧内的多次 move 会丢位移
+    setPan(target.x + dx, target.y + dy, { elastic: true })
   })
 
   const endDrag = (event) => {
@@ -413,16 +544,27 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     } catch {
       // 忽略
     }
+    // 丢掉还没落地的合流帧，把橡皮筋状态同步落下来
+    if (panFrame) {
+      cancelAnimationFrame(panFrame)
+      panFrame = null
+    }
+    flushPan(true)
+
     const limit = bounds()
-    // 越界（橡皮筋状态）先回弹，否则进入惯性滑行
-    if (pan.x > limit.maxX || pan.x < limit.minX || pan.y > limit.maxY || pan.y < limit.minY) {
-      stopInertia()
-      applyPan(pan.x, pan.y)
+    const outOfBounds = pan.x > limit.maxX || pan.x < limit.minX || pan.y > limit.maxY || pan.y < limit.minY
+    if (outOfBounds) {
+      // 越界就先回弹到边界内，再交给惯性
+      animatePanTo(
+        clamp(pan.x, limit.minX, limit.maxX),
+        clamp(pan.y, limit.minY, limit.maxY)
+      )
     } else {
       startInertia()
     }
     // 防御：万一拖完没有 click 事件（例如在窗口外松开），别把下一次点击也吞掉
     if (suppressClick) setTimeout(() => { suppressClick = false }, 350)
+    endGestureSoon()
   }
 
   on(viewport, 'pointerup', endDrag)
@@ -439,7 +581,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   on(viewport, 'wheel', (event) => {
     event.preventDefault()
     stopInertia()
-    applyPan(pan.x - event.deltaX, pan.y - event.deltaY)
+    beginGesture()
+    // 触控板的惯性滚动会带来密集的 wheel 事件，同样合流到一帧一次
+    setPan(target.x - event.deltaX, target.y - event.deltaY)
+    endGestureSoon()
   }, { passive: false })
 
   /* ================================================================ */
@@ -478,6 +623,20 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     tileSize = next.size
     grid.style.setProperty('--wall-columns', String(columns))
     grid.style.setProperty('--wall-size', `${tileSize}px`)
+    // 平面尺寸变了，几何缓存必须跟着刷新（这里的一次强制重排是必要开销）
+    measureGeometry()
+  }
+
+  /** 布局 / 尺寸变化后重新收敛平移状态（reset=true 时回到平面左上角） */
+  function settlePan ({ reset = false } = {}) {
+    cancelAnimation()
+    if (reset) {
+      pan.x = 0
+      pan.y = 0
+    }
+    target.x = pan.x
+    target.y = pan.y
+    flushPan(false)
   }
 
   function setDensity (next) {
@@ -493,7 +652,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
       const key = currentAlbumKey()
       if (key !== featuredKey) applyFeatured(key)
     })
-    applyPan(pan.x, pan.y)
+    settlePan()
   }
 
   function setLayout (next) {
@@ -504,11 +663,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     }
     paintSegmentedThumb(layoutSegmented, layoutThumb)
     actions.setSetting({ wallLayout: layout })
-    flip(() => {
-      applyLayout()
-      stopInertia()
-      applyPan(0, 0)
-    })
+    flip(() => applyLayout())
+    settlePan({ reset: true })
   }
 
   /* ================================================================ */
@@ -648,7 +804,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     applyLayout()
     featuredKey = null
     applyFeatured(currentAlbumKey())
-    applyPan(0, 0)
+    settlePan({ reset: true })
 
     if (animateIn && !reduceMotion()) {
       grid.classList.add('is-entering')
@@ -737,7 +893,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         if (key !== featuredKey) applyFeatured(key)
       })
       if (key === featuredKey && key) syncHeroContent()
-      applyPan(pan.x, pan.y)
+      settlePan()
     }
 
     countNode.textContent = `${list.length} 张专辑 · ${state.library.tracks.length} 首`
@@ -796,15 +952,13 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     }
     paintSegmentedThumb(layoutSegmented, layoutThumb)
     applyLayout()
-    applyPan(0, 0)
+    settlePan({ reset: true })
   })
 
   const resizeObserver = new ResizeObserver(() => {
     if (store.get().ui.view !== 'wall') return
-    const before = columns
     applyLayout()
-    if (columns !== before) applyPan(pan.x, pan.y)
-    else applyPan(pan.x, pan.y)
+    settlePan()
   })
   resizeObserver.observe(viewport)
 
@@ -827,8 +981,24 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         horizontal: limit.minX < -1,
         vertical: limit.minY < -1,
         dragging,
-        pannable: limit.minX < -1 || limit.minY < -1
+        pannable: limit.minX < -1 || limit.minY < -1,
+        lazy: lazy.state
       }
+    },
+    /**
+     * 自检用：同步落一次平移（含样式写入与指示器更新），用来测「每帧平移的纯开销」。
+     * 刻意绕过 rAF 合流，这样测到的就是真实的一帧工作量；
+     * 正常情况下这里没有任何 DOM 读取，单次应当是微秒级。
+     */
+    debugApplyPan: (x, y) => {
+      target.x = x
+      target.y = y
+      if (panFrame) {
+        cancelAnimationFrame(panFrame)
+        panFrame = null
+      }
+      flushPan(false)
+      return { x: pan.x, y: pan.y }
     }
   }
 }

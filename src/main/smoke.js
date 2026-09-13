@@ -491,11 +491,13 @@ async function runSmoke ({ win, ctx }) {
 
       // --- 聚焦块 ---
       // 注意：computed style 也要立刻取值，后面切换专辑时这个元素就不再是聚焦块了
+      const gridRect0 = document.querySelector('.media-wall').getBoundingClientRect()
       const featured = document.querySelector('.wall-tile.is-featured')
       const featuredStyle = featured ? getComputedStyle(featured) : null
       const featuredOrder = featuredStyle ? featuredStyle.order : null
       const featuredColumn = featuredStyle ? featuredStyle.gridColumnStart : null
       const featuredRow = featuredStyle ? featuredStyle.gridRowStart : null
+      const featuredRect = featured ? featured.getBoundingClientRect() : null
       const hero = featured?.querySelector('.wall-tile__hero')
       const heroTitle = hero?.querySelector('.hero__title')?.textContent || ''
       const heroLines = hero ? hero.querySelectorAll('.mini-lyrics__line').length : 0
@@ -519,25 +521,28 @@ async function runSmoke ({ win, ctx }) {
       const columnsAfter = grid?.style.getPropertyValue('--wall-columns')
       const flippingAfter = document.querySelectorAll('.wall-tile.is-flipping').length
 
-      // --- 切到另一张专辑，聚焦块要跟过去 ---
+      // --- 切换到另一张「排在很后面」的专辑：聚焦块应当原地放大，而不是跳到平面上角 ---
       const beforeSwitchKey = document.querySelector('.wall-tile.is-featured')?.dataset.key || null
       const albums = window.__aria.actions.albums()
       const other = albums.find((a) => a.key !== beforeSwitchKey) || null
-      if (other) window.__aria.actions.playCollectionOf(other.tracks, other.tracks[0])
+      // 用靠后的专辑做验证：如果聚焦块会被强制排到首位，它的位置必然回到原点
+      const farAlbum = albums[Math.min(120, albums.length - 1)] || other
+      if (farAlbum) window.__aria.actions.playCollectionOf(farAlbum.tracks, farAlbum.tracks[0])
       await new Promise((r) => setTimeout(r, 1100))
       const afterSwitchTile = document.querySelector('.wall-tile.is-featured')
       const afterSwitchKey = afterSwitchTile?.dataset.key || null
       const afterSwitchTitle = afterSwitchTile?.querySelector('.hero__title')?.textContent || ''
       const afterSwitchOrder = afterSwitchTile ? getComputedStyle(afterSwitchTile).order : null
-      // order:-1 只影响网格排布，不改 DOM 顺序，所以看实际位置是否落在网格左上角
-      let afterSwitchPosition = false
-      if (afterSwitchTile) {
-        const gridRect = document.querySelector('.media-wall').getBoundingClientRect()
-        const tileRect = afterSwitchTile.getBoundingClientRect()
-        afterSwitchPosition = Math.abs(tileRect.left - gridRect.left) < 12 &&
-          Math.abs(tileRect.top - gridRect.top) < 12 &&
-          tileRect.width > 100
-      }
+      const gridRectAfter = document.querySelector('.media-wall').getBoundingClientRect()
+      const afterRect = afterSwitchTile ? afterSwitchTile.getBoundingClientRect() : null
+      // 「原地放大」= 它的左边缘远离平面左上角（离原点有几个格子宽），而不是被拽到首位
+      const distanceFromOrigin = afterRect && gridRectAfter
+        ? {
+            left: Math.round(afterRect.left - gridRectAfter.left),
+            top: Math.round(afterRect.top - gridRectAfter.top)
+          }
+        : null
+      const afterSwitchPosition = Boolean(afterRect) && afterRect.left - gridRectAfter.left > 300
       const progressWidth = afterSwitchTile?.querySelector('.hero__progress i')?.style.width || '0%'
 
       // --- 打开专辑 ---
@@ -553,9 +558,12 @@ async function runSmoke ({ win, ctx }) {
         hasFeatured: Boolean(featured),
         featuredKey, currentAlbumKey,
         featuredOrder, featuredColumn, featuredRow,
+        featuredRectFromOrigin: featuredRect && gridRect0
+          ? { left: Math.round(featuredRect.left - gridRect0.left), top: Math.round(featuredRect.top - gridRect0.top) }
+          : null,
         heroTitle, heroLines, heroActive, heroControls, hasExpandButton,
-        beforeSwitchKey, expectedSwitchKey: other?.key || null, afterSwitchKey, afterSwitchTitle,
-        afterSwitchPosition, afterSwitchOrder, progressWidth,
+        beforeSwitchKey, expectedSwitchKey: farAlbum?.key || null, afterSwitchKey, afterSwitchTitle,
+        afterSwitchOrder, afterSwitchPosition, distanceFromOrigin, progressWidth,
         openedAlbum
       }`)
     record('媒体墙', wallView.tiles > 0 && wallView.tiles === groupResult.albums,
@@ -564,8 +572,8 @@ async function runSmoke ({ win, ctx }) {
       `格子 ${wallView.sizeBefore}→${wallView.sizeAfter}，列数 ${wallView.columnsBefore}→${wallView.columnsAfter}`)
     record('媒体墙聚焦块',
       wallView.hasFeatured && wallView.featuredKey === wallView.currentAlbumKey &&
-      wallView.featuredOrder === '-1' && wallView.featuredColumn === 'span 2',
-      `正在播放的专辑排到首位（order=${wallView.featuredOrder}，跨列 ${wallView.featuredColumn}）`)
+      wallView.featuredColumn === 'span 2' && wallView.featuredOrder === '0',
+      `聚焦块跨列 ${wallView.featuredColumn}、order=${wallView.featuredOrder}（不再被强制排到首位），距平面原点 ${JSON.stringify(wallView.featuredRectFromOrigin)}`)
     record('聚焦块内容',
       wallView.heroTitle.length > 0 && wallView.heroControls === 3 && wallView.hasExpandButton &&
       wallView.heroLines > 0 && wallView.heroActive === 1,
@@ -574,8 +582,8 @@ async function runSmoke ({ win, ctx }) {
       `切换瞬间有 ${wallView.flippingRightAfter} 个格子参与动画（共 ${wallView.animated} 个动画），900ms 后全部收敛`)
     record('聚焦块跟随切歌',
       Boolean(wallView.afterSwitchKey) && wallView.afterSwitchKey === wallView.expectedSwitchKey &&
-      wallView.afterSwitchTitle.length > 0 && wallView.afterSwitchPosition && wallView.afterSwitchOrder === '-1',
-      `播放另一张专辑后聚焦块移到 ${wallView.afterSwitchKey?.slice(0, 14)}（order=${wallView.afterSwitchOrder}，排到首位=${wallView.afterSwitchPosition}），标题《${wallView.afterSwitchTitle}》`)
+      wallView.afterSwitchTitle.length > 0 && wallView.afterSwitchPosition,
+      `播放靠后的专辑后聚焦块移到它自己的位置（距原点 ${JSON.stringify(wallView.distanceFromOrigin)}，order=${wallView.afterSwitchOrder}），标题《${wallView.afterSwitchTitle}》`)
     record('媒体墙打开专辑', wallView.openedAlbum, '点击方块角标可进入专辑详情')
 
     /* ---------- 媒体墙的自由拖动（2D 画布） ---------- */
@@ -601,11 +609,21 @@ async function runSmoke ({ win, ctx }) {
       // ① 中键斜向拖动：两个轴都应该动
       pointer('pointerdown', cx, cy, { button: 1, buttons: 4 })
       for (let i = 1; i <= 12; i++) pointer('pointermove', cx - i * 14, cy - i * 7, { button: 1, buttons: 4 })
+      // 平移是按帧合流的，等一帧再读
+      await new Promise((r) => requestAnimationFrame(r))
       const duringMiddle = wall.debugState().pan
+      const lazyDuringDrag = wall.debugState().lazy
       pointer('pointerup', cx - 168, cy - 84, { button: 1, buttons: 0 })
       await new Promise((r) => setTimeout(r, 460))
       const afterMiddle = wall.debugState().pan
       const inertia = { x: afterMiddle.x - duringMiddle.x, y: afterMiddle.y - duringMiddle.y }
+
+      // 惯性停稳 + 防抖窗口之后，封面观察应当自动恢复（惯性时长与环境帧率有关，这里轮询等待）
+      let lazyAfterDrag = wall.debugState().lazy
+      for (let i = 0; i < 40 && lazyAfterDrag.suspended; i++) {
+        await new Promise((r) => setTimeout(r, 250))
+        lazyAfterDrag = wall.debugState().lazy
+      }
 
       // ② Alt + 左键往回拖
       const beforeAlt = wall.debugState().pan
@@ -620,14 +638,25 @@ async function runSmoke ({ win, ctx }) {
       viewport.dispatchEvent(new WheelEvent('wheel', {
         bubbles: true, cancelable: true, deltaX: 160, deltaY: 240
       }))
-      await new Promise((r) => setTimeout(r, 150))
+      await new Promise((r) => setTimeout(r, 500))
       const afterWheel = wall.debugState().pan
 
       // ④ 位置指示器：平移量非零时，内部视口框的位置应当等于 -pan*scale
       const minimap = document.querySelector('.wall-minimap')
       const mapBox = minimap?.querySelector('.wall-minimap__viewport')
-      const mapRect = minimap?.getBoundingClientRect()
-      const boxRect = mapBox?.getBoundingClientRect()
+      // 指示器的位移带 90ms 过渡，等它稳定下来再量（低帧率环境下要等更久）
+      let previousBox = null
+      let boxRect = null
+      let mapRect = null
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 120))
+        mapRect = minimap?.getBoundingClientRect()
+        boxRect = mapBox?.getBoundingClientRect()
+        // 注意：这里是包在模板字符串里的注入代码，内部不能再出现反引号
+        const snapshot = Math.round(boxRect?.left || 0) + '|' + Math.round(boxRect?.top || 0)
+        if (snapshot === previousBox) break
+        previousBox = snapshot
+      }
       const scale = Number(minimap?.dataset.scale) || 1
       const mapState = {
         visible: Boolean(minimap && !minimap.hidden),
@@ -661,7 +690,8 @@ async function runSmoke ({ win, ctx }) {
 
       return {
         initial, duringMiddle, afterMiddle, inertia, beforeAlt, afterAlt,
-        beforeWheel, afterWheel, afterOverdrag, withinBounds, mapState, fitState, canvasState
+        beforeWheel, afterWheel, afterOverdrag, withinBounds, mapState, fitState, canvasState,
+        lazyDuringDrag, lazyAfterDrag
       }`)
     const pan = panCheck
     record('媒体墙二维画布',
@@ -676,6 +706,10 @@ async function runSmoke ({ win, ctx }) {
     record('松手带惯性',
       Math.abs(pan.inertia.x) > 0 || Math.abs(pan.inertia.y) > 0,
       `松手后又滑行 x=${pan.inertia.x} y=${pan.inertia.y}`)
+    record('拖动期间暂停封面观察',
+      pan.lazyDuringDrag.suspended === true && pan.lazyDuringDrag.observing === 0 &&
+      pan.lazyAfterDrag.suspended === false && pan.lazyAfterDrag.observing > 0,
+      `拖动中 observing=${pan.lazyDuringDrag.observing}（暂停），停稳后恢复 observing=${pan.lazyAfterDrag.observing} / 待加载 ${pan.lazyAfterDrag.pending}`)
     record('Alt + 左键拖动',
       pan.afterAlt.x !== pan.beforeAlt.x && pan.afterAlt.y !== pan.beforeAlt.y,
       `x ${pan.beforeAlt.x} → ${pan.afterAlt.x}，y ${pan.beforeAlt.y} → ${pan.afterAlt.y}`)
@@ -692,6 +726,87 @@ async function runSmoke ({ win, ctx }) {
     record('布局切换',
       !pan.fitState.horizontal && pan.canvasState.horizontal && pan.fitState.layout === 'fit' && pan.canvasState.layout === 'canvas',
       `适应宽度：横向不可拖（${pan.fitState.bounds.width}≈视口 ${pan.fitState.bounds.viewWidth}）；自由画布：横向可拖（${pan.canvasState.bounds.width} vs ${pan.canvasState.bounds.viewWidth}）`)
+
+    /* ---------- 平移的每帧开销（曾经每帧强制两次重排，导致一卡一卡） ---------- */
+
+    const perfCheck = await evaluate(win, `
+      const wall = window.__aria.views.mediaWall
+      const viewport = document.querySelector('.wall-viewport')
+
+      // 基准：什么都不做时的帧间隔。软件渲染 / 窗口被遮挡的环境本身就会节流 rAF，
+      // 所以必须先量一个空载基准，否则「帧慢」会被误判成平移的锅。
+      const idleFrames = []
+      let idleLast = performance.now()
+      for (let i = 0; i < 24; i++) {
+        await new Promise((r) => requestAnimationFrame(r))
+        const now = performance.now()
+        idleFrames.push(now - idleLast)
+        idleLast = now
+      }
+      const idleWarm = idleFrames.slice(4)
+      const idleAverage = idleWarm.reduce((sum, value) => sum + value, 0) / Math.max(1, idleWarm.length)
+
+      // 每帧平移的纯开销（同步落一次，绕过 rAF 合流）
+      for (let i = 0; i < 60; i++) wall.debugApplyPan(-i * 3, -i * 2)
+      const rounds = 400
+      const started = performance.now()
+      for (let i = 0; i < rounds; i++) {
+        wall.debugApplyPan(-(i % 900) * 4, -(i % 700) * 3)
+      }
+      const elapsed = performance.now() - started
+
+      // 模拟 30 帧真实拖动，量帧间隔
+      const frames = []
+      let last = performance.now()
+      const rect = viewport.getBoundingClientRect()
+      const cx = Math.round(rect.left + rect.width / 2)
+      const cy = Math.round(rect.top + rect.height / 2)
+      const pointer = (type, x, y, init = {}) => viewport.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, isPrimary: true, pointerId: 9, pointerType: 'mouse',
+        clientX: x, clientY: y, ...init
+      }))
+      pointer('pointerdown', cx, cy, { button: 1, buttons: 4 })
+      for (let i = 0; i < 30; i++) {
+        pointer('pointermove', cx - i * 9, cy - i * 4, { button: 1, buttons: 4 })
+        await new Promise((r) => requestAnimationFrame(r))
+        const now = performance.now()
+        frames.push(now - last)
+        last = now
+      }
+      pointer('pointerup', cx - 270, cy - 120, { button: 1, buttons: 0 })
+      await new Promise((r) => setTimeout(r, 500))
+
+      const dragWarm = frames.slice(4)
+      const dragAverage = dragWarm.reduce((sum, value) => sum + value, 0) / Math.max(1, dragWarm.length)
+
+      // 对照微基准：如果每帧照旧读 DOM（offsetWidth / getBoundingClientRect），代价是多少。
+      // 这不是被测代码，只是用来量化「缓存几何」省下了什么。
+      const grid = document.querySelector('.media-wall')
+      const minimap = document.querySelector('.wall-minimap')
+      const domRounds = 100
+      const domStarted = performance.now()
+      for (let i = 0; i < domRounds; i++) {
+        void grid.offsetWidth
+        void minimap.getBoundingClientRect()
+        grid.style.transform = 'translate3d(' + (-i) + 'px,' + (-i) + 'px,0)'
+      }
+      const domElapsed = performance.now() - domStarted
+
+      return {
+        rounds,
+        elapsed: Math.round(elapsed * 100) / 100,
+        perCall: Math.round((elapsed / rounds) * 10000) / 10000,
+        idleAverage: Math.round(idleAverage * 100) / 100,
+        dragAverage: Math.round(dragAverage * 100) / 100,
+        dragMax: Math.round(Math.max(...dragWarm) * 100) / 100,
+        domPerCall: Math.round((domElapsed / domRounds) * 1000) / 1000
+      }`)
+    record('平移每帧开销（无强制重排）', perfCheck.perCall < 0.2,
+      `${perfCheck.rounds} 次同步平移共 ${perfCheck.elapsed}ms，平均 ${perfCheck.perCall}ms/次（含 transform 写入与指示器更新）；` +
+      `对照：每帧读一次 DOM 的旧写法为 ${perfCheck.domPerCall}ms/次，相差约 ${Math.round(perfCheck.domPerCall / Math.max(0.0001, perfCheck.perCall))} 倍`)
+    record('拖动不额外拖慢帧率',
+      perfCheck.dragAverage < Math.max(34, perfCheck.idleAverage * 1.8),
+      `空载帧间隔 ${perfCheck.idleAverage}ms，拖动时 ${perfCheck.dragAverage}ms（最大 ${perfCheck.dragMax}ms）；注：本环境 rAF 本身被节流到约 ${Math.round(1000 / perfCheck.idleAverage)}fps，故只看相对值`)
 
     /* ---------- 各视图的滚动能力（曾经因为视图根节点 display 被清掉而整块滚不动） ---------- */
 
