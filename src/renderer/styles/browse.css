@@ -794,6 +794,19 @@
   text-shadow: 0 1px 14px rgba(0, 0, 0, 0.45);
 }
 
+/* 翻译行：比主歌词小一号、淡一些，跟随所在行的状态一起亮起来 */
+.mini-lyrics__sub {
+  margin-top: 0.15em;
+  font-size: 0.76em;
+  font-weight: 500;
+  color: currentColor;
+  opacity: 0.62;
+}
+
+.mini-lyrics__line.is-active .mini-lyrics__sub {
+  opacity: 0.82;
+}
+
 .mini-lyrics__empty {
   font-size: clamp(10px, 3cqw, 15px);
   color: rgba(255, 255, 255, 0.42);

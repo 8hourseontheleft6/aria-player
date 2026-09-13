@@ -1,6 +1,10 @@
 /**
  * 迷你歌词：3~5 行的同步滚动歌词，用于媒体墙的聚焦块这类小尺寸容器。
  * 与大歌词视图共用状态（store.lyrics + LYRICS_ACTIVE 事件），但不可交互、不做偏移设置。
+ *
+ * 双语歌词必须同时渲染主歌词与翻译行：中文歌词文件常见的形式是
+ * 「中文在前、英文在后、时间戳相同」，只取 line.text 就会变成
+ * 前面几行英文、后面全是中文，看起来像「只剩翻译了」。
  */
 
 import { h, clear } from '../core/dom.js'
@@ -15,6 +19,13 @@ export function createMiniLyrics ({ store, bus, player, className = '' }) {
   let activeIndex = -1
   let translateY = 0
 
+  /** 一行 = 主歌词（+ 可选的翻译行） */
+  function createLine (text, translation) {
+    return h('div', { class: 'mini-lyrics__line' },
+      h('div', { class: 'mini-lyrics__main', text }),
+      translation ? h('div', { class: 'mini-lyrics__sub', text: translation }) : null)
+  }
+
   function render () {
     const lyrics = store.get().lyrics
     clear(inner)
@@ -23,11 +34,15 @@ export function createMiniLyrics ({ store, bus, player, className = '' }) {
     translateY = 0
     inner.style.transform = 'none'
 
-    let texts = []
-    if (lyrics.lines?.length) texts = lyrics.lines.map((line) => line.text)
-    else if (lyrics.plain?.length) texts = lyrics.plain
+    if (lyrics.lines?.length) {
+      for (const line of lyrics.lines) {
+        lineNodes.push(createLine(line.text, line.translation))
+      }
+    } else if (lyrics.plain?.length) {
+      for (const text of lyrics.plain) lineNodes.push(createLine(text, ''))
+    }
 
-    if (!texts.length) {
+    if (!lineNodes.length) {
       const message = lyrics.status === 'loading'
         ? '正在载入歌词…'
         : lyrics.status === 'empty' ? '纯音乐，请欣赏' : '暂无歌词'
@@ -35,9 +50,6 @@ export function createMiniLyrics ({ store, bus, player, className = '' }) {
       return
     }
 
-    for (const text of texts) {
-      lineNodes.push(h('div', { class: 'mini-lyrics__line', text: text }))
-    }
     inner.append(...lineNodes)
 
     // 直接对齐到当前播放位置，避免刚显示时还停在第一行

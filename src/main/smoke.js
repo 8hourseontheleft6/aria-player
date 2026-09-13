@@ -12,6 +12,7 @@
 
 const path = require('node:path')
 const fs = require('node:fs')
+const fsp = require('node:fs/promises')
 const os = require('node:os')
 
 const POLL_INTERVAL = 250
@@ -973,6 +974,71 @@ async function runSmoke ({ win, ctx }) {
     record('无变化时不提示',
       noopScan.changed === 0 && toastCount === 0,
       `重扫未产生任何增减（changed=${noopScan.changed}，复用缓存 ${noopScan.reused} 首），界面上没有弹出提示（toast=${toastCount}）`)
+
+    /* ---------- 双语歌词：迷你歌词必须同时显示主歌词与翻译 ---------- */
+
+    // 找一个「同一时间戳出现两次」的歌词文件 = 双语歌词
+    const bilingualTrack = await (async () => {
+      const candidates = artworkService.getTracks().filter((track) => track.lyricsPath).slice(0, 120)
+      for (const track of candidates) {
+        let text = ''
+        try {
+          text = (await fsp.readFile(track.lyricsPath)).toString('utf8')
+        } catch {
+          continue
+        }
+        // 时间戳是 ASCII，即使文件是 GBK 也能正确数出来
+        const stamps = [...text.matchAll(/\[(\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?)\]/g)].map((match) => match[1])
+        const counts = new Map()
+        for (const stamp of stamps) counts.set(stamp, (counts.get(stamp) || 0) + 1)
+        const duplicated = [...counts.values()].filter((count) => count >= 2).length
+        if (duplicated >= 5) return track
+      }
+      return null
+    })()
+
+    if (!bilingualTrack) {
+      record('双语歌词迷你显示', true, '资料库里没有找到双语歌词，跳过')
+    } else {
+      const bilingualCheck = await evaluate(win, `
+        const { actions, store } = window.__aria
+        const track = store.get().library.byId.get(${JSON.stringify(bilingualTrack.id)})
+        if (!track) return { error: '找不到曲目' }
+        actions.setView('wall')
+        actions.playTrack(track, [track])
+        // 等歌词加载完
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 250))
+          if (store.get().lyrics.status === 'ready' && store.get().lyrics.lines.length > 3) break
+        }
+        const state = store.get().lyrics
+        const nodes = [...document.querySelectorAll('.hero__lyrics .mini-lyrics__line')]
+        const withSub = nodes.filter((node) => node.querySelector('.mini-lyrics__sub'))
+        const sample = withSub.slice(0, 3).map((node) => ({
+          main: node.querySelector('.mini-lyrics__main')?.textContent || '',
+          sub: node.querySelector('.mini-lyrics__sub')?.textContent || ''
+        }))
+        const activeNode = document.querySelector('.hero__lyrics .mini-lyrics__line.is-active')
+        return {
+          title: track.title,
+          lyricLines: state.lines.length,
+          translated: state.lines.filter((line) => line.translation).length,
+          renderedLines: nodes.length,
+          renderedWithSub: withSub.length,
+          sample,
+          activeHasSub: Boolean(activeNode?.querySelector('.mini-lyrics__sub')),
+          fullViewLines: document.querySelectorAll('.lyrics__line').length
+        }`)
+      const sampleOk = bilingualCheck.sample?.length > 0 &&
+        bilingualCheck.sample.every((item) => item.main.length > 0 && item.sub.length > 0 && item.main !== item.sub)
+      record('双语歌词迷你显示',
+        bilingualCheck.renderedWithSub > 3 && bilingualCheck.renderedWithSub === bilingualCheck.translated && sampleOk,
+        `《${bilingualCheck.title}》解析出 ${bilingualCheck.translated}/${bilingualCheck.lyricLines} 行带翻译，` +
+        `迷你歌词渲染 ${bilingualCheck.renderedWithSub} 行带翻译；例：` +
+        (bilingualCheck.sample || []).map((item) => `「${item.main}」/「${item.sub}」`).join('、'))
+      record('双语歌词全屏视图', bilingualCheck.fullViewLines > 0,
+        `全屏歌词仍渲染 ${bilingualCheck.fullViewLines} 行（与迷你歌词共用同一份解析结果）`)
+    }
 
     /* ---------- 各视图的滚动能力（曾经因为视图根节点 display 被清掉而整块滚不动） ---------- */
 
