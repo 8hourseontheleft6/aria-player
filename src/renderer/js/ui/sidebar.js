@@ -27,6 +27,8 @@ export function createSidebar ({ store, bus, actions }) {
   function render () {
     const state = store.get()
     const { ui, library, playback } = state
+    const albumCount = actions.albums?.().length || 0
+    const artistCount = actions.artists?.().length || 0
     clear(scroll)
     clear(footer)
 
@@ -36,15 +38,35 @@ export function createSidebar ({ store, bus, actions }) {
       row({
         iconName: 'music',
         label: '正在播放',
-        selected: ui.view === 'now-playing',
+        selected: ui.nowPlayingOpen,
         onClick: () => actions.openNowPlaying()
       }),
       row({
         iconName: 'list',
         label: '全部歌曲',
         count: library.tracks.length || undefined,
-        selected: ui.view !== 'settings' && ui.source.type === 'all',
+        selected: ui.view === 'songs' && ui.source.type === 'all',
         onClick: () => actions.setSource({ type: 'all', value: null })
+      }),
+      row({
+        iconName: 'disc',
+        label: '专辑',
+        count: albumCount || undefined,
+        selected: ui.view === 'albums',
+        onClick: () => actions.setView('albums')
+      }),
+      row({
+        iconName: 'artist',
+        label: '艺人',
+        count: artistCount || undefined,
+        selected: ui.view === 'artists',
+        onClick: () => actions.setView('artists')
+      }),
+      row({
+        iconName: 'wall',
+        label: '媒体墙',
+        selected: ui.view === 'wall',
+        onClick: () => actions.setView('wall')
       }),
       row({
         iconName: 'waveform',

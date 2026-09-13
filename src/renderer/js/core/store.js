@@ -102,6 +102,7 @@ export function initialState () {
     ui: {
       view: 'songs',
       source: { type: 'all', value: null },
+      detail: null,
       query: '',
       sort: { key: 'default', direction: 'asc' },
       nowPlayingOpen: false,
@@ -110,7 +111,8 @@ export function initialState () {
       lyricsVisible: true,
       toast: null,
       scanning: false,
-      scanProgress: null
+      scanProgress: null,
+      dropActive: false
     },
     library: {
       loaded: false,

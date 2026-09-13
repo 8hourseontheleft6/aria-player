@@ -98,7 +98,7 @@ export function createTrackList ({ store, bus, player, artwork, actions }) {
       selectedId = track.id
       refreshSelection()
     })
-    on(row, 'dblclick', () => actions.playTrack(track))
+    on(row, 'dblclick', () => actions.playTrack(track, tracks))
     on(row, 'contextmenu', (event) => {
       event.preventDefault()
       selectedId = track.id
@@ -141,7 +141,7 @@ export function createTrackList ({ store, bus, player, artwork, actions }) {
           title: '播放',
           onClick: (event) => {
             event.stopPropagation()
-            actions.playTrack(track)
+            actions.playTrack(track, tracks)
           }
         }, icon('play'))
       )
@@ -257,7 +257,7 @@ export function createTrackList ({ store, bus, player, artwork, actions }) {
       refreshSelection()
     } else if (event.key === 'Enter') {
       const track = tracks.find((item) => item.id === selectedId)
-      if (track) actions.playTrack(track)
+      if (track) actions.playTrack(track, tracks)
     }
   })
 

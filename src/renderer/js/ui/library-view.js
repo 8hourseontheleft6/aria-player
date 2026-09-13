@@ -3,6 +3,7 @@
 import { h, on, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
 import { formatDurationLong, normalizeForSearch } from '../core/format.js'
+import { selectVisibleTracks, selectTitle } from '../core/selectors.js'
 import { EVENTS } from '../core/bus.js'
 import { createTrackList } from './track-list.js'
 import { openPopover, popoverRows } from './overlay.js'
@@ -16,39 +17,6 @@ const SORT_OPTIONS = [
   { key: 'year', label: '年份' },
   { key: 'added', label: '文件修改时间' }
 ]
-
-function compareTracks (sort) {
-  const dir = sort.direction === 'desc' ? -1 : 1
-  const text = (a, b) => String(a || '').localeCompare(String(b || ''), 'zh-Hans-CN')
-  return (a, b) => {
-    let result = 0
-    switch (sort.key) {
-      case 'title':
-        result = text(a.title, b.title)
-        break
-      case 'artist':
-        result = text(a.artist, b.artist) || text(a.album, b.album) || text(a.title, b.title)
-        break
-      case 'album':
-        result = text(a.album, b.album) || (a.discNo - b.discNo) || (a.trackNo - b.trackNo)
-        break
-      case 'duration':
-        result = a.duration - b.duration
-        break
-      case 'year':
-        result = (a.year || 0) - (b.year || 0) || text(a.album, b.album)
-        break
-      case 'added':
-        result = (a.mtimeMs || 0) - (b.mtimeMs || 0)
-        break
-      default:
-        result = text(a.albumArtist, b.albumArtist) || text(a.album, b.album) ||
-          (a.discNo - b.discNo) || (a.trackNo - b.trackNo) || text(a.title, b.title)
-    }
-    if (result === 0) result = text(a.title, b.title)
-    return result * dir
-  }
-}
 
 export function createLibraryView ({ store, bus, player, artwork, actions, trackListOptions }) {
   const trackList = createTrackList({ store, bus, player, artwork, actions, ...trackListOptions })
@@ -158,25 +126,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
 
   /* ---------------- 数据计算 ---------------- */
   function computeTracks (state) {
-    let list = state.library.tracks
-    const { source, query, sort } = state.ui
-
-    if (source.type === 'folder' && source.value) {
-      list = list.filter((track) => track.path.startsWith(source.value))
-    }
-
-    const keyword = normalizeForSearch(query)
-    if (keyword) {
-      const parts = keyword.split(/\s+/).filter(Boolean)
-      list = list.filter((track) => {
-        const haystack = track._search || normalizeForSearch(`${track.title} ${track.artist} ${track.album} ${track.albumArtist}`)
-        return parts.every((part) => haystack.includes(part))
-      })
-    }
-
-    const sorted = list.slice()
-    sorted.sort(compareTracks(sort))
-    return sorted
+    return selectVisibleTracks(state)
   }
 
   let lastSignature = ''
@@ -190,9 +140,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     }
 
     const total = tracks.reduce((sum, track) => sum + (track.duration || 0), 0)
-    const title = state.ui.source.type === 'folder' && state.ui.source.value
-      ? (state.ui.source.value.split(/[\\/]/).filter(Boolean).pop() || '文件夹')
-      : (state.ui.query ? '搜索结果' : '全部歌曲')
+    const title = selectTitle(state, '全部歌曲')
 
     headerTitle.textContent = title
     compactTitle.textContent = title

@@ -25,7 +25,7 @@ const SHORTCUTS = [
   ['M', '切换播放模式'],
   ['[ / ]', '播放速度 -0.05× / +0.05×'],
   ['↑ / ↓、回车', '在列表中移动选择 / 播放'],
-  ['Esc', '关闭浮层']
+  ['Esc', '关闭浮层 / 返回上一级 / 收起正在播放']
 ]
 
 export function createSettingsView ({ store, bus, player, actions, host }) {

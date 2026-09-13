@@ -12,6 +12,14 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
 | --- | --- |
 | ![歌曲列表](docs/screenshots/01-library.png) | ![正在播放](docs/screenshots/02-now-playing.png) |
 
+| 专辑网格 | 专辑详情 |
+| --- | --- |
+| ![专辑网格](docs/screenshots/09-albums.png) | ![专辑详情](docs/screenshots/10-album-detail.png) |
+
+| 媒体墙 | 艺人 |
+| --- | --- |
+| ![媒体墙](docs/screenshots/12-wall.png) | ![艺人列表](docs/screenshots/11-artists.png) |
+
 | 播放队列 | 设置 |
 | --- | --- |
 | ![播放队列](docs/screenshots/04-queue.png) | ![设置](docs/screenshots/06-settings.png) |
@@ -27,6 +35,7 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
 ## 功能
 
 - **资料库**：递归扫描本地音乐目录，读取 ID3 / MP4 / FLAC / Vorbis 元数据与内嵌封面（`music-metadata`，缺失时自动降级到内置 ID3 解析器）
+- **浏览**：歌曲列表（虚拟滚动，几万首不卡）、专辑网格、艺人列表、媒体墙（满屏封面马赛克，三档尺寸），专辑/艺人详情页支持整张播放、随机播放、加入队列
 - **播放**：顺序播放、列表循环、单曲循环、随机播放，暂停 / 上一曲 / 下一曲 / 进度条拖动与缓冲显示
 - **歌词**：自动匹配同名或「歌名-歌手」`.lrc`，逐行跟随滚动、双语翻译行、逐字（卡拉 OK）高亮、手动滚动后「回到当前」、偏移与字号调节，支持 GBK/UTF-8/UTF-16 编码探测与内嵌歌词
 - **变速**：0.5× – 2×（步进 0.05），可开关「保持音调」
@@ -76,7 +85,7 @@ npx electron scripts/preview.js docs/screenshots/01-library.png 104
 | `Ctrl + M` | 静音 |
 | `M` | 切换播放模式 |
 | `[ / ]` | 播放速度 ±0.05× |
-| `Esc` | 关闭浮层 |
+| `Esc` | 关闭浮层 / 返回上一级 / 收起正在播放 |
 
 键盘上的媒体键（播放/暂停、上一首、下一首）由主进程全局快捷键接管，可在设置里关闭。
 
@@ -105,10 +114,11 @@ src/
     js/
       app.js                   渲染层组装（composition root）
       core/                    bus store dom icons format remote media-url artwork
-                               audio-engine playlist playback-modes lrc plugin-host player-controller
-      ui/                      titlebar sidebar library-view track-list player-bar
-                               now-playing-panel lyrics-view queue-panel settings-view
-                               slider overlay artwork-node track-menu
+                               audio-engine playlist playback-modes lrc plugin-host
+                               selectors（可见曲目） grouping（专辑/艺人索引） player-controller
+      ui/                      titlebar sidebar library-view browse-view media-wall
+                               cover-grid track-list player-bar now-playing-panel lyrics-view
+                               queue-panel settings-view slider overlay artwork-node track-menu
       plugins/                 内置示例插件
 ```
 

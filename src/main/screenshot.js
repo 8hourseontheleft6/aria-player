@@ -87,6 +87,36 @@ async function runScreenshots ({ win }) {
     ['06-settings.png', '设置', async () => {
       await evaluate(win, `window.__aria.actions.setQuery(''); window.__aria.actions.setView('settings'); return true`)
       await sleep(900)
+    }],
+    ['09-albums.png', '专辑网格', async () => {
+      await evaluate(win, `window.__aria.actions.setView('albums'); return true`)
+      await sleep(1600)
+    }],
+    ['10-album-detail.png', '专辑详情', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        const albums = actions.albums()
+        // 挑一张曲目最多的专辑，能看出详情页的曲目列表
+        const album = albums.slice().sort((a, b) => b.trackCount - a.trackCount)[0]
+        actions.openAlbum(album.key)
+        return true`)
+      await sleep(1600)
+    }],
+    ['11-artists.png', '艺人列表', async () => {
+      await evaluate(win, `window.__aria.actions.setView('artists'); return true`)
+      await sleep(1400)
+    }],
+    ['13-artist-detail.png', '艺人详情', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        const artists = actions.artists().slice().sort((a, b) => b.trackCount - a.trackCount)
+        actions.openArtist(artists[0].key)
+        return true`)
+      await sleep(1600)
+    }],
+    ['12-wall.png', '媒体墙', async () => {
+      await evaluate(win, `window.__aria.actions.setView('wall'); return true`)
+      await sleep(2200)
     }]
   ]
 

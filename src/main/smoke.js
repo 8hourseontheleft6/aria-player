@@ -391,6 +391,112 @@ async function runSmoke ({ win, ctx }) {
       return { cards, switches, visible }`)
     record('设置页渲染', settingsResult.visible && settingsResult.cards >= 5,
       `${settingsResult.cards} 个分组卡片，${settingsResult.switches} 个开关`)
+
+    /* ---------- 浏览视图 ---------- */
+
+    // 专辑 / 艺人分组
+    const groupResult = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const albums = actions.albums()
+      const artists = actions.artists()
+      const total = store.get().library.tracks.length
+      const counted = albums.reduce((sum, album) => sum + album.trackCount, 0)
+      return {
+        albums: albums.length,
+        artists: artists.length,
+        total,
+        counted,
+        firstAlbum: albums[0] ? { name: albums[0].name, artist: albums[0].albumArtist, tracks: albums[0].trackCount, key: albums[0].key } : null,
+        firstArtist: artists[0] ? { name: artists[0].name, albums: artists[0].albumCount, tracks: artists[0].trackCount } : null
+      }`)
+    record('专辑分组', groupResult.albums > 0 && groupResult.counted === groupResult.total,
+      `${groupResult.albums} 张专辑，覆盖 ${groupResult.counted}/${groupResult.total} 首；例：${groupResult.firstAlbum?.artist}《${groupResult.firstAlbum?.name}》${groupResult.firstAlbum?.tracks} 首`)
+    record('艺人分组', groupResult.artists > 0,
+      `${groupResult.artists} 位艺人；例：${groupResult.firstArtist?.name}（${groupResult.firstArtist?.albums} 张 / ${groupResult.firstArtist?.tracks} 首）`)
+
+    // 专辑网格 + 详情页
+    const albumView = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('albums')
+      await new Promise((r) => setTimeout(r, 600))
+      const cards = document.querySelectorAll('.cover-card').length
+      const covers = document.querySelectorAll('.cover-card__art img').length
+      const page = document.querySelector('.browse-page')
+      const root = page?.parentElement
+      const content = document.getElementById('content')
+      const rectOf = (el) => { const r = el?.getBoundingClientRect(); return r ? [Math.round(r.width), Math.round(r.height)] : null }
+      const geometry = { page: rectOf(page), root: rectOf(root), content: rectOf(content), display: page ? getComputedStyle(page).display : null }
+      const visible = Boolean(page && page.getBoundingClientRect().height > 0)
+      const first = document.querySelector('.cover-card')
+      first?.click()
+      await new Promise((r) => setTimeout(r, 600))
+      const detail = document.querySelectorAll('.browse-page')[2]
+      const detailTitle = detail?.querySelector('.browse-detail__title')?.textContent || ''
+      const rows = detail ? detail.querySelectorAll('.track-row').length : 0
+      const detailVisible = Boolean(detail && detail.getBoundingClientRect().height > 0)
+      const detailKey = window.__aria.store.get().ui.detail?.key || null
+      return { cards, covers, visible, geometry, detailTitle, rows, detailVisible, detailKey }`)
+    record('专辑网格', albumView.visible && albumView.cards > 0,
+      `${albumView.cards} 张卡片，已加载封面 ${albumView.covers} 张，几何 ${JSON.stringify(albumView.geometry)}`)
+    record('专辑详情页', albumView.detailVisible && Boolean(albumView.detailKey) && albumView.detailTitle.length > 0 && albumView.rows > 0,
+      `《${albumView.detailTitle}》渲染 ${albumView.rows} 行曲目`)
+
+    // 从专辑详情播放：队列应该等于该专辑曲目数
+    const albumPlay = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const album = actions.albumByKey(store.get().ui.detail.key)
+      actions.playCollectionOf(album.tracks, album.tracks[0])
+      await new Promise((r) => setTimeout(r, 800))
+      const queue = store.get().playback.queue.length
+      const playing = player.currentTrack()
+      return { queue, albumTracks: album.trackCount, title: playing?.title || '' }`)
+    record('按专辑播放', albumPlay.queue === albumPlay.albumTracks,
+      `队列 ${albumPlay.queue} 首 = 专辑 ${albumPlay.albumTracks} 首；正在播放《${albumPlay.title}》`)
+
+    // 艺人列表与详情
+    const artistView = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('artists')
+      await new Promise((r) => setTimeout(r, 600))
+      const rows = document.querySelectorAll('.artist-row').length
+      document.querySelector('.artist-row')?.click()
+      await new Promise((r) => setTimeout(r, 700))
+      const name = document.querySelector('.browse-detail__title')?.textContent || ''
+      const strip = document.querySelectorAll('.cover-grid--strip .cover-card').length
+      const detailKey = window.__aria.store.get().ui.detail?.key || null
+      const backVisible = Boolean(document.querySelector('.browse-back'))
+      document.querySelector('.browse-back')?.click()
+      await new Promise((r) => setTimeout(r, 400))
+      const detailAfterBack = window.__aria.store.get().ui.detail
+      actions.setView('songs')
+      return { rows, name, strip, detailKey, backVisible, detailAfterBack }`)
+    record('艺人列表', artistView.rows > 0, `${artistView.rows} 位艺人`)
+    record('艺人详情与返回', Boolean(artistView.detailKey) && artistView.name.length > 0 && artistView.backVisible && artistView.detailAfterBack === null,
+      `《${artistView.name}》横向专辑 ${artistView.strip} 张，返回后详情状态已清空`)
+
+    // 媒体墙
+    const wallView = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 900))
+      const tiles = document.querySelectorAll('.wall-tile').length
+      const imgs = document.querySelectorAll('.wall-tile__art img').length
+      const grid = document.querySelector('.media-wall')
+      const widthBefore = grid?.style.getPropertyValue('--wall-min')
+      document.querySelector('[data-density="l"]')?.click()
+      await new Promise((r) => setTimeout(r, 300))
+      const widthAfter = grid?.style.getPropertyValue('--wall-min')
+      document.querySelector('.wall-tile .wall-tile__open')?.click()
+      await new Promise((r) => setTimeout(r, 500))
+      const openedAlbum = Boolean(window.__aria.store.get().ui.detail)
+      actions.closeDetail()
+      actions.setView('songs')
+      return { tiles, imgs, widthBefore, widthAfter, openedAlbum }`)
+    record('媒体墙', wallView.tiles > 0 && wallView.tiles === groupResult.albums,
+      `${wallView.tiles} 张封面方块（= 专辑数），已加载 ${wallView.imgs} 张`)
+    record('媒体墙密度切换', wallView.widthBefore !== wallView.widthAfter,
+      `--wall-min ${wallView.widthBefore} → ${wallView.widthAfter}`)
+    record('媒体墙打开专辑', wallView.openedAlbum, '点击方块角标可进入专辑详情')
   } catch (err) {
     record('执行过程', false, err.message)
   }

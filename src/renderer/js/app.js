@@ -20,15 +20,20 @@ import { createPluginHost } from './core/plugin-host.js'
 import { registerBuiltinModes } from './core/playback-modes.js'
 import { createArtworkService } from './core/artwork.js'
 import { createPlayerController } from './core/player-controller.js'
+import { createLibraryIndex } from './core/grouping.js'
+import { selectVisibleTracks } from './core/selectors.js'
 
 import { createTitlebar } from './ui/titlebar.js'
 import { createSidebar } from './ui/sidebar.js'
 import { createLibraryView } from './ui/library-view.js'
+import { createBrowseView } from './ui/browse-view.js'
+import { createMediaWall } from './ui/media-wall.js'
 import { createSettingsView } from './ui/settings-view.js'
 import { createPlayerBar } from './ui/player-bar.js'
 import { createNowPlayingPanel } from './ui/now-playing-panel.js'
 import { createQueuePanel } from './ui/queue-panel.js'
 import { createTrackMenu } from './ui/track-menu.js'
+import { createLazyArtwork } from './ui/artwork-node.js'
 import { toast, closeAllLayers } from './ui/overlay.js'
 
 import { BUILTIN_PLUGINS } from './plugins/index.js'
@@ -56,6 +61,30 @@ async function main () {
   const player = createPlayerController({ store, bus, engine, playlist, host, artwork })
 
   /* ------------------------------------------------------------------ */
+  /* 可见曲目与分组索引（带记忆化，避免每次渲染重算 800 首）               */
+  /* ------------------------------------------------------------------ */
+  const libraryIndex = createLibraryIndex()
+  let visibleCache = null
+  let visibleKey = [null, null, null, null]
+
+  function visibleTracks () {
+    const state = store.get()
+    const { library, ui } = state
+    if (visibleCache &&
+      visibleKey[0] === library.tracks && visibleKey[1] === ui.source &&
+      visibleKey[2] === ui.query && visibleKey[3] === ui.sort) {
+      return visibleCache
+    }
+    visibleCache = selectVisibleTracks(state)
+    visibleKey = [library.tracks, ui.source, ui.query, ui.sort]
+    return visibleCache
+  }
+
+  function index () {
+    return libraryIndex.get(visibleTracks())
+  }
+
+  /* ------------------------------------------------------------------ */
   /* DOM 容器                                                            */
   /* ------------------------------------------------------------------ */
   const dom = {
@@ -72,12 +101,62 @@ async function main () {
   /* ------------------------------------------------------------------ */
   const actions = {
     setView (view) {
-      store.set((state) => ({ ...state, ui: { ...state.ui, view } }))
+      store.set((state) => ({
+        ...state,
+        ui: {
+          ...state.ui,
+          view,
+          // 从侧边栏切换视图时总是回到列表页，不保留上一次的专辑/艺人详情
+          detail: null
+        }
+      }))
+      if (store.get().ui.nowPlayingOpen) actions.closeNowPlaying()
     },
 
     setSource (source) {
-      store.set((state) => ({ ...state, ui: { ...state.ui, view: 'songs', source } }))
-      if (store.get().ui.nowPlayingOpen) actions.closeNowPlaying()
+      store.set((state) => ({
+        ...state,
+        ui: {
+          ...state.ui,
+          source,
+          detail: null,
+          view: state.ui.view === 'settings' ? 'songs' : state.ui.view
+        }
+      }))
+    },
+
+    /* ---------- 专辑 / 艺人浏览 ---------- */
+    albums: () => index().albumList,
+    artists: () => index().artistList,
+    albumByKey: (key) => index().albums.get(key) || null,
+    artistByKey: (key) => index().artists.get(key) || null,
+
+    openAlbum (key) {
+      store.set((state) => ({ ...state, ui: { ...state.ui, view: 'albums', detail: { type: 'album', key } } }))
+    },
+
+    openArtist (key) {
+      store.set((state) => ({ ...state, ui: { ...state.ui, view: 'artists', detail: { type: 'artist', key } } }))
+    },
+
+    closeDetail () {
+      store.set((state) => ({ ...state, ui: { ...state.ui, detail: null } }))
+    },
+
+    /** 用某个集合（专辑 / 艺人 / 搜索结果）作为队列播放 */
+    playCollectionOf (tracks, startTrack) {
+      const list = (tracks || []).map((track) => track.id)
+      if (!list.length) return
+      const start = startTrack?.id || list[0]
+      if (store.get().playback.mode === 'shuffle') player.setMode('loop-list')
+      player.playCollection(list, start)
+    },
+
+    shuffleCollectionOf (tracks) {
+      const list = (tracks || []).map((track) => track.id)
+      if (!list.length) return
+      player.setMode('shuffle')
+      player.playCollection(list, list[Math.floor(Math.random() * list.length)])
     },
 
     setQuery (query) {
@@ -140,34 +219,32 @@ async function main () {
       if (window.innerWidth < 1100) actions.toggleQueue(false)
     },
 
-    playTrack (track) {
+    playTrack (track, context) {
       if (!track) return
-      const list = libraryView.tracks.map((item) => item.id)
-      if (list.includes(track.id)) {
-        player.playCollection(list, track.id)
-      } else {
-        player.playCollection([track.id], track.id)
-      }
+      // context 由列表组件传入（专辑详情、艺人详情的列表会传自己的曲目集合），
+      // 这样「点哪首歌就以哪个集合作为队列」的行为在各视图里一致
+      const source = Array.isArray(context) && context.length ? context : visibleTracks()
+      const list = source.map((item) => item.id)
+      if (list.includes(track.id)) player.playCollection(list, track.id)
+      else player.playCollection([track.id], track.id)
     },
 
     playAll () {
-      const list = libraryView.tracks
+      const list = visibleTracks()
       if (!list.length) {
         toast({ message: '列表里还没有歌曲', type: 'info' })
         return
       }
-      if (store.get().playback.mode === 'shuffle') player.setMode('loop-list')
-      player.playCollection(list.map((item) => item.id), list[0].id)
+      actions.playCollectionOf(list, list[0])
     },
 
     shuffleAll () {
-      const list = libraryView.tracks
+      const list = visibleTracks()
       if (!list.length) {
         toast({ message: '列表里还没有歌曲', type: 'info' })
         return
       }
-      player.setMode('shuffle')
-      player.playCollection(list.map((item) => item.id), list[Math.floor(Math.random() * list.length)].id)
+      actions.shuffleCollectionOf(list)
     },
 
     togglePlay () {
@@ -247,6 +324,10 @@ async function main () {
   const sidebar = createSidebar({ store, bus, actions })
   const trackMenu = createTrackMenu({ store, bus, player, host, actions })
   const libraryView = createLibraryView({ store, bus, player, artwork, actions })
+  // 封面懒加载器由 app 统一持有：专辑网格、艺人列表、媒体墙共用同一个 IntersectionObserver
+  const lazyArtwork = createLazyArtwork(artwork)
+  const browseView = createBrowseView({ store, bus, player, artwork, actions, lazy: lazyArtwork })
+  const mediaWall = createMediaWall({ store, bus, player, actions, lazy: lazyArtwork })
   const settingsView = createSettingsView({ store, bus, player, actions, host })
   const playerBar = createPlayerBar({ store, bus, player, artwork, actions })
   const nowPlayingPanel = createNowPlayingPanel({ store, bus, player, artwork, host, actions })
@@ -254,15 +335,28 @@ async function main () {
 
   dom.titlebar.replaceWith(titlebar.element)
   dom.sidebar.replaceWith(sidebar.element)
-  dom.content.append(libraryView.element, settingsView.element, queuePanel.element)
+  dom.content.append(libraryView.element, browseView.element, mediaWall.element, settingsView.element, queuePanel.element)
   dom.playerBar.replaceWith(playerBar.element)
   dom.nowPlaying.replaceWith(nowPlayingPanel.element)
 
-  // 视图切换：歌曲列表 / 设置
-  store.select((state) => state.ui.view, (view) => {
-    libraryView.element.style.display = view === 'settings' ? 'none' : ''
-    settingsView.element.style.display = view === 'settings' ? '' : 'none'
+  // 视图切换：歌曲列表 / 专辑 / 艺人 / 媒体墙 / 设置
+  // 注意：几个视图可能共用同一个容器（专辑与艺人共用 browseView），
+  // 所以按「容器 -> 支持的视图」组织，避免同一元素被后面的分支又设回 display:none
+  const viewContainers = [
+    { views: ['songs'], element: libraryView.element },
+    { views: ['albums', 'artists'], element: browseView.element },
+    { views: ['wall'], element: mediaWall.element },
+    { views: ['settings'], element: settingsView.element }
+  ]
+
+  store.select((state) => `${state.ui.view}|${state.ui.detail ? state.ui.detail.key : ''}`, () => {
+    const view = store.get().ui.view
+    for (const container of viewContainers) {
+      container.element.style.display = container.views.includes(view) ? '' : 'none'
+    }
     if (view === 'settings') settingsView.render()
+    if (view === 'wall') mediaWall.refresh()
+    if (view === 'albums' || view === 'artists') browseView.render()
   })
 
   store.select((state) => state.ui.sidebarVisible, (visible) => {
@@ -395,6 +489,11 @@ async function main () {
         }
         if (store.get().ui.queueOpen) {
           actions.toggleQueue(false)
+          event.preventDefault()
+          return
+        }
+        if (store.get().ui.detail && !store.get().ui.nowPlayingOpen) {
+          actions.closeDetail()
           event.preventDefault()
           return
         }

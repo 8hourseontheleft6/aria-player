@@ -1,0 +1,480 @@
+/* ==========================================================================
+   浏览视图：专辑网格 / 艺人列表 / 详情页 / 媒体墙
+   ========================================================================== */
+
+.browse-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.browse-scroll {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 24px;
+}
+
+/* ------------------------------ 封面网格 ------------------------------ */
+
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--cover-min, 152px), 1fr));
+  gap: 22px 18px;
+  padding: 4px 24px 32px;
+}
+
+.cover-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  border-radius: var(--radius-md);
+}
+
+.cover-card__art {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--fill-quaternary);
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  transition: transform var(--dur) var(--ease-ios), box-shadow var(--dur) var(--ease-ios);
+}
+
+.cover-card__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-card__art .icon {
+  width: 34px;
+  height: 34px;
+}
+
+.cover-card:hover .cover-card__art {
+  transform: translateY(-3px) scale(1.015);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+}
+
+.cover-card:active .cover-card__art {
+  transform: scale(0.985);
+}
+
+.cover-card__meta {
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.cover-card__title {
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  color: var(--label);
+  line-height: 1.3;
+}
+
+.cover-card__sub {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  line-height: 1.4;
+}
+
+/* 悬停时浮出的播放键 */
+.cover-card__play {
+  position: absolute;
+  right: 10px;
+  bottom: 58px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-label);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.36);
+  opacity: 0;
+  transform: translateY(6px) scale(0.9);
+  transition: opacity var(--dur-fast) var(--ease-ios), transform var(--dur) var(--ease-ios);
+}
+
+.cover-card__play .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.cover-card:hover .cover-card__play {
+  opacity: 1;
+  transform: none;
+}
+
+.cover-card__play:active {
+  transform: scale(0.9);
+}
+
+.cover-card__badge {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* 艺人详情里的横向专辑条 */
+.cover-grid--strip {
+  grid-template-columns: repeat(auto-fill, 132px);
+  grid-auto-flow: column;
+  grid-auto-columns: 132px;
+  gap: 14px;
+  padding: 4px 24px 10px;
+  width: max-content;
+}
+
+.album-strip {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: none;
+  margin-top: 4px;
+}
+
+.album-strip::-webkit-scrollbar {
+  height: 8px;
+}
+
+/* ------------------------------ 艺人列表 ------------------------------ */
+
+.artist-rows {
+  padding: 4px 16px 32px;
+}
+
+.artist-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-ios);
+}
+
+.artist-row:hover {
+  background: var(--bg-hover);
+}
+
+.artist-row__avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex: none;
+  background: var(--fill-quaternary);
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.artist-row__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.artist-row__avatar .icon {
+  width: 22px;
+  height: 22px;
+}
+
+.artist-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.artist-row__name {
+  font-size: var(--text-body);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.artist-row__meta {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+}
+
+.artist-row__chevron {
+  width: 15px;
+  height: 15px;
+  color: var(--label-4);
+  flex: none;
+}
+
+/* ------------------------------ 详情页头部 ------------------------------ */
+
+.browse-detail {
+  padding: 4px 24px 18px;
+  flex: none;
+  transition: max-height var(--dur) var(--ease-ios), opacity var(--dur-fast) var(--ease-ios),
+    padding var(--dur) var(--ease-ios);
+}
+
+/* 列表滚动后收起详情头，把空间让给曲目 */
+.browse-detail.is-collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.browse-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  padding: 0 10px 0 6px;
+  margin-bottom: 10px;
+  border-radius: var(--radius-pill);
+  color: var(--label-2);
+  font-size: var(--text-subhead);
+  font-weight: 500;
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+
+.browse-back:hover {
+  background: var(--bg-hover);
+  color: var(--label);
+}
+
+.browse-back .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.browse-detail__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 22px;
+}
+
+.browse-detail__cover {
+  width: 168px;
+  height: 168px;
+  flex: none;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--fill-quaternary);
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+  box-shadow: var(--shadow-artwork);
+}
+
+.browse-detail__avatar {
+  width: 140px;
+  height: 140px;
+  flex: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--fill-quaternary);
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+  box-shadow: var(--shadow-artwork);
+}
+
+.browse-detail__cover img,
+.browse-detail__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.browse-detail__cover .icon,
+.browse-detail__avatar .icon {
+  width: 52px;
+  height: 52px;
+}
+
+.browse-detail__info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+.browse-detail__title {
+  font-family: var(--font-display);
+  font-size: var(--text-title1);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.browse-detail__subtitle {
+  font-size: var(--text-body);
+  color: var(--label-2);
+}
+
+.browse-detail__stats {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.browse-detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+/* ------------------------------ 媒体墙 ------------------------------ */
+
+.media-wall__scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+.media-wall {
+  --wall-min: 148px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--wall-min), 1fr));
+  gap: 3px;
+  padding: 3px 3px 20px;
+}
+
+.wall-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--fill-quaternary);
+  animation: wall-in var(--dur-slow) var(--ease-out) backwards;
+}
+
+@keyframes wall-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.wall-tile__art {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--label-4);
+}
+
+.wall-tile__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 620ms var(--ease-out), filter var(--dur) var(--ease-ios);
+}
+
+.wall-tile__art .icon {
+  width: 32px;
+  height: 32px;
+}
+
+.wall-tile:hover .wall-tile__art img {
+  transform: scale(1.09);
+}
+
+.wall-tile__info {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 34px 10px 9px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.35) 55%, transparent);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-ios);
+  text-align: left;
+  pointer-events: none;
+}
+
+.wall-tile:hover .wall-tile__info {
+  opacity: 1;
+}
+
+.wall-tile__name {
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  color: #ffffff;
+  line-height: 1.3;
+}
+
+.wall-tile__artist {
+  font-size: var(--text-caption);
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.4;
+}
+
+.wall-tile__open {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #ffffff;
+  opacity: 0;
+  transform: scale(0.86);
+  transition: opacity var(--dur-fast) var(--ease-ios), transform var(--dur-fast) var(--ease-ios);
+}
+
+.wall-tile__open .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.wall-tile:hover .wall-tile__open {
+  opacity: 1;
+  transform: none;
+}
+
+.wall-tile__open:hover {
+  background: var(--accent);
+}
+
+/* 媒体墙在窄窗口下缩小密度 */
+@media (max-width: 900px) {
+  .media-wall {
+    --wall-min: 108px;
+  }
+}
