@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('aria', {
     clearArtworkCache: () => ipcRenderer.invoke('library:clear-artwork-cache'),
     reveal: (filePath) => ipcRenderer.invoke('library:reveal', filePath),
     handleDrop: (paths, options) => ipcRenderer.invoke('library:handle-drop', paths, options),
+    searchLyrics: (input) => ipcRenderer.invoke('library:search-lyrics', input),
+    lyricsIndex: () => ipcRenderer.invoke('library:lyrics-index'),
     onScanProgress: (handler) => on('library:scan-progress', handler),
     onWatchUpdate: (handler) => on('library:watch-update', handler),
     onWatchError: (handler) => on('library:watch-error', handler)

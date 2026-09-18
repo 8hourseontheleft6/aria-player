@@ -15,6 +15,8 @@ const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const os = require('node:os')
 
+const { decodeTextBuffer } = require('./util/text')
+
 const POLL_INTERVAL = 250
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -279,18 +281,227 @@ async function runSmoke ({ win, ctx }) {
         ? `AudioContext ${tapResult.state}，波形振幅 ${tapResult.maxDeviation}/128，推进 ${tapResult.advanced}s`
         : tapResult.reason)
 
-    // 搜索
-    const searchResult = await evaluate(win, `
+    /* ---------- 搜索：两档范围 + 搜索历史 ----------
+     *
+     * 先在主进程侧准备一个「只可能出现在歌词里」的关键词：
+     * 从某个 .lrc 里取词，再确认它不出现在任何曲目的歌名/艺人/专辑里。
+     * 这样「基础档搜不到、深度档搜得到」就是一条真正有区分度的断言。
+     */
+    const normalizeSearch = (value) => String(value || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+
+    const allTracks = ctx.get('library').getTracks()
+    const basicHaystack = allTracks
+      .map((track) => normalizeSearch(`${track.title} ${track.artist} ${track.album} ${track.albumArtist}`))
+    const withLyrics = allTracks.filter((track) => track.lyricsPath)
+    let lyricsKeyword = ''
+    let lyricsSampleTitle = ''
+    for (const track of withLyrics.slice(0, 40)) {
+      let text = ''
+      try {
+        const raw = await fsp.readFile(track.lyricsPath)
+        text = decodeTextBuffer(raw).text
+      } catch {
+        continue
+      }
+      const words = [...new Set(text.split(/[^0-9A-Za-z\u4e00-\u9fa5]+/))]
+        .map((word) => word.trim())
+        .filter((word) => word.length >= 4)
+      const found = words.find((word) => {
+        const normalized = normalizeSearch(word)
+        return normalized.length >= 4 && !basicHaystack.some((haystack) => haystack.includes(normalized))
+      })
+      if (found) {
+        lyricsKeyword = found
+        lyricsSampleTitle = track.title
+        break
+      }
+    }
+    const artistSample = allTracks.find((track) => track.artist && track.artist.length >= 4)
+    const genreSample = allTracks.find((track) => track.genre)
+
+    const searchCheck = await evaluate(win, `
       const { actions, store } = window.__aria
-      const tracks = store.get().library.tracks
-      const keyword = tracks[0].title.slice(0, 4)
+      const keyword = ${JSON.stringify(lyricsKeyword)}
+      const artist = ${JSON.stringify(artistSample ? artistSample.artist : '')}
+      const artistTitle = ${JSON.stringify(artistSample ? artistSample.title : '')}
+      const genre = ${JSON.stringify(genreSample ? genreSample.genre : '')}
+      const sampleTitle = ${JSON.stringify(lyricsSampleTitle)}
+      const rowTitles = () => [...document.querySelectorAll('.track-row')]
+        .map((row) => row.textContent || '')
+      const settle = async (ms = 420) => { await new Promise((r) => setTimeout(r, ms)) }
+
       actions.setView('songs')
-      actions.setQuery(keyword)
-      await new Promise((r) => setTimeout(r, 200))
-      const found = document.querySelectorAll('.track-row').length
       actions.setQuery('')
-      return { keyword, found }`)
-    record('搜索', true, `关键词「${searchResult.keyword}」渲染 ${searchResult.found} 行`)
+      await settle(200)
+
+      // ① 基础档：按艺人搜
+      actions.setSearchScope('basic')
+      actions.setQuery(artist)
+      await settle()
+      const basicArtistRows = rowTitles()
+
+      // ② 基础档：搜只出现在歌词里的词 —— 应当搜不到
+      actions.setQuery(keyword)
+      await settle()
+      const basicLyricsRows = rowTitles()
+
+      // ③ 深度档：同一个词 —— 应当能搜到那首歌
+      actions.setSearchScope('deep')
+      actions.setQuery(keyword)
+      await settle(120)
+      const scanning = store.get().ui.searchLyrics
+      await actions.searchLyricsNow(keyword)
+      await settle(300)
+      const deepLyricsRows = rowTitles()
+      const lyricsState = store.get().ui.searchLyrics
+
+      // ④ 深度档：按流派搜（扩展字段）
+      actions.setQuery(genre)
+      await actions.searchLyricsNow(genre)
+      await settle(300)
+      const deepGenreRows = rowTitles()
+
+      // ⑤ 搜索历史：提交、去重、移除、清空
+      //    每一步都 await：设置写入是 IPC + 广播回声，不等的话后一步会读到旧值
+      await actions.clearSearchHistory()
+      actions.setQuery(artist)
+      await actions.commitSearch(artist)
+      await actions.commitSearch(artist)
+      actions.setQuery(keyword)
+      await actions.commitSearch(keyword)
+      await settle(120)
+      const historyAfterCommit = [...(store.get().settings.searchHistory || [])]
+      await actions.removeSearchHistory(keyword)
+      await settle(120)
+      const historyAfterRemove = [...(store.get().settings.searchHistory || [])]
+      await actions.clearSearchHistory()
+      await settle(120)
+      const historyAfterClear = [...(store.get().settings.searchHistory || [])]
+
+      // 收尾：回到干净状态
+      actions.setSearchScope('basic')
+      actions.setQuery('')
+      await settle(120)
+
+      return {
+        keyword, artist, artistTitle, genre, sampleTitle, scanning: Boolean(scanning),
+        basicArtistRows, basicLyricsRows, deepLyricsRows, deepGenreRows,
+        lyricsState, historyAfterCommit, historyAfterRemove, historyAfterClear
+      }`)
+
+    const search = searchCheck
+    record('搜索：基础档匹配歌名/专辑/艺人',
+      search.basicArtistRows.length > 0 &&
+      search.basicArtistRows.some((text) => text.includes(search.artistTitle.slice(0, 6))),
+      `按艺人「${search.artist}」搜到 ${search.basicArtistRows.length} 行，其中包含《${search.artistTitle}》`)
+    record('搜索：基础档不搜歌词',
+      search.keyword ? search.basicLyricsRows.length === 0 : true,
+      search.keyword
+        ? `「${search.keyword}」只出现在歌词里，基础档渲染 ${search.basicLyricsRows.length} 行（应为 0）`
+        : '资料库里没有可用的歌词样本，跳过')
+    record('搜索：深度档能搜到歌词里的词',
+      Boolean(search.keyword) && search.deepLyricsRows.length > 0 &&
+      search.deepLyricsRows.some((text) => text.includes(search.sampleTitle.slice(0, 6))),
+      search.keyword
+        ? `「${search.keyword}」深度档渲染 ${search.deepLyricsRows.length} 行（含《${search.sampleTitle}》）；` +
+          `主进程扫描 ${search.lyricsState?.scanned ?? '—'} 份歌词、命中 ${search.lyricsState?.matched ?? '—'} 首、耗时 ${search.lyricsState?.elapsedMs ?? '—'}ms`
+        : '资料库里没有可用的歌词样本，跳过')
+    record('搜索：深度档能搜扩展字段（流派/年份/文件名等）',
+      !search.genre || search.deepGenreRows.length > 0,
+      search.genre
+        ? `按流派「${search.genre}」搜到 ${search.deepGenreRows.length} 行`
+        : '资料库里没有填了流派的曲目，跳过')
+    record('搜索历史：记录 / 去重 / 移除 / 清空',
+      search.historyAfterCommit.length === 2 &&
+      search.historyAfterCommit[0] === search.keyword &&
+      search.historyAfterCommit[1] === search.artist &&
+      search.historyAfterRemove.length === 1 &&
+      search.historyAfterRemove[0] === search.artist &&
+      search.historyAfterClear.length === 0,
+      `提交两次（同一词重复提交只留一条）→ ${JSON.stringify(search.historyAfterCommit)}；` +
+      `移除一条 → ${JSON.stringify(search.historyAfterRemove)}；清空 → ${JSON.stringify(search.historyAfterClear)}`)
+
+    /* ---------- 搜索面板：范围切换与历史列表确实是可用的界面 ---------- */
+    const searchPanelCheck = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 220) => { await new Promise((r) => setTimeout(r, ms)) }
+      actions.setView('songs')
+      await actions.clearSearchHistory()
+      await actions.commitSearch('love')
+      await actions.commitSearch('Blues')
+      actions.setSearchScope('basic')
+      await settle(260)
+
+      const input = document.querySelector('.search input')
+      const panel = document.querySelector('.search-panel')
+      const scopeButton = document.querySelector('.search__scope')
+      const beforeFocus = panel.hidden
+
+      input.focus()
+      await settle()
+      const opened = {
+        hidden: panel.hidden,
+        scopes: [...panel.querySelectorAll('.search-panel__scope')].map((node) => node.textContent),
+        selected: panel.querySelector('.search-panel__scope.is-selected')?.textContent || '',
+        history: [...panel.querySelectorAll('.search-panel__term')].map((node) => node.textContent),
+        hint: panel.querySelector('.search-panel__hint')?.textContent || ''
+      }
+
+      panel.querySelector('[data-scope="deep"]').click()
+      await settle(320)
+      const afterScope = {
+        scope: store.get().settings.searchScope,
+        label: scopeButton.querySelector('span')?.textContent || '',
+        isDeep: scopeButton.classList.contains('is-deep'),
+        selected: panel.querySelector('.search-panel__scope.is-selected')?.textContent || '',
+        hint: panel.querySelector('.search-panel__hint')?.textContent || '',
+        placeholder: input.placeholder
+      }
+      // 点击没生效时再直接调一次动作，用来区分「按钮没接上」和「动作本身没生效」
+      let afterDirect = null
+      if (store.get().settings.searchScope !== 'deep') {
+        await actions.setSearchScope('deep')
+        await settle(320)
+        afterDirect = {
+          scope: store.get().settings.searchScope,
+          label: scopeButton.querySelector('span')?.textContent || ''
+        }
+      }
+
+      panel.querySelector('.search-panel__term').click()
+      await settle()
+      const afterPick = { query: store.get().ui.query, value: input.value, hidden: panel.hidden }
+
+      input.focus()
+      await settle(150)
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await settle()
+      const afterEscape = { hidden: panel.hidden }
+
+      actions.setSearchScope('basic')
+      actions.setQuery('')
+      await actions.clearSearchHistory()
+      await settle(150)
+      return { beforeFocus, opened, afterScope, afterDirect, afterPick, afterEscape }
+    `)
+    record('搜索面板：范围切换与历史列表',
+      searchPanelCheck.beforeFocus === true &&
+      searchPanelCheck.opened.hidden === false &&
+      searchPanelCheck.opened.scopes.length === 2 &&
+      searchPanelCheck.opened.history.length === 2 &&
+      searchPanelCheck.afterScope.scope === 'deep' &&
+      searchPanelCheck.afterScope.selected === '含歌词等' &&
+      searchPanelCheck.afterPick.query === 'Blues' &&
+      searchPanelCheck.afterEscape.hidden === true,
+      `聚焦前隐藏 → 聚焦后展开（范围 ${JSON.stringify(searchPanelCheck.opened.scopes)}，历史 ${JSON.stringify(searchPanelCheck.opened.history)}）；` +
+      `切到深度档后按钮显示「${searchPanelCheck.afterScope.label}」、提示「${searchPanelCheck.afterScope.hint}」、占位「${searchPanelCheck.afterScope.placeholder}」` +
+      `${searchPanelCheck.afterDirect ? `；点击无效，直接调动作的结果 ${JSON.stringify(searchPanelCheck.afterDirect)}` : ''}；` +
+      `点历史回填「${searchPanelCheck.afterPick.query}」；Esc 收起=${searchPanelCheck.afterEscape.hidden}`)
+
 
     // 正在播放面板与歌词视图
     const uiResult = await evaluate(win, `
@@ -717,6 +928,10 @@ async function runSmoke ({ win, ctx }) {
       const initial = wall.debugState()
 
       // ① 中键斜向拖动：两个轴都应该动
+      //    先把位置挪到可拖范围的中间 —— 贴着边界出发时这一拖会被钳制成零位移
+      const midBounds = wall.debugState().bounds
+      wall.debugApplyPan(Math.round(midBounds.minX / 2), Math.round(midBounds.minY / 2))
+      await new Promise((r) => requestAnimationFrame(r))
       pointer('pointerdown', cx, cy, { button: 1, buttons: 4 })
       for (let i = 1; i <= 12; i++) pointer('pointermove', cx - i * 14, cy - i * 7, { button: 1, buttons: 4 })
       // 平移是按帧合流的，等一帧再读

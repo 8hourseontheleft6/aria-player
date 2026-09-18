@@ -7,6 +7,7 @@ const path = require('node:path')
 const { isAudioFile } = require('../util/mime')
 const { walkFiles, findNamedImage, listDirIndex, invalidateDirIndex } = require('../util/files')
 const { readMetadata, readEmbeddedArtwork } = require('./metadata')
+const { decodeTextBuffer } = require('../util/text')
 
 const CACHE_VERSION = 3
 const SCAN_CONCURRENCY = 6
@@ -549,6 +550,107 @@ function createLibraryService (ctx) {
     }
   }
 
+  /* ================================================================ */
+  /* 歌词搜索：只在「深度搜索」档使用                                    */
+  /* ================================================================ */
+
+  /**
+   * .lrc 文本缓存。
+   *
+   * 全库几百个歌词文件、每个几 KB，读一遍是几百毫秒级；缓存在内存里之后
+   * 后续每次输入都是纯字符串匹配（毫秒级）。用 mtime 判断是否失效，
+   * 所以外部改了歌词文件也能立刻反映出来。
+   */
+  const lyricsIndex = new Map()   // path -> { mtimeMs, size, text }
+  let lyricsIndexHits = 0
+
+  const LYRICS_READ_CONCURRENCY = 8
+
+  async function readLyricsText (filePath, stat) {
+    const cached = lyricsIndex.get(filePath)
+    if (cached && cached.mtimeMs === Math.round(stat.mtimeMs) && cached.size === stat.size) {
+      lyricsIndexHits++
+      return cached.text
+    }
+    const raw = await fsp.readFile(filePath)
+    const { text } = decodeTextBuffer(raw)
+    lyricsIndex.set(filePath, { mtimeMs: Math.round(stat.mtimeMs), size: stat.size, text })
+    return text
+  }
+
+  /**
+   * 在歌词里搜索关键词。
+   *
+   * 语义与普通搜索保持一致：多个关键词之间是「与」，全都出现在同一份歌词里才算命中。
+   * 返回命中的曲目 id（有上限，避免一次把整库都算上）。
+   *
+   * @param {{ query?: string, limit?: number }} [options]
+   */
+  async function searchLyrics (options = {}) {
+    const started = performance.now()
+    const query = String(options.query || '').trim().toLowerCase()
+    const limit = Math.max(1, Math.min(2000, Number(options.limit) || 500))
+    if (!query) {
+      return { ids: [], scanned: 0, matched: 0, elapsedMs: 0, cached: 0, truncated: false }
+    }
+    const parts = query.split(/\s+/).filter(Boolean)
+
+    // 只考虑真的有歌词的曲目
+    const candidates = []
+    for (const track of tracks) {
+      if (track.lyricsPath) candidates.push(track)
+    }
+
+    const ids = []
+    let scanned = 0
+    let matched = 0
+    let failed = 0
+    let truncated = false
+    let cursor = 0
+
+    const worker = async () => {
+      while (cursor < candidates.length) {
+        const track = candidates[cursor++]
+        scanned++
+        try {
+          const stat = await fsp.stat(track.lyricsPath)
+          const text = await readLyricsText(track.lyricsPath, stat)
+          const haystack = text.toLowerCase()
+          if (parts.every((part) => haystack.includes(part))) {
+            matched++
+            if (ids.length < limit) ids.push(track.id)
+            else truncated = true
+          }
+        } catch {
+          // 文件被删或读不了：跳过它，不要让整次搜索失败
+          failed++
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(LYRICS_READ_CONCURRENCY, candidates.length) }, worker))
+
+    return {
+      ids,
+      scanned,
+      matched,
+      failed,
+      truncated,
+      cached: lyricsIndex.size,
+      hits: lyricsIndexHits,
+      elapsedMs: Math.round((performance.now() - started) * 100) / 100
+    }
+  }
+
+  function getLyricsIndexStats () {
+    return { files: lyricsIndex.size, hits: lyricsIndexHits }
+  }
+
+  function resetLyricsIndex () {
+    lyricsIndex.clear()
+    lyricsIndexHits = 0
+    return true
+  }
+
   return {
     init,
     scan,
@@ -564,6 +666,9 @@ function createLibraryService (ctx) {
     getArtworkStats,
     clearArtworkCache,
     resolveDrop,
+    searchLyrics,
+    getLyricsIndexStats,
+    resetLyricsIndex,
     getStats: () => ({ count: tracks.length, scannedAt, folders: getFolders().length, scanning: Boolean(scanningPromise) }),
     revealInFolder: (filePath) => shell.showItemInFolder(filePath),
     invalidateDirIndex

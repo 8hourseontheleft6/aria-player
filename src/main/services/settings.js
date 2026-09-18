@@ -22,6 +22,9 @@ const DEFAULTS = {
   showRemainingTime: false,
   reduceMotion: false,
   showFps: false,
+  // 搜索：basic = 只搜歌曲信息（歌名/专辑/艺人），deep = 连歌词、年份、流派、文件名等一起搜
+  searchScope: 'basic',
+  searchHistory: [],
   wallLayout: 'canvas',
   prewarmArtwork: true,
   trayEnabled: true,

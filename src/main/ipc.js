@@ -82,6 +82,9 @@ function registerIpc (ctx) {
     'library:artwork-stats': () => library.getArtworkStats(),
     'library:clear-artwork-cache': (_event, options) => library.clearArtworkCache(options || {}),
     'library:handle-drop': (_event, paths, options) => library.resolveDrop(paths, options || {}),
+    // 深度搜索的歌词部分：只在用户选中「含歌词等」时才调用
+    'library:search-lyrics': (_event, input) => library.searchLyrics(input || {}),
+    'library:lyrics-index': () => library.getLyricsIndexStats(),
     'library:reveal': (_event, filePath) => {
       if (typeof filePath === 'string' && filePath) library.revealInFolder(filePath)
       return true

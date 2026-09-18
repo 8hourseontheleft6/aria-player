@@ -47,11 +47,142 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     }
   }, icon('list', { className: 'icon icon--stroke' }))
 
+  /* ---------------- 搜索：范围切换 + 搜索历史 ---------------- */
+
+  /*
+   * 两档范围：
+   *   歌曲信息 —— 歌名 / 专辑 / 艺人（纯内存匹配，输入即出结果）
+   *   含歌词等 —— 再加上歌词（主进程读 .lrc）与年份、流派、文件名、编码格式
+   * 歌词是异步的，所以这里还要显示「正在搜歌词」以及命中数量。
+   */
+  const SCOPE_LABELS = { basic: '歌曲信息', deep: '含歌词等' }
+  let searchScope = store.get().settings.searchScope === 'deep' ? 'deep' : 'basic'
+  let searchPanelOpen = false
+
+  const scopeButtons = ['basic', 'deep'].map((scope) => h('button', {
+    class: `search-panel__scope${scope === searchScope ? ' is-selected' : ''}`,
+    type: 'button',
+    'data-scope': scope,
+    onClick: () => actions.setSearchScope(scope)
+  }, SCOPE_LABELS[scope]))
+
+  const historyList = h('div', { class: 'search-panel__history' })
+  const searchHint = h('div', { class: 'search-panel__hint' })
+
+  const searchPanel = h('div', { class: 'search-panel', hidden: true },
+    h('div', { class: 'search-panel__row' },
+      h('span', { class: 'search-panel__label', text: '搜索范围' }),
+      h('div', { class: 'search-panel__scope-group' }, ...scopeButtons)
+    ),
+    h('div', { class: 'search-panel__row', 'data-empty': '最近搜索' },
+      h('span', { class: 'search-panel__label', text: '最近搜索' }),
+      h('button', {
+        class: 'search-panel__clear',
+        type: 'button',
+        title: '清空搜索历史',
+        onClick: () => actions.clearSearchHistory()
+      }, '清空')
+    ),
+    historyList,
+    searchHint
+  )
+  // 面板里的交互不能把输入框的焦点抢走，否则下拉一开就关
+  on(searchPanel, 'mousedown', (event) => event.preventDefault())
+
+  function renderSearchPanel () {
+    const state = store.get()
+    searchScope = state.settings.searchScope === 'deep' ? 'deep' : 'basic'
+    scopeLabelNode.textContent = SCOPE_LABELS[searchScope]
+    for (const button of scopeButtons) {
+      button.classList.toggle('is-selected', button.dataset.scope === searchScope)
+    }
+    const history = state.settings.searchHistory || []
+    historyList.replaceChildren(...history.map((item) => h('div', { class: 'search-panel__item' },
+      h('button', {
+        class: 'search-panel__term',
+        type: 'button',
+        title: `搜索「${item}」`,
+        onClick: () => {
+          searchInput.value = item
+          actions.setQuery(item)
+          actions.commitSearch(item)
+          // 先聚焦再关面板：反过来的话聚焦事件会把面板又打开
+          searchInput.focus()
+          openSearchPanel(false)
+        }
+      }, icon('clock', { className: 'icon icon--stroke' }), h('span', { text: item })),
+      h('button', {
+        class: 'search-panel__remove',
+        type: 'button',
+        title: '从历史中移除',
+        onClick: () => actions.removeSearchHistory(item)
+      }, icon('close', { className: 'icon icon--stroke' }))
+    )))
+    historyList.hidden = history.length === 0
+
+    const lyrics = state.ui.searchLyrics
+    const deep = searchScope === 'deep'
+    if (!deep) {
+      searchHint.textContent = '当前只搜索歌名、专辑与艺人'
+    } else if (!state.ui.query.trim()) {
+      searchHint.textContent = '还会搜索歌词文件，以及年份、流派、文件名、编码格式'
+    } else if (lyrics?.scanning) {
+      searchHint.textContent = '正在搜索歌词…'
+    } else if (lyrics && lyrics.error) {
+      searchHint.textContent = `歌词搜索失败：${lyrics.error}`
+    } else if (lyrics) {
+      searchHint.textContent = `已扫描 ${lyrics.scanned} 份歌词，命中 ${lyrics.matched} 首（${lyrics.elapsedMs}ms）`
+    } else {
+      searchHint.textContent = '还会搜索歌词文件，以及年份、流派、文件名、编码格式'
+    }
+    searchInput.placeholder = deep ? '搜索歌词、年份、流派…' : '搜索歌名、专辑、艺人'
+  }
+
+  function syncSearchPanel () {
+    searchPanel.hidden = !searchPanelOpen
+    searchInput.setAttribute('aria-expanded', String(searchPanelOpen))
+    scopeSelect.classList.toggle('is-deep', searchScope === 'deep')
+  }
+
+  function openSearchPanel (open) {
+    searchPanelOpen = open
+    renderSearchPanel()
+    syncSearchPanel()
+  }
+
+  const scopeLabelNode = h('span', { text: SCOPE_LABELS[searchScope] })
+  const scopeSelect = h('button', {
+    class: 'search__scope',
+    type: 'button',
+    title: '搜索范围与搜索历史',
+    onClick: () => openSearchPanel(!searchPanelOpen)
+  }, scopeLabelNode, icon('chevronDown', { className: 'icon icon--stroke' }))
+
+  function commitQuery () {
+    if (searchInput.value.trim()) actions.commitSearch(searchInput.value)
+  }
+
   const searchInput = h('input', {
     type: 'search',
-    placeholder: '搜索歌曲、艺人、专辑',
+    placeholder: '搜索歌名、专辑、艺人',
     spellcheck: false,
-    onInput: (event) => actions.setQuery(event.target.value)
+    onInput: (event) => actions.setQuery(event.target.value),
+    onFocus: () => openSearchPanel(true),
+    onBlur: () => {
+      // 失焦（比如点开一首歌开始播放）就算「用过这次搜索」，记进历史
+      commitQuery()
+      openSearchPanel(false)
+    },
+    onKeyDown: (event) => {
+      if (event.key === 'Enter') {
+        commitQuery()
+        openSearchPanel(false)
+        searchInput.blur()
+      } else if (event.key === 'Escape') {
+        openSearchPanel(false)
+        searchInput.blur()
+      }
+    }
   })
   const searchClear = h('button', {
     class: 'search__clear',
@@ -63,7 +194,13 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
       searchInput.focus()
     }
   }, icon('close', { className: 'icon icon--stroke' }))
-  const searchBox = h('label', { class: 'search' }, icon('search', { className: 'icon icon--stroke' }), searchInput, searchClear)
+  const searchBox = h('label', { class: 'search' },
+    icon('search', { className: 'icon icon--stroke' }),
+    searchInput,
+    scopeSelect,
+    searchClear,
+    searchPanel
+  )
 
   const scanButton = h('button', {
     class: 'btn btn--icon',
@@ -133,7 +270,14 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
   function refresh () {
     const state = store.get()
     const tracks = computeTracks(state)
-    const signature = `${tracks.length}|${state.ui.source.type}|${state.ui.source.value}|${state.ui.query}|${state.ui.sort.key}|${state.ui.sort.direction}|${state.library.tracks.length}`
+    /*
+     * 签名里必须带上「歌词命中」：深度搜索时列表内容取决于主进程异步返回的 id，
+     * 不带上它的话结果到了也不会重绘（列表会一直停在「0 首」）。
+     */
+    const lyricsSignature = state.ui.searchLyrics
+      ? `${state.ui.searchLyrics.query}#${state.ui.searchLyrics.ids?.length ?? 0}#${state.ui.searchLyrics.scanning ? 1 : 0}`
+      : '-'
+    const signature = `${tracks.length}|${state.ui.source.type}|${state.ui.source.value}|${state.ui.query}|${state.ui.sort.key}|${state.ui.sort.direction}|${state.library.tracks.length}|${state.settings.searchScope}|${lyricsSignature}`
     if (signature !== lastSignature) {
       lastSignature = signature
       trackList.setTracks(tracks)
@@ -157,6 +301,15 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
 
     searchClear.parentElement.classList.toggle('has-value', Boolean(state.ui.query))
     if (searchInput.value !== state.ui.query) searchInput.value = state.ui.query
+    // 搜索面板：范围按钮、历史、歌词搜索进度都跟着 store 走
+    searchScope = state.settings.searchScope === 'deep' ? 'deep' : 'basic'
+    scopeLabelNode.textContent = SCOPE_LABELS[searchScope]
+    for (const button of scopeButtons) {
+      button.classList.toggle('is-selected', button.dataset.scope === searchScope)
+    }
+    scopeSelect.classList.toggle('is-deep', searchScope === 'deep')
+    searchInput.placeholder = searchScope === 'deep' ? '搜索歌词、年份、流派…' : '搜索歌名、专辑、艺人'
+    if (searchPanelOpen) renderSearchPanel()
 
     /* 空状态 */
     clear(empty)
@@ -215,7 +368,9 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
 
   bus.on(EVENTS.LIBRARY_UPDATED, refresh)
   store.subscribe((state, prev) => {
-    if (state.ui === prev.ui && state.library === prev.library) return
+    // 设置也要算进来：搜索范围（basic/deep）会影响占位符、范围按钮与提示文案，
+    // 只盯 ui/library 的话，点了范围按钮界面不会有任何反应
+    if (state.ui === prev.ui && state.library === prev.library && state.settings === prev.settings) return
     refresh()
   })
 

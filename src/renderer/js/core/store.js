@@ -96,6 +96,8 @@ export function initialState () {
       lyricFontScale: 1,
       showRowArtwork: true,
       showFps: false,
+      searchScope: 'basic',
+      searchHistory: [],
       globalMediaKeys: true,
       showRemainingTime: false
     },
@@ -105,6 +107,8 @@ export function initialState () {
       source: { type: 'all', value: null },
       detail: null,
       query: '',
+      // 深度搜索的歌词命中结果：{ query, ids, scanning, scanned, matched, elapsedMs }
+      searchLyrics: null,
       sort: { key: 'default', direction: 'asc' },
       nowPlayingOpen: false,
       queueOpen: false,

@@ -42,6 +42,8 @@ import { createFpsOverlay } from './ui/fps-overlay.js'
 import { BUILTIN_PLUGINS } from './plugins/index.js'
 
 const SORT_KEYS = ['default', 'title', 'artist', 'album', 'duration', 'year', 'added']
+/** 搜索历史最多留这么多条（新的在前） */
+const SEARCH_HISTORY_LIMIT = 10
 
 async function main () {
   /* ------------------------------------------------------------------ */
@@ -183,6 +185,56 @@ async function main () {
 
     setQuery (query) {
       store.set((state) => ({ ...state, ui: { ...state.ui, query } }))
+      // 深度搜索时歌词要问主进程，这里跟着防抖触发
+      requestSearchLyrics()
+    },
+
+    /**
+     * 切换搜索范围。
+     * basic = 只搜歌曲信息（歌名 / 专辑 / 艺人）；deep = 再算上歌词、年份、流派、文件名等。
+     */
+    setSearchScope (scope) {
+      const next = scope === 'deep' ? 'deep' : 'basic'
+      if (next === 'basic') actions.setSearchLyrics(null)
+      requestSearchLyrics({ scope: next })
+      // 返回 promise：界面点击与自检都可以等写盘回来
+      return actions.setSetting({ searchScope: next })
+    },
+
+    /** 主进程搜歌词的结果回填（只认「对应当前关键词」的那一份） */
+    setSearchLyrics (result) {
+      store.set((state) => ({ ...state, ui: { ...state.ui, searchLyrics: result } }))
+    },
+
+    /**
+     * 记一条搜索历史。
+     * 只在用户真的「用了一次搜索」时调用（回车 / 点结果 / 失焦），不是每敲一个字都记，
+     * 否则历史会被 "t"/"ta"/"tay" 这种半截词塞满。
+     */
+    commitSearch (query = store.get().ui.query) {
+      const trimmed = String(query || '').trim()
+      if (!trimmed) return null
+      const history = store.get().settings.searchHistory || []
+      const next = [trimmed, ...history.filter((item) => item !== trimmed)].slice(0, SEARCH_HISTORY_LIMIT)
+      // 返回 promise：调用方（界面 / 自检）可以等写盘回来再继续，
+      // 否则连续两次提交会被设置回声按旧值覆盖（自检里真的撞到过）
+      return actions.setSetting({ searchHistory: next })
+    },
+
+    removeSearchHistory (query) {
+      const history = store.get().settings.searchHistory || []
+      return actions.setSetting({ searchHistory: history.filter((item) => item !== query) })
+    },
+
+    clearSearchHistory () {
+      return actions.setSetting({ searchHistory: [] })
+    },
+
+    /** 自检用：直接跑一次歌词搜索（不走防抖），并把结果写进 store */
+    async searchLyricsNow (query = store.get().ui.query) {
+      const result = await runLyricsSearch(String(query || ''))
+      actions.setSearchLyrics(result)
+      return result
     },
 
     setSort (key) {
@@ -473,9 +525,17 @@ async function main () {
     let totalDuration = 0
     for (const track of tracks) {
       // 预计算搜索串，避免每次输入都重新拼字符串
+      // _search 是「歌曲信息」档用的（歌名 / 艺人 / 专辑 / 专辑艺人）
       track._search = normalizeForSearch(
-        `${track.title} ${track.artist} ${track.album} ${track.albumArtist} ${track.file}`
+        `${track.title} ${track.artist} ${track.album} ${track.albumArtist}`
       )
+      // _deepSearch 是「含歌词等」那一档额外算的：年份、流派、文件名、目录、编码格式
+      track._deepSearch = normalizeForSearch([
+        track._search,
+        track.genre, track.year, track.file, track.dir, track.path,
+        track.codec, track.bitrate, track.sampleRate,
+        track.lossless ? '无损 lossless flac' : '有损 lossy'
+      ].filter(Boolean).join(' '))
       byId.set(track.id, track)
       totalDuration += track.duration || 0
     }
@@ -493,6 +553,68 @@ async function main () {
     }))
     bus.emit(EVENTS.LIBRARY_UPDATED, { count: tracks.length })
     return tracks
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 深度搜索：歌词由主进程去读 .lrc                                      */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * 歌词不在渲染层：全库几百个 .lrc 文件由主进程读一遍并缓存（按 mtime 失效），
+   * 这里只负责防抖调用、把结果按「关键词」标注后交给 store。
+   * 标注关键词是必须的：搜索是异步的，输入过程中旧结果会晚到，
+   * 拿它去过滤会闪出错误的列表（selectors 里会核对 query 才采信）。
+   */
+  let lyricsSearchTimer = null
+  let lyricsSearchToken = 0
+
+  async function runLyricsSearch (query) {
+    const started = performance.now()
+    const parts = normalizeForSearch(query).split(/\s+/).filter(Boolean)
+    if (!parts.length) return null
+    try {
+      const result = await remote.library.searchLyrics({ query })
+      return {
+        query,
+        ids: result?.ids || [],
+        scanned: result?.scanned || 0,
+        matched: result?.matched || 0,
+        truncated: Boolean(result?.truncated),
+        elapsedMs: result?.elapsedMs ?? Math.round((performance.now() - started) * 100) / 100
+      }
+    } catch (err) {
+      console.warn('[app] 歌词搜索失败', err)
+      return { query, ids: [], scanned: 0, matched: 0, error: String(err?.message || err) }
+    }
+  }
+
+  /** 输入变化 / 切换范围时调用：只有深度档且有词才真的去搜 */
+  function requestSearchLyrics ({ immediate = false, scope = null } = {}) {
+    const state = store.get()
+    const effectiveScope = scope || (state.settings.searchScope === 'deep' ? 'deep' : 'basic')
+    const deep = effectiveScope === 'deep'
+    const query = state.ui.query
+    if (lyricsSearchTimer) {
+      clearTimeout(lyricsSearchTimer)
+      lyricsSearchTimer = null
+    }
+    if (!deep || !String(query || '').trim()) {
+      if (state.ui.searchLyrics) actions.setSearchLyrics(null)
+      return
+    }
+    // 已经搜过同一个词就不重复劳动
+    if (state.ui.searchLyrics && state.ui.searchLyrics.query === query) return
+
+    const run = async () => {
+      const token = ++lyricsSearchToken
+      // 先亮出「正在搜歌词」，免得用户以为没有结果
+      actions.setSearchLyrics({ query, ids: [], scanning: true })
+      const result = await runLyricsSearch(query)
+      if (token !== lyricsSearchToken) return
+      actions.setSearchLyrics(result)
+    }
+    if (immediate) run()
+    else lyricsSearchTimer = setTimeout(run, 260)
   }
 
   remote.library.onScanProgress((progress) => {

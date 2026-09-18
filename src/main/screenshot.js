@@ -103,12 +103,20 @@ async function runScreenshots ({ win }) {
         return true`)
       await sleep(1200)
     }],
-    ['05-search.png', '搜索', async () => {
+    ['05-search.png', '搜索（含范围切换与搜索历史）', async () => {
       await evaluate(win, `
-        window.__aria.actions.toggleQueue(false)
-        window.__aria.actions.setQuery('love')
+        const { actions } = window.__aria
+        actions.toggleQueue(false)
+        // 攒几条历史，让下拉面板里有内容可看
+        await actions.clearSearchHistory()
+        for (const term of ['love', 'Taylor', 'Blues']) await actions.commitSearch(term)
+        actions.setSearchScope('deep')
+        actions.setQuery('love')
+        await new Promise((r) => setTimeout(r, 400))
+        // 聚焦输入框 = 打开面板（范围切换与最近搜索都在里面）
+        document.querySelector('.search input')?.focus()
         return true`)
-      await sleep(900)
+      await sleep(1400)
     }],
     ['06-settings.png', '设置', async () => {
       await evaluate(win, `window.__aria.actions.setQuery(''); window.__aria.actions.setView('settings'); return true`)

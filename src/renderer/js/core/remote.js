@@ -32,6 +32,8 @@ function createStub () {
       clearArtworkCache: unavailable('清理封面缓存'),
       reveal: unavailable('在文件夹中显示'),
       handleDrop: unavailable('处理拖入的文件'),
+      searchLyrics: unavailable('搜索歌词'),
+      lyricsIndex: unavailable('歌词索引统计'),
       onScanProgress: noop,
       onWatchUpdate: noop,
       onWatchError: noop
