@@ -433,6 +433,21 @@ async function main () {
   document.getElementById('layer-root').appendChild(dropZone.element)
   document.getElementById('layer-root').appendChild(fpsOverlay.element)
 
+  /*
+   * 队列面板挂在哪：全屏播放页打开时挂进播放页里，否则挂回内容区。
+   *
+   * 为什么必须挪：`.app` 自己带着 `z-index: 1`，是一个层叠上下文，
+   * 而全屏播放页是它的兄弟、`z-index: 40` —— 于是整个 app 子树都在播放页下面，
+   * 队列面板自己把 z-index 抬到 45 也没用（实测确实被压住，用户看到的就是
+   * 「全屏里点队列按了没反应，退出全屏才看得到」）。挂进播放页后就跟它同层了。
+   */
+  function mountQueuePanel () {
+    const state = store.get()
+    const host = state.ui.nowPlayingOpen ? nowPlayingPanel.element : dom.content
+    if (queuePanel.element.parentElement !== host) host.appendChild(queuePanel.element)
+  }
+  store.select((state) => `${state.ui.nowPlayingOpen}|${state.ui.queueOpen}`, mountQueuePanel)
+
   // 视图切换：歌曲列表 / 专辑 / 艺人 / 媒体墙 / 设置
   // 注意两点：
   //  1) 几个视图可能共用同一个容器（专辑与艺人共用 browseView），所以按

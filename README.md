@@ -72,7 +72,7 @@ npm run dev      # 启动并打开开发者工具
 这几个脚本都是无人值守的，退出码可直接用于 CI：
 
 ```bash
-npm run smoke            # 完整链路自检（107 项：资料库→播放→seek→变速→队列→模式→歌词→搜索→协议→界面→浏览→系统集成→监听→在线补全）
+npm run smoke            # 完整链路自检（109 项：资料库→播放→seek→变速→队列→模式→歌词→搜索→协议→界面→浏览→系统集成→监听→在线补全）
 npm run perf             # 帧率诊断：逐视图量 rAF 间隔 + 拖动路径 A/B 对照（见「性能」一节）
 npm run audit            # 视觉审计：计算样式 / 几何 / 截图位图统计，输出 docs/screenshots/audit.json
 npm run shots            # 生成 docs/screenshots/ 下的界面截图
@@ -120,6 +120,20 @@ npx electron scripts/preview.js docs/screenshots/01-library.png 104
 DOM 上的 `getBoundingClientRect()` 相交**不能**说明元素真的看得见：被祖先 `overflow: hidden`
 裁掉、或者被判定为屏幕外不绘制时，rect 照样相交。上面那个「拖到别处全白」的 bug
 之所以能通过当时全部 92 项自检，就是因为所有判定都建立在 rect 之上。
+
+同样地，`element.click()` 也说明不了「点得到」—— 被裁掉、被别的层压住的元素
+照样能被程序化点击触发。搜索面板与全屏播放页里的队列面板都栽在这上面：
+
+- 搜索面板挂在 `.search` 内部，而 `.search` 为收起动画带着 `overflow: hidden`
+  且展开后没解除 → 面板被整个裁掉，用户看到的是「只能搜歌曲信息，切不了范围」；
+- 队列面板的 `z-index` 高于播放页（45 > 40）却仍然被压住 —— 因为 `.app` 自己就是一个
+  `z-index: 1` 的层叠上下文，整个 app 子树都在播放页下面。修法是全屏时把队列面板
+  挂进播放页里（`mountQueuePanel()`），跟它同层。
+
+所以媒体墙、搜索面板、全屏播放页里的队列都各自有一条「命中测试」：
+在元素的中心点调 `elementFromPoint`，要求命中的确实是它自己；范围切换那条还会
+派发完整的 `pointerdown/mousedown/pointerup/mouseup/click` 序列，而不是 `element.click()`。
+
 
 现在媒体墙有一条专门的检查：在墙视口里取 24 个点做 `elementFromPoint`，
 要求绝大多数点能命中真实的格子（阈值 75%，留出 3px 格子缝与平面边缘的余量；

@@ -334,7 +334,12 @@
   right: 0;
   bottom: 0;
   width: 320px;
-  z-index: 30;
+  /*
+   * 必须高于全屏播放页（.now-playing 是 40）：否则在正在播放全屏页里点队列，
+   * 面板确实打开了、却整个盖在那层下面 —— 用户看到的就是「按了没用，
+   * 退出全屏才看得到队列」。.content 没有自己的层叠上下文，所以这里直接比大小有效。
+   */
+  z-index: 45;
   display: flex;
   flex-direction: column;
   background: var(--bg-bar);

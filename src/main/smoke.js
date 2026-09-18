@@ -519,7 +519,127 @@ async function runSmoke ({ win, ctx }) {
       `切到深度档后按钮显示「${searchPanelCheck.afterScope.label}」、提示「${searchPanelCheck.afterScope.hint}」、占位「${searchPanelCheck.afterScope.placeholder}」；` +
       `点历史回填「${searchPanelCheck.afterPick.query}」；Esc 收起=${searchPanelCheck.afterEscape.hidden}`)
 
-    /* ---------- 匹配详情：悬停时显示的「为什么搜到它」 ---------- */
+    /* ---------- 「看得见、点得到」：程序化 click 抓不到的那类问题 ----------
+     *
+     * 回归现场一：搜索面板挂在 .search 里，而 .search 带着 overflow:hidden
+     * （收起动画需要），展开后没解除 —— 面板被整个裁掉，
+     * 用户看到的就是「只能搜歌曲信息，切不了范围」。element.click() 照样能触发，
+     * 所以旧断言全绿。
+     * 回归现场二：队列面板 z-index 低于全屏播放页，在全屏里点队列「按了没用」。
+     *
+     * 这两条都用命中测试 + 真实鼠标事件序列来盯。
+     */
+    const hitRealityCheck = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 320) => { await new Promise((r) => setTimeout(r, ms)) }
+      const hitAt = (node) => {
+        const rect = node.getBoundingClientRect()
+        const x = Math.round(rect.left + rect.width / 2)
+        const y = Math.round(rect.top + rect.height / 2)
+        const found = document.elementFromPoint(x, y)
+        return {
+          x, y,
+          inside: Boolean(found),
+          className: found ? (found.className || found.tagName).toString().slice(0, 40) : '',
+          isScope: Boolean(found && found.closest && found.closest('.search-panel__scope')),
+          isPanel: Boolean(found && found.closest && found.closest('.search-panel')),
+          isQueue: Boolean(found && found.closest && found.closest('.queue-panel'))
+        }
+      }
+      // 真实鼠标序列（mousedown → mouseup → click），不是 element.click()
+      const realClick = (node) => {
+        const rect = node.getBoundingClientRect()
+        const x = Math.round(rect.left + rect.width / 2)
+        const y = Math.round(rect.top + rect.height / 2)
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          node.dispatchEvent(new MouseEvent(type, {
+            bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type.includes('down') ? 1 : 0
+          }))
+        }
+      }
+
+      actions.setView('songs')
+      actions.setSearchScope('basic')
+      await settle(260)
+      const slot = document.querySelector('.search-slot')
+      if (!slot.classList.contains('is-open')) slot.querySelector('.btn').click()
+      await settle(460)
+      const deepButton = document.querySelector('.search-panel [data-scope="deep"]')
+      const deepHit = deepButton ? hitAt(deepButton) : null
+      if (deepButton) realClick(deepButton)
+      await settle(420)
+      const scopeAfterRealClick = store.get().settings.searchScope
+
+      // 全屏播放页里的队列：按钮要有用，而且面板必须在最上层
+      const restoreScope = 'basic'
+      actions.openNowPlaying()
+      await settle(600)
+      actions.toggleQueue(true)
+      await settle(600)
+      const queuePanel = document.querySelector('.queue-panel')
+      const queueHit = queuePanel ? hitAt(queuePanel) : null
+      const nowPlayingPanel = document.querySelector('.now-playing')
+      const queueRect = queuePanel ? queuePanel.getBoundingClientRect() : null
+      const diag = {
+        queueRect: queueRect ? [Math.round(queueRect.width), Math.round(queueRect.height), Math.round(queueRect.left), Math.round(queueRect.top)] : null,
+        queueHidden: queuePanel ? queuePanel.hidden : null,
+        queueZ: queuePanel ? getComputedStyle(queuePanel).zIndex : null,
+        queuePosition: queuePanel ? getComputedStyle(queuePanel).position : null,
+        nowPlayingZ: nowPlayingPanel ? getComputedStyle(nowPlayingPanel).zIndex : null,
+        nowPlayingRect: nowPlayingPanel
+          ? [Math.round(nowPlayingPanel.getBoundingClientRect().width), Math.round(nowPlayingPanel.getBoundingClientRect().height)]
+          : null,
+        // 队列中心点上，从最上面数的前几个元素
+        stack: queuePanel
+          ? document.elementsFromPoint(
+            Math.round(queuePanel.getBoundingClientRect().left + 40),
+            Math.round(queuePanel.getBoundingClientRect().top + 60)
+          ).slice(0, 4).map((node) => (node.className || node.tagName).toString().slice(0, 28))
+          : [],
+        ancestors: queuePanel
+          ? (() => {
+            const out = []
+            let node = queuePanel.parentElement
+            while (node && out.length < 5) {
+              const style = getComputedStyle(node)
+              // 注意：这段是注入代码，里面不能再出现反引号（会截断外层模板字符串）
+              out.push((node.className || node.tagName).toString().slice(0, 18) +
+                '[z=' + style.zIndex + ',' + style.position + ',' + (style.transform === 'none' ? '-' : 'tf') + ']')
+              node = node.parentElement
+            }
+            return out
+          })()
+          : []
+      }
+      const nowPlayingOpen = store.get().ui.nowPlayingOpen
+      const queueOpen = store.get().ui.queueOpen
+      actions.toggleQueue(false)
+      actions.closeNowPlaying()
+      actions.setSearchScope(restoreScope)
+      actions.setQuery('')
+      await settle(300)
+      return {
+        deepHit, scopeAfterRealClick, queueHit, nowPlayingOpen, queueOpen, diag,
+        view: store.get().ui.view
+      }
+    `)
+    record('搜索面板真的看得见、点得到',
+      hitRealityCheck.deepHit &&
+      hitRealityCheck.deepHit.isScope === true &&
+      hitRealityCheck.scopeAfterRealClick === 'deep',
+      `在「含歌词等」按钮中心 (${hitRealityCheck.deepHit?.x},${hitRealityCheck.deepHit?.y}) 做命中测试：` +
+      `命中到的是 ${hitRealityCheck.deepHit?.className || '空'}（属于范围按钮=${hitRealityCheck.deepHit?.isScope}）；` +
+      `真实鼠标序列点击后范围=${hitRealityCheck.scopeAfterRealClick}`)
+    record('全屏播放页里队列按钮有用且在顶层',
+      hitRealityCheck.nowPlayingOpen === true &&
+      hitRealityCheck.queueOpen === true &&
+      hitRealityCheck.queueHit &&
+      hitRealityCheck.queueHit.isQueue === true,
+      `打开正在播放全屏页后再开队列（nowPlayingOpen=${hitRealityCheck.nowPlayingOpen}、queueOpen=${hitRealityCheck.queueOpen}）：` +
+      `队列面板 ${hitRealityCheck.diag?.queueRect?.join('×')} hidden=${hitRealityCheck.diag?.queueHidden} ` +
+      `z=${hitRealityCheck.diag?.queueZ}/${hitRealityCheck.diag?.queuePosition}，播放页 z=${hitRealityCheck.diag?.nowPlayingZ}；` +
+      `中心点的层序 ${JSON.stringify(hitRealityCheck.diag?.stack)}；队列的祖先 ${JSON.stringify(hitRealityCheck.diag?.ancestors)}`)
+
     const matchDetailCheck = await evaluate(win, `
       const { actions, store } = window.__aria
       const settle = async (ms = 340) => { await new Promise((r) => setTimeout(r, ms)) }

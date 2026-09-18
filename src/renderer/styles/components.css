@@ -447,6 +447,12 @@
   padding-right: 10px;
   opacity: 1;
   pointer-events: auto;
+  /*
+   * 展开时必须解除裁剪：范围切换与搜索历史是一块绝对定位的下拉面板，
+   * 它挂在 .search 里面 —— 收起动画需要 overflow:hidden，但展开后还留着的话
+   * 面板会被整个裁掉（用户看到的就是「只能搜歌曲信息，切不了范围」）。
+   */
+  overflow: visible;
 }
 
 .search__scope {
