@@ -425,25 +425,34 @@ async function runSmoke ({ win, ctx }) {
       `提交两次（同一词重复提交只留一条）→ ${JSON.stringify(search.historyAfterCommit)}；` +
       `移除一条 → ${JSON.stringify(search.historyAfterRemove)}；清空 → ${JSON.stringify(search.historyAfterClear)}`)
 
-    /* ---------- 搜索面板：范围切换与历史列表确实是可用的界面 ---------- */
+    /* ---------- 搜索框：图标式展开 + 范围切换 + 历史列表 ---------- */
     const searchPanelCheck = await evaluate(win, `
       const { actions, store } = window.__aria
-      const settle = async (ms = 220) => { await new Promise((r) => setTimeout(r, ms)) }
+      const settle = async (ms = 240) => { await new Promise((r) => setTimeout(r, ms)) }
       actions.setView('songs')
       await actions.clearSearchHistory()
       await actions.commitSearch('love')
       await actions.commitSearch('Blues')
       actions.setSearchScope('basic')
-      await settle(260)
+      await settle(280)
 
+      const slot = document.querySelector('.search-slot')
+      const toggle = slot.querySelector('.btn')
       const input = document.querySelector('.search input')
       const panel = document.querySelector('.search-panel')
       const scopeButton = document.querySelector('.search__scope')
-      const beforeFocus = panel.hidden
+      const fieldWidth = () => Math.round(document.querySelector('.search').getBoundingClientRect().width)
 
+      // ① 默认收起：只留一颗放大镜
+      const collapsed = { open: slot.classList.contains('is-open'), width: fieldWidth() }
+
+      toggle.click()
+      await settle(420)
       input.focus()
       await settle()
       const opened = {
+        open: slot.classList.contains('is-open'),
+        width: fieldWidth(),
         hidden: panel.hidden,
         scopes: [...panel.querySelectorAll('.search-panel__scope')].map((node) => node.textContent),
         selected: panel.querySelector('.search-panel__scope.is-selected')?.textContent || '',
@@ -452,7 +461,7 @@ async function runSmoke ({ win, ctx }) {
       }
 
       panel.querySelector('[data-scope="deep"]').click()
-      await settle(320)
+      await settle(340)
       const afterScope = {
         scope: store.get().settings.searchScope,
         label: scopeButton.querySelector('span')?.textContent || '',
@@ -461,20 +470,10 @@ async function runSmoke ({ win, ctx }) {
         hint: panel.querySelector('.search-panel__hint')?.textContent || '',
         placeholder: input.placeholder
       }
-      // 点击没生效时再直接调一次动作，用来区分「按钮没接上」和「动作本身没生效」
-      let afterDirect = null
-      if (store.get().settings.searchScope !== 'deep') {
-        await actions.setSearchScope('deep')
-        await settle(320)
-        afterDirect = {
-          scope: store.get().settings.searchScope,
-          label: scopeButton.querySelector('span')?.textContent || ''
-        }
-      }
 
       panel.querySelector('.search-panel__term').click()
       await settle()
-      const afterPick = { query: store.get().ui.query, value: input.value, hidden: panel.hidden }
+      const afterPick = { query: store.get().ui.query, value: input.value }
 
       input.focus()
       await settle(150)
@@ -482,14 +481,33 @@ async function runSmoke ({ win, ctx }) {
       await settle()
       const afterEscape = { hidden: panel.hidden }
 
+      // ② 收起时连关键词一起清掉，免得「看不见却还在过滤」
+      const queryBeforeClose = store.get().ui.query
+      toggle.click()
+      await settle(420)
+      const afterCollapse = {
+        open: slot.classList.contains('is-open'),
+        width: fieldWidth(),
+        query: store.get().ui.query
+      }
+
       actions.setSearchScope('basic')
       actions.setQuery('')
       await actions.clearSearchHistory()
       await settle(150)
-      return { beforeFocus, opened, afterScope, afterDirect, afterPick, afterEscape }
+      return { collapsed, opened, afterScope, afterPick, afterEscape, queryBeforeClose, afterCollapse }
     `)
+    record('搜索框：默认收起成图标，点开才展开',
+      searchPanelCheck.collapsed.open === false &&
+      searchPanelCheck.collapsed.width < 20 &&
+      searchPanelCheck.opened.open === true &&
+      searchPanelCheck.opened.width > 200 &&
+      searchPanelCheck.queryBeforeClose !== '' &&
+      searchPanelCheck.afterCollapse.open === false &&
+      searchPanelCheck.afterCollapse.query === '',
+      `收起时输入框宽 ${searchPanelCheck.collapsed.width}px（只留一颗放大镜）→ 点开后 ${searchPanelCheck.opened.width}px；` +
+      `收起前关键词「${searchPanelCheck.queryBeforeClose}」→ 收起后已清空，宽度回到 ${searchPanelCheck.afterCollapse.width}px`)
     record('搜索面板：范围切换与历史列表',
-      searchPanelCheck.beforeFocus === true &&
       searchPanelCheck.opened.hidden === false &&
       searchPanelCheck.opened.scopes.length === 2 &&
       searchPanelCheck.opened.history.length === 2 &&
@@ -497,13 +515,243 @@ async function runSmoke ({ win, ctx }) {
       searchPanelCheck.afterScope.selected === '含歌词等' &&
       searchPanelCheck.afterPick.query === 'Blues' &&
       searchPanelCheck.afterEscape.hidden === true,
-      `聚焦前隐藏 → 聚焦后展开（范围 ${JSON.stringify(searchPanelCheck.opened.scopes)}，历史 ${JSON.stringify(searchPanelCheck.opened.history)}）；` +
-      `切到深度档后按钮显示「${searchPanelCheck.afterScope.label}」、提示「${searchPanelCheck.afterScope.hint}」、占位「${searchPanelCheck.afterScope.placeholder}」` +
-      `${searchPanelCheck.afterDirect ? `；点击无效，直接调动作的结果 ${JSON.stringify(searchPanelCheck.afterDirect)}` : ''}；` +
+      `展开后面板可见（范围 ${JSON.stringify(searchPanelCheck.opened.scopes)}，历史 ${JSON.stringify(searchPanelCheck.opened.history)}）；` +
+      `切到深度档后按钮显示「${searchPanelCheck.afterScope.label}」、提示「${searchPanelCheck.afterScope.hint}」、占位「${searchPanelCheck.afterScope.placeholder}」；` +
       `点历史回填「${searchPanelCheck.afterPick.query}」；Esc 收起=${searchPanelCheck.afterEscape.hidden}`)
 
+    /* ---------- 匹配详情：悬停时显示的「为什么搜到它」 ---------- */
+    const matchDetailCheck = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 340) => { await new Promise((r) => setTimeout(r, ms)) }
+      actions.setView('songs')
+      const tracks = store.get().library.tracks
+      const rows = () => [...document.querySelectorAll('.track-row')].map((row) => {
+        const match = row.querySelector('.track-row__match')
+        const title = row.querySelector('.track-row__title')
+        return {
+          titleText: title ? title.textContent : '',
+          titleHl: title ? title.querySelectorAll('.hl').length : 0,
+          matchLabel: match?.querySelector('.track-row__match-label')?.textContent || '',
+          matchText: match ? match.textContent : '',
+          matchHl: match ? match.querySelectorAll('.hl').length : 0,
+          hasMatch: Boolean(match && match.childNodes.length)
+        }
+      })
 
-    // 正在播放面板与歌词视图
+      // ① 歌名命中：标题里应当出现高亮片段
+      //    挑一个含 ASCII 词的标题，高亮匹配更稳（日文假名会走 NFD 分解那条路）
+      const titleSample = tracks.find((track) => /[A-Za-z]{5,}/.test(track.title)) || tracks[0]
+      const titleKeyword = (titleSample.title.match(/[A-Za-z]{5,}/) || [])[0] || titleSample.title.slice(0, 4)
+      actions.setSearchScope('basic')
+      actions.setQuery(titleKeyword)
+      await settle()
+      const titleRows = rows()
+
+      // ② 歌词命中：用主进程给回来的命中行里取词，保证确实是歌词命中
+      const probe = await actions.searchLyricsNow('the')
+      const detail = (probe?.matches || []).find((item) => item.line && /[A-Za-z]{4,}/.test(item.line))
+      let lyricRows = []
+      let lyricDebug = null
+      if (detail) {
+        const word = (detail.line.match(/[A-Za-z]{4,}/) || [])[0]
+        actions.setSearchScope('deep')
+        await actions.searchLyricsNow(word)
+        actions.setQuery(word)
+        await settle(460)
+        const info = store.get().ui.searchLyrics
+        lyricRows = rows()
+        lyricDebug = { word, matches: (info?.matches || []).length, line: detail.line.slice(0, 50) }
+      } else {
+        lyricDebug = { word: '', matches: (probe?.matches || []).length, line: '', reason: '主进程没有回传命中行' }
+      }
+
+      // ③ 没有搜索时不该有任何匹配详情
+      actions.setQuery('')
+      await settle(320)
+      const noSearch = rows()
+
+      actions.setSearchScope('basic')
+      return {
+        titleKeyword,
+        titleWithHl: titleRows.filter((row) => row.titleHl > 0).length,
+        titleTotal: titleRows.length,
+        lyricMatched: lyricRows.filter((row) => row.matchLabel === '歌词匹配').length,
+        lyricHl: lyricRows.reduce((sum, row) => sum + row.matchHl, 0),
+        lyricSample: (lyricRows.find((row) => row.matchLabel === '歌词匹配') || {}).matchText || '',
+        lyricDebug,
+        noSearchMatchRows: noSearch.filter((row) => row.hasMatch).length
+      }
+    `)
+    record('歌名命中时标题会带上高亮片段',
+      matchDetailCheck.titleWithHl > 0,
+      `按歌名片段「${matchDetailCheck.titleKeyword}」搜索：${matchDetailCheck.titleTotal} 行里 ${matchDetailCheck.titleWithHl} 行的标题带命中片段` +
+      `（.hl 只在悬停时上色，不悬停保持原样）`)
+    record('歌词命中时悬停显示命中的那一句',
+      matchDetailCheck.lyricMatched > 0 && matchDetailCheck.lyricHl > 0,
+      matchDetailCheck.lyricDebug
+        ? `关键词「${matchDetailCheck.lyricDebug.word}」（取自歌词行「${matchDetailCheck.lyricDebug.line}…」，该词命中 ${matchDetailCheck.lyricDebug.matches} 首）：` +
+          `${matchDetailCheck.lyricMatched} 行标为「歌词匹配」、共 ${matchDetailCheck.lyricHl} 处高亮；示例「${matchDetailCheck.lyricSample.slice(0, 56)}」`
+        : '没有可用的歌词命中样本，跳过')
+    record('没有搜索时不显示匹配详情',
+      matchDetailCheck.noSearchMatchRows === 0,
+      `清空关键词后仍有 ${matchDetailCheck.noSearchMatchRows} 行带着匹配详情（应为 0，未搜索时保持原来的样子）`)
+
+    /* ---------- 歌词命中 → 点开歌曲自动跳到那一句（可开关） ---------- */
+    const jumpCheck = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const player = window.__aria.player
+      const settle = async (ms = 300) => { await new Promise((r) => setTimeout(r, ms)) }
+      const byId = store.get().library.byId
+      const waitFor = async (predicate, timeout = 14000) => {
+        const deadline = performance.now() + timeout
+        while (performance.now() < deadline) {
+          if (predicate()) return true
+          await settle(250)
+        }
+        return false
+      }
+
+      // 找一个「命中行有明显时间轴」的词，这样跳没跳一眼可辨
+      const probe = await actions.searchLyricsNow('the')
+      const hits = (probe?.matches || []).filter((item) => item.line && item.time > 25)
+      if (hits.length < 1) {
+        return { skipped: true, reason: '没有时间轴足够靠后的歌词命中样本' }
+      }
+      const first = hits[0]
+      const wordA = (first.line.match(/[A-Za-z]{4,}/) || [])[0]
+
+      // 打开开关：点开应当跳到那一句
+      await actions.setSetting({ jumpToMatchedLyric: true })
+      actions.setSearchScope('deep')
+      await actions.searchLyricsNow(wordA)
+      actions.setQuery(wordA)
+      await settle(420)
+      const stateA = store.get().ui.searchLyrics
+      const hitA = (stateA?.matches || []).find((item) => item.id === first.id) ||
+        (stateA?.matches || [])[0]
+      const trackA = hitA ? byId.get(hitA.id) : null
+      let onResult = null
+      if (trackA && hitA) {
+        actions.playTrack(trackA, [trackA])
+        const reached = await waitFor(() => player.getTime() >= hitA.time - 2)
+        onResult = { time: Math.round(player.getTime()), target: Math.round(hitA.time), reached }
+      }
+
+      // 关掉开关：点开应当从头播，不跳
+      await actions.setSetting({ jumpToMatchedLyric: false })
+      const second = hits.find((item) => item.id !== first.id) || null
+      let offResult = null
+      if (second) {
+        const wordB = (second.line.match(/[A-Za-z]{4,}/) || [])[0]
+        await actions.searchLyricsNow(wordB)
+        actions.setQuery(wordB)
+        await settle(420)
+        const stateB = store.get().ui.searchLyrics
+        const hitB = (stateB?.matches || []).find((item) => item.id === second.id) ||
+          (stateB?.matches || [])[0]
+        const trackB = hitB ? byId.get(hitB.id) : null
+        if (trackB && hitB) {
+          actions.playTrack(trackB, [trackB])
+          await settle(3200)
+          offResult = { time: Math.round(player.getTime()), target: Math.round(hitB.time) }
+        }
+      }
+
+      await actions.setSetting({ jumpToMatchedLyric: true })
+      actions.setSearchScope('basic')
+      actions.setQuery('')
+      player.pause()
+      await settle(200)
+      return { skipped: false, wordA, onResult, offResult }
+    `)
+    record('歌词命中：点开歌曲跳到那一句（可在设置里关掉）',
+      !jumpCheck.skipped &&
+      jumpCheck.onResult && jumpCheck.onResult.reached &&
+      (!jumpCheck.offResult || jumpCheck.offResult.time < jumpCheck.offResult.target - 5),
+      jumpCheck.skipped
+        ? jumpCheck.reason
+        : `开关打开：搜索「${jumpCheck.wordA}」后点开，播放位置跳到 ${jumpCheck.onResult.time}s（命中句在 ${jumpCheck.onResult.target}s）；` +
+          (jumpCheck.offResult
+            ? `开关关闭：同样点开只播到 ${jumpCheck.offResult.time}s（命中句在 ${jumpCheck.offResult.target}s，没有跳）`
+            : '开关关闭的对照组没有可用的第二首样本'))
+
+
+
+    /* ---------- 从任何视图都能回到「全部歌曲」 ----------
+     *
+     * 回归现场：侧边栏的「全部歌曲」只调了 setSource，而 setSource 只在当前是设置页时
+     * 才把视图切回歌曲 —— 从媒体墙 / 艺人 / 专辑点过来会「什么也没发生」，
+     * 用户看到的就是「点过媒体墙、艺人之后就回不到全部歌曲页面」。
+     * 这里逐个视图点一遍，断言真的回到了歌曲列表。
+     */
+    const backToSongsCheck = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 420) => { await new Promise((r) => setTimeout(r, ms)) }
+      const listContainer = document.querySelector('.track-list')?.closest('.view-root') ||
+        document.querySelectorAll('.content-inner')[0]
+      // 用「第一行的实际矩形高度」判断列表是否真的显示出来了
+      // （offsetParent 在这种定位结构下恒为 null，外层容器的 rect 也不一定能代表）
+      const listVisible = () => {
+        const row = document.querySelector('.track-row')
+        return (row?.getBoundingClientRect().height || 0) > 10
+      }
+      const visibleRoots = () => [...document.querySelectorAll('#content > .view-root')]
+        .filter((node) => node.style.display !== 'none' && node.offsetParent !== null)
+        .map((node) => (node.className || '').toString().slice(0, 24))
+
+      const sidebarRow = (label) => [...document.querySelectorAll('.sidebar__row')]
+        .find((node) => (node.textContent || '').includes(label))
+
+      // 侧边栏里「全部歌曲」那一项
+      const allSongsRow = sidebarRow('全部歌曲')
+      const results = []
+      for (const [label, action] of [
+        ['专辑', () => actions.setView('albums')],
+        ['艺人', () => actions.setView('artists')],
+        ['媒体墙', () => actions.setView('wall')],
+        ['设置', () => actions.setView('settings')]
+      ]) {
+        action()
+        await settle()
+        const before = { view: store.get().ui.view, visible: visibleRoots() }
+        allSongsRow.click()
+        await settle()
+        results.push({
+          label,
+          before,
+          view: store.get().ui.view,
+          source: store.get().ui.source.type,
+          detail: store.get().ui.detail ? store.get().ui.detail.key : null,
+          visible: visibleRoots(),
+          songsVisible: listVisible(),
+          rows: document.querySelectorAll('.track-row').length
+        })
+      }
+      // 队列面板打开着的时候也要能回到全部歌曲
+      actions.toggleQueue(true)
+      actions.setView('wall')
+      await settle()
+      allSongsRow.click()
+      await settle()
+      const withQueue = {
+        view: store.get().ui.view,
+        songsVisible: listVisible(),
+        queueOpen: store.get().ui.queueOpen
+      }
+      actions.toggleQueue(false)
+      actions.setView('songs')
+      await settle(300)
+      return { results, withQueue, hasRow: Boolean(allSongsRow) }
+    `)
+    const backToSongs = backToSongsCheck.results
+    record('从任何视图都能回到「全部歌曲」',
+      backToSongsCheck.hasRow &&
+      backToSongs.every((item) => item.view === 'songs' && item.source === 'all' &&
+        item.detail === null && item.songsVisible && item.rows > 0) &&
+      backToSongsCheck.withQueue.view === 'songs' && backToSongsCheck.withQueue.songsVisible,
+      backToSongs.map((item) => `${item.label}（切前 ${item.before.view}）→ ${item.view}/${item.source}，列表可见=${item.songsVisible}、${item.rows} 行`).join('；') +
+      `；队列面板开着时 → ${backToSongsCheck.withQueue.view}，列表可见=${backToSongsCheck.withQueue.songsVisible}`)
+
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria
       actions.openNowPlaying({ lyrics: true })
@@ -916,6 +1164,10 @@ async function runSmoke ({ win, ctx }) {
 
       const wall = window.__aria.views.mediaWall
       const viewport = document.querySelector('.wall-viewport')
+      // 前面的检查会把视图切到歌曲列表，这里必须先切回媒体墙：
+      // 视图隐藏时它是 0×0，可拖范围会被算成 0，拖动自然是「位移 0」
+      window.__aria.actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 700))
       const rect = viewport.getBoundingClientRect()
       const cx = Math.round(rect.left + rect.width / 2)
       const cy = Math.round(rect.top + rect.height / 2)

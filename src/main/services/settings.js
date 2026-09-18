@@ -25,6 +25,8 @@ const DEFAULTS = {
   // 搜索：basic = 只搜歌曲信息（歌名/专辑/艺人），deep = 连歌词、年份、流派、文件名等一起搜
   searchScope: 'basic',
   searchHistory: [],
+  // 从歌词搜索结果里点开歌曲时，是否自动跳到命中的那一句
+  jumpToMatchedLyric: true,
   wallLayout: 'canvas',
   prewarmArtwork: true,
   trayEnabled: true,

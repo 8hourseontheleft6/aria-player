@@ -299,6 +299,8 @@ async function main () {
       // 这样「点哪首歌就以哪个集合作为队列」的行为在各视图里一致
       const source = Array.isArray(context) && context.length ? context : visibleTracks()
       const list = source.map((item) => item.id)
+      // 来自歌词搜索结果的话，记下要跳的那一句（等这一首就绪后再 seek）
+      scheduleLyricSeek(track)
       if (list.includes(track.id)) player.playCollection(list, track.id)
       else player.playCollection([track.id], track.id)
     },
@@ -512,6 +514,15 @@ async function main () {
 
   remote.settings.onChanged((next) => applySettings(next))
 
+  /*
+   * 「从歌词搜索点开歌曲 → 跳到命中的那一句」：
+   * 切歌后音频要先拿到时长，这时才能 seek，所以在播放状态更新时试着落地一次。
+   */
+  store.select((state) => `${state.playback.trackId}|${state.playback.status}|${state.playback.duration}`,
+    () => {
+      if (pendingLyricSeek) flushPendingLyricSeek()
+    })
+
   /* ------------------------------------------------------------------ */
   /* 资料库                                                              */
   /* ------------------------------------------------------------------ */
@@ -577,6 +588,9 @@ async function main () {
       return {
         query,
         ids: result?.ids || [],
+        // 命中详情（哪一行歌词、那一行的文本与时间轴）也要带上：
+        // 界面用它在悬停时高亮、并把时间交给「点开歌曲跳到那一句」
+        matches: result?.matches || [],
         scanned: result?.scanned || 0,
         matched: result?.matched || 0,
         truncated: Boolean(result?.truncated),
@@ -586,6 +600,55 @@ async function main () {
       console.warn('[app] 歌词搜索失败', err)
       return { query, ids: [], scanned: 0, matched: 0, error: String(err?.message || err) }
     }
+  }
+
+  /**
+   * 「从歌词搜索结果点开歌曲时，自动跳到命中的那一句」。
+   *
+   * 返回这首歌在当前搜索结果里的歌词命中（含时间轴）；没有命中、
+   * 关键词已经变了、或者用户在设置里关掉了这个功能，都返回 null。
+   */
+  function matchedLyricFor (trackId) {
+    const state = store.get()
+    if (state.settings.jumpToMatchedLyric === false) return null
+    const search = state.ui.searchLyrics
+    if (!search || !trackId) return null
+    if (search.query !== state.ui.query) return null
+    const hit = (search.matches || []).find((item) => item.id === trackId)
+    if (!hit || typeof hit.time !== 'number' || hit.time <= 0) return null
+    return hit
+  }
+
+  /*
+   * 待执行的「跳到歌词句」：不能立刻 seek —— 刚切歌时音频还没拿到时长，
+   * 这时 seek 会被丢掉。所以记下来，等这一首真的就绪（有时间轴）再跳一次。
+   */
+  let pendingLyricSeek = null
+
+  function scheduleLyricSeek (track) {
+    const hit = track ? matchedLyricFor(track.id) : null
+    pendingLyricSeek = hit ? { trackId: track.id, time: hit.time, line: hit.line } : null
+    return pendingLyricSeek
+  }
+
+  function flushPendingLyricSeek () {
+    if (!pendingLyricSeek) return false
+    const state = store.get()
+    if (state.playback.trackId !== pendingLyricSeek.trackId) {
+      pendingLyricSeek = null
+      return false
+    }
+    if (!(state.playback.duration > 0)) return false
+    const target = Math.min(pendingLyricSeek.time, Math.max(0, state.playback.duration - 0.5))
+    const applied = pendingLyricSeek
+    pendingLyricSeek = null
+    player.seek(target)
+    toast({
+      message: `已跳到歌词「${String(applied.line || '').slice(0, 24)}」`,
+      type: 'success',
+      duration: 2600
+    })
+    return true
   }
 
   /** 输入变化 / 切换范围时调用：只有深度档且有词才真的去搜 */

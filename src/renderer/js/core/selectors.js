@@ -143,3 +143,79 @@ export function selectTitle (state, fallback) {
   }
   return fallback
 }
+
+/** 把一段文本按关键词切成「普通 / 命中」两种片段，界面悬停时用它做高亮 */
+export function highlightParts (text, parts) {
+  const source = String(text || '')
+  if (!source || !parts?.length) return [{ text: source, hit: false }]
+  const escaped = parts
+    .filter(Boolean)
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .sort((a, b) => b.length - a.length)
+  if (!escaped.length) return [{ text: source, hit: false }]
+  let regex
+  try {
+    regex = new RegExp(`(${escaped.join('|')})`, 'gi')
+  } catch {
+    return [{ text: source, hit: false }]
+  }
+  const out = []
+  let last = 0
+  for (const match of source.matchAll(regex)) {
+    if (match.index > last) out.push({ text: source.slice(last, match.index), hit: false })
+    out.push({ text: match[0], hit: true })
+    last = match.index + match[0].length
+  }
+  if (last < source.length) out.push({ text: source.slice(last), hit: false })
+  return out
+}
+
+/** 某个字段是否被全部关键词命中 */
+function fieldHits (value, parts) {
+  const haystack = normalizeForSearch(value)
+  return Boolean(haystack) && parts.every((part) => haystack.includes(part))
+}
+
+/**
+ * 这条结果「为什么」被搜出来 —— 界面悬停时用它显示匹配详情。
+ *
+ * 优先级就是用户直觉的顺序：歌名 → 艺人 → 专辑 → 歌词 → 其他信息。
+ * 歌名命中时不额外交代内容（标题自己会被高亮），只回一个标记。
+ *
+ * @param {object} track
+ * @param {string} query
+ * @param {{ scope?: 'basic'|'deep', lyricsMatch?: { line?: string, time?: number|null, lineIndex?: number }|null }} [options]
+ */
+export function describeMatch (track, query, options = {}) {
+  const parts = queryParts(query)
+  if (!parts.length || !track) return null
+
+  if (fieldHits(track.title, parts)) return { kind: 'title', label: '歌名匹配', highlightTitle: true }
+  if (fieldHits(track.artist, parts)) return { kind: 'artist', label: '艺人匹配', text: track.artist }
+  if (fieldHits(track.album, parts)) return { kind: 'album', label: '专辑匹配', text: track.album }
+
+  const lyrics = options.lyricsMatch
+  if (lyrics && lyrics.line) {
+    return {
+      kind: 'lyrics',
+      label: '歌词匹配',
+      text: lyrics.line,
+      time: lyrics.time ?? null,
+      lineIndex: lyrics.lineIndex ?? -1
+    }
+  }
+
+  if (options.scope !== 'deep') return null
+  const extended = [
+    { label: '流派', value: track.genre },
+    { label: '年份', value: track.year ? String(track.year) : '' },
+    { label: '文件名', value: track.file },
+    { label: '文件夹', value: track.dir },
+    { label: '编码', value: track.codec },
+    { label: '码率', value: track.bitrate ? `${track.bitrate} kbps` : '' },
+    { label: '采样率', value: track.sampleRate ? `${track.sampleRate} Hz` : '' },
+    { label: '无损', value: track.lossless ? '无损 lossless flac' : '' }
+  ].find((item) => fieldHits(item.value, parts))
+  if (!extended) return null
+  return { kind: 'extended', label: `${extended.label}匹配`, text: String(extended.value) }
+}

@@ -6,6 +6,7 @@
 import { h, on, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
 import { formatDuration } from '../core/format.js'
+import { highlightParts } from '../core/selectors.js'
 import { EVENTS } from '../core/bus.js'
 
 const ROW_HEIGHT = 54
@@ -17,7 +18,7 @@ const SORT_COLUMNS = [
   { key: 'duration', label: '时长' }
 ]
 
-export function createTrackList ({ store, bus, player, artwork, actions }) {
+export function createTrackList ({ store, bus, player, artwork, actions, matchFor = null }) {
   const canvas = h('div', { class: 'tracklist__canvas' })
   const viewport = h('div', { class: 'tracklist__viewport scroll', tabindex: '0' }, canvas)
 
@@ -91,7 +92,12 @@ export function createTrackList ({ store, bus, player, artwork, actions }) {
       }, icon('ellipsis'))
     )
 
-    row.append(indexCell, main, h('div', { class: 'track-row__album truncate', text: track.album }), right)
+    row.append(indexCell, main, h('div', { class: 'track-row__album truncate' },
+      h('span', { class: 'track-row__album-text truncate' }),
+      // 悬停时才出现的「为什么搜到它」：默认 display:none，
+      // 与专辑名共用同一个格子，所以显示出来不会让行高/列宽发生变化
+      h('span', { class: 'track-row__match truncate' })
+    ), right)
     paintRow(row, track, index)
 
     on(row, 'click', () => {
@@ -150,10 +156,38 @@ export function createTrackList ({ store, bus, player, artwork, actions }) {
     // 标题 + 歌词标记
     const titleNode = row.querySelector('.track-row__title')
     clear(titleNode)
-    titleNode.append(h('span', { class: 'truncate', text: track.title }))
+    // 搜索命中歌名时把命中片段标出来（样式上只在悬停时才真正高亮）
+    const match = matchFor ? matchFor(track) : null
+    const parts = match ? match.parts : []
+    const titleText = h('span', { class: 'truncate' })
+    for (const piece of highlightParts(track.title, parts)) {
+      titleText.append(piece.hit
+        ? h('span', { class: 'hl', text: piece.text })
+        : h('span', { text: piece.text }))
+    }
+    titleNode.append(titleText)
     if (track.lyricsPath) {
       titleNode.append(h('span', { class: 'track-row__badge', title: '有歌词' },
         icon('lyrics', { className: 'icon icon--stroke' }), '词'))
+    }
+
+    // 专辑名 + 悬停显示的匹配详情
+    const albumText = row.querySelector('.track-row__album-text')
+    if (albumText) albumText.textContent = track.album
+    const matchNode = row.querySelector('.track-row__match')
+    if (matchNode) {
+      clear(matchNode)
+      if (match && match.label) {
+        matchNode.dataset.kind = match.kind
+        matchNode.title = `${match.label}：${match.text || track.title}`
+        matchNode.append(h('span', { class: 'track-row__match-label', text: match.label }))
+        const text = match.kind === 'title' ? track.title : match.text
+        for (const piece of highlightParts(text, parts)) {
+          matchNode.append(piece.hit
+            ? h('span', { class: 'hl', text: piece.text })
+            : h('span', { text: piece.text }))
+        }
+      }
     }
 
     loadArtwork(row.querySelector('.track-row__art'), track)

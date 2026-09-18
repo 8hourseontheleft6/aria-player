@@ -229,6 +229,55 @@
 .track-row__album {
   font-size: var(--text-subhead);
   color: var(--label-3);
+  /* 专辑名与「匹配详情」共用这一格，悬停时互相切换 —— 布局完全不变 */
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* 悬停时才出现的匹配详情（只在搜索时才有内容） */
+.track-row__match {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-footnote);
+  color: var(--label-2);
+}
+
+.track-row:hover .track-row__match:not(:empty) {
+  display: flex;
+}
+
+/* 有匹配详情时，悬停就用它顶掉专辑名（:has 在这里是可靠的：Electron 42 的 Chromium 早就支持） */
+.track-row:hover .track-row__album:has(.track-row__match:not(:empty)) .track-row__album-text {
+  display: none;
+}
+
+.track-row__match-label {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--fill-quaternary);
+  color: var(--label-3);
+  font-size: var(--text-caption);
+}
+
+.track-row__match[data-kind='lyrics'] .track-row__match-label {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 命中关键词的高亮：不悬停时完全不留痕，悬停才亮起来 */
+.hl {
+  border-radius: 3px;
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+
+.track-row:hover .hl {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: var(--label);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .track-row__right {

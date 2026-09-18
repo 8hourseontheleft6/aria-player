@@ -417,6 +417,38 @@
 
 /* --------------------- 搜索范围与搜索历史 --------------------- */
 
+/*
+ * 搜索默认收起成一颗放大镜：点开才展开输入框，工具栏平时保持干净。
+ * 用 max-width + opacity 做过渡：比 display 切换好做动画，也不会让工具栏抖动。
+ */
+.search-slot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-slot .search {
+  max-width: 0;
+  /* 原来那一版带 min-width: 180px，不覆盖掉的话收起时仍然是 180px 宽 */
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  transition: max-width var(--dur) var(--ease-ios), opacity var(--dur-fast) var(--ease-ios),
+    padding var(--dur) var(--ease-ios);
+}
+
+.search-slot.is-open .search {
+  max-width: 330px;
+  min-width: 180px;
+  padding-left: 10px;
+  padding-right: 10px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .search__scope {
   display: flex;
   align-items: center;

@@ -98,6 +98,7 @@ export function initialState () {
       showFps: false,
       searchScope: 'basic',
       searchHistory: [],
+      jumpToMatchedLyric: true,
       globalMediaKeys: true,
       showRemainingTime: false
     },

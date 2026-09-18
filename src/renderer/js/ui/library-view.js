@@ -3,7 +3,7 @@
 import { h, on, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
 import { formatDurationLong, normalizeForSearch } from '../core/format.js'
-import { selectVisibleTracks, selectTitle } from '../core/selectors.js'
+import { selectVisibleTracks, selectTitle, describeMatch } from '../core/selectors.js'
 import { EVENTS } from '../core/bus.js'
 import { createTrackList } from './track-list.js'
 import { openPopover, popoverRows } from './overlay.js'
@@ -19,7 +19,30 @@ const SORT_OPTIONS = [
 ]
 
 export function createLibraryView ({ store, bus, player, artwork, actions, trackListOptions }) {
-  const trackList = createTrackList({ store, bus, player, artwork, actions, ...trackListOptions })
+  /**
+   * 「这条结果为什么被搜出来」—— 列表悬停时显示匹配详情用。
+   * 歌词命中只认「对应当前关键词」的那一份结果（异步搜索会晚到一步）。
+   */
+  function matchFor (track) {
+    const state = store.get()
+    const raw = state.ui.query.trim()
+    if (!raw) return null
+    const scope = state.settings.searchScope === 'deep' ? 'deep' : 'basic'
+    const lyrics = state.ui.searchLyrics && state.ui.searchLyrics.query === state.ui.query
+      ? (state.ui.searchLyrics.matches || []).find((item) => item.id === track.id)
+      : null
+    const info = describeMatch(track, state.ui.query, { scope, lyricsMatch: lyrics || null })
+    if (!info) return null
+    /*
+     * 高亮用「用户原样输入的关键词」，不能用归一化后的：
+     * 归一化会做 NFD 分解（假名、带变音符的字母会被拆成基字符 + 组合记号），
+     * 拿它去匹配原文就永远匹配不上，标题/歌词行都高亮不出来。
+     */
+    const parts = raw.split(/\s+/).filter(Boolean)
+    return { ...info, parts }
+  }
+
+  const trackList = createTrackList({ store, bus, player, artwork, actions, matchFor, ...trackListOptions })
 
   /* ---------------- 工具栏 ---------------- */
   const compactTitle = h('div', { class: 'view-toolbar__title', text: '全部歌曲' })
@@ -202,6 +225,33 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     searchPanel
   )
 
+  /*
+   * 搜索默认只留一个放大镜图标，点开才展开输入框 ——
+   * 工具栏平时保持干净（这是需求里「现在的搜索很丑」那条）。
+   * 收起时如果还有关键词就顺带清掉，免得出现「看不见却还在过滤」的状态。
+   */
+  function setSearchOpen (open) {
+    searchSlot.classList.toggle('is-open', open)
+    if (open) {
+      searchInput.focus()
+    } else {
+      openSearchPanel(false)
+      if (searchInput.value) {
+        searchInput.value = ''
+        actions.setQuery('')
+      }
+    }
+  }
+
+  const searchToggle = h('button', {
+    class: 'btn btn--icon',
+    type: 'button',
+    title: '搜索（Ctrl + F）',
+    onClick: () => setSearchOpen(!searchSlot.classList.contains('is-open'))
+  }, icon('search', { className: 'icon icon--stroke' }))
+
+  const searchSlot = h('div', { class: 'search-slot' }, searchToggle, searchBox)
+
   const scanButton = h('button', {
     class: 'btn btn--icon',
     type: 'button',
@@ -223,7 +273,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     compactTitle,
     h('div', { class: 'view-toolbar__spacer' }),
     metaLabel,
-    searchBox,
+    searchSlot,
     locateButton,
     sortButton,
     scanButton
@@ -380,6 +430,8 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     element,
     refresh,
     focusSearch: () => {
+      // Ctrl+F：先展开搜索框（默认收起时只有一个图标）再聚焦
+      setSearchOpen(true)
       searchInput.focus()
       searchInput.select()
     },

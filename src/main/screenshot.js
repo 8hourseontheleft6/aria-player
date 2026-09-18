@@ -113,7 +113,8 @@ async function runScreenshots ({ win }) {
         actions.setSearchScope('deep')
         actions.setQuery('love')
         await new Promise((r) => setTimeout(r, 400))
-        // 聚焦输入框 = 打开面板（范围切换与最近搜索都在里面）
+        // 搜索默认收起成一颗放大镜，先点开再聚焦（这样范围按钮与历史面板才可见）
+        document.querySelector('.search-slot .btn')?.click()
         document.querySelector('.search input')?.focus()
         return true`)
       await sleep(1400)

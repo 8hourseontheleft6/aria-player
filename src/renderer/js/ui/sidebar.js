@@ -46,7 +46,16 @@ export function createSidebar ({ store, bus, actions }) {
         label: '全部歌曲',
         count: library.tracks.length || undefined,
         selected: ui.view === 'songs' && ui.source.type === 'all',
-        onClick: () => actions.setSource({ type: 'all', value: null })
+        /*
+         * 点「全部歌曲」必须真的回到歌曲列表。
+         * 只调 setSource 不够：它只在当前是设置页时才把视图切回歌曲，
+         * 从媒体墙 / 艺人 / 专辑点过来会「什么也没发生」——
+         * 用户反馈的「点过媒体墙、艺人后就回不到全部歌曲」就是这个。
+         */
+        onClick: () => {
+          actions.setSource({ type: 'all', value: null })
+          actions.setView('songs')
+        }
       }),
       row({
         iconName: 'disc',
@@ -103,7 +112,11 @@ export function createSidebar ({ store, bus, actions }) {
           label: name,
           count: count || undefined,
           selected: ui.source.type === 'folder' && ui.source.value === folder,
-          onClick: () => actions.setSource({ type: 'folder', value: folder }),
+          // 同上：点文件夹也是「看这个文件夹里的歌」，从别的视图点过来要真的切过去
+          onClick: () => {
+            actions.setSource({ type: 'folder', value: folder })
+            actions.setView('songs')
+          },
           action: h('span', {
             class: 'sidebar__row-action',
             title: '从资料库移除',

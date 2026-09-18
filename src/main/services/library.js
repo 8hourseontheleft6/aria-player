@@ -565,6 +565,45 @@ function createLibraryService (ctx) {
   let lyricsIndexHits = 0
 
   const LYRICS_READ_CONCURRENCY = 8
+  /** 一次搜索最多带回来这么多条「命中详情」（给界面悬停显示、点击跳转用） */
+  const LYRICS_MATCH_LIMIT = 300
+  /** 单行歌词回传时的截断长度 */
+  const LYRICS_LINE_MAX = 160
+
+  /**
+   * 找出「第一行同时包含全部关键词」的歌词行，并把时间轴一起取出来。
+   * 时间用于「点开歌曲时跳到这一句」；只解析命中的那一行，不做整首解析。
+   *
+   * LRC 行形如 [mm:ss.xx]歌词，也可能混有 [ar:...] 这类元信息行或纯文本行。
+   */
+  function findMatchedLine (text, parts) {
+    const lines = text.split(/\r?\n/)
+    for (let index = 0; index < lines.length; index++) {
+      const raw = lines[index]
+      if (!raw) continue
+      let time = null
+      let body = raw
+      const stamps = raw.match(/\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]/g)
+      if (stamps) {
+        const first = stamps[0].slice(1, -1)
+        const [minute, second] = first.split(':')
+        const seconds = Number(String(second).replace(':', '.'))
+        if (Number.isFinite(seconds)) time = Number(minute) * 60 + seconds
+        body = raw.replace(/\[[^\]]*\]/g, '')
+      }
+      const trimmed = body.trim()
+      if (!trimmed) continue
+      const haystack = trimmed.toLowerCase()
+      if (parts.every((part) => haystack.includes(part))) {
+        return {
+          lineIndex: index,
+          line: trimmed.length > LYRICS_LINE_MAX ? `${trimmed.slice(0, LYRICS_LINE_MAX)}…` : trimmed,
+          time
+        }
+      }
+    }
+    return null
+  }
 
   async function readLyricsText (filePath, stat) {
     const cached = lyricsIndex.get(filePath)
@@ -582,7 +621,9 @@ function createLibraryService (ctx) {
    * 在歌词里搜索关键词。
    *
    * 语义与普通搜索保持一致：多个关键词之间是「与」，全都出现在同一份歌词里才算命中。
-   * 返回命中的曲目 id（有上限，避免一次把整库都算上）。
+   * 返回命中的曲目 id（有上限，避免一次把整库都算上），
+   * 以及前若干条的「命中详情」（哪一行、那一行的文本与时间轴），
+   * 界面用它在悬停时高亮、在点开歌曲时跳到对应的那一句。
    *
    * @param {{ query?: string, limit?: number }} [options]
    */
@@ -591,7 +632,7 @@ function createLibraryService (ctx) {
     const query = String(options.query || '').trim().toLowerCase()
     const limit = Math.max(1, Math.min(2000, Number(options.limit) || 500))
     if (!query) {
-      return { ids: [], scanned: 0, matched: 0, elapsedMs: 0, cached: 0, truncated: false }
+      return { ids: [], matches: [], scanned: 0, matched: 0, elapsedMs: 0, cached: 0, truncated: false }
     }
     const parts = query.split(/\s+/).filter(Boolean)
 
@@ -602,6 +643,7 @@ function createLibraryService (ctx) {
     }
 
     const ids = []
+    const matches = []
     let scanned = 0
     let matched = 0
     let failed = 0
@@ -618,8 +660,15 @@ function createLibraryService (ctx) {
           const haystack = text.toLowerCase()
           if (parts.every((part) => haystack.includes(part))) {
             matched++
-            if (ids.length < limit) ids.push(track.id)
-            else truncated = true
+            if (ids.length < limit) {
+              ids.push(track.id)
+              if (matches.length < LYRICS_MATCH_LIMIT) {
+                const hit = findMatchedLine(text, parts)
+                matches.push({ id: track.id, ...(hit || { lineIndex: -1, line: '', time: null }) })
+              }
+            } else {
+              truncated = true
+            }
           }
         } catch {
           // 文件被删或读不了：跳过它，不要让整次搜索失败
@@ -631,6 +680,7 @@ function createLibraryService (ctx) {
 
     return {
       ids,
+      matches,
       scanned,
       matched,
       failed,

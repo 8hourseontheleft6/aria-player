@@ -235,6 +235,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     /* ---------- 歌词 ---------- */
     scroll.appendChild(group('歌词', [
       row({
+        title: '搜索到歌词时跳到那一句',
+        sub: '在「含歌词等」范围里搜到的歌，点开时自动跳到歌词命中的那一句（在结果里悬停可以看到是哪一句）',
+        control: switchControl(settings.jumpToMatchedLyric !== false,
+          (value) => actions.setSetting({ jumpToMatchedLyric: value }))
+      }),
+      row({
         title: '全局偏移',
         sub: '正值让歌词提前显示，可用来校准时间轴',
         control: sliderControl({
