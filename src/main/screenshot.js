@@ -161,8 +161,9 @@ async function runScreenshots ({ win }) {
             bubbles: true, cancelable: true, deltaX: -dx, deltaY: -dy
           }))
         }
+        ${WAIT_COVERS}
         return true`)
-      await sleep(1400)
+      await sleep(1200)
     }],
     ['14-wall-scrolled.png', '媒体墙（斜向拖到中段）', async () => {
       await evaluate(win, `

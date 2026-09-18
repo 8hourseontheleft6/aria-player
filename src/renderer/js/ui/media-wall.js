@@ -210,18 +210,9 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   on(hero, 'click', (event) => event.stopPropagation())
   on(hero, 'dblclick', (event) => event.stopPropagation())
 
-  /* ---------------- 平面、窗口与视口 ---------------- */
-  /*
-   * 三层结构（详见 browse.css 顶部注释）：
-   *   viewport   视口大小、overflow:hidden —— 真正裁剪的地方
-   *     window   视口 + 一个窗口步长，被 translate(pan + origin) 平移
-   *       grid   整个平面的网格，用 translate(-origin) 在窗口里滚动
-   * 被平移的窗口只有视口那么大，栅格化范围因此被限制住；
-   * 而网格仍是完整的平面，拖到任何位置都有内容。
-   */
+  /* ---------------- 平面与视口 ---------------- */
   const grid = h('div', { class: 'media-wall' })
-  const wallWindow = h('div', { class: 'wall-window' }, grid)
-  const viewport = h('div', { class: 'wall-viewport' }, wallWindow)
+  const viewport = h('div', { class: 'wall-viewport' }, grid)
 
   // 右下角位置指示器：内容比视口大时才出现
   const minimapViewport = h('div', { class: 'wall-minimap__viewport' })
@@ -238,16 +229,16 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   const velocity = { x: 0, y: 0 }
 
   /**
-   * 窗口原点：网格在窗口内的偏移量（取窗口步长的整数倍）。
+   * 每个格子在平面里的行列。
    *
-   * 平移一个「视口大小」的窗口，网格再用 -origin 在窗口里反向滚动，
-   * 两者相加正好等于 pan，所以屏幕位置依旧是 平面坐标 + pan，一格都不会错位。
-   * origin 只取步长整数倍，因此拖动过程中绝大多数帧只需要写一次 transform。
+   * 只用来算「哪些格子看得见」，所以不回读 DOM：布局变化后（重建 / 改密度 /
+   * 聚焦块换位）量一次，之后平移途中只看缓存。
    */
-  const windowOrigin = { x: 0, y: 0 }
-  let windowStep = 320
-  let windowStepOverride = 0
-  let windowPainted = ''
+  const slots = []                // 与 grid.children 同序
+  let slotPitch = 151             // 格子 + 间距
+  let slotRows = 0
+  let slotColumns = 0
+  let cullTimer = null
   let visibleScanTimer = null
   let lastScan = null
 
@@ -283,24 +274,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   function measureGeometry () {
     geometry.viewWidth = viewport.clientWidth
     geometry.viewHeight = viewport.clientHeight
-    /*
-     * 平面尺寸不能再从 grid.offsetWidth 读 —— 网格的盒子现在被收成了窗口大小
-     * （见 browse.css 的说明），它的轨道仍然横跨整面墙。所以宽度直接按
-     * 「列数 × 格子 + 间距 + 内边距」算，高度取最后一张格子的位置加尺寸：
-     * 网格是顺序自动填充（没有 dense），最后一张必然落在最后一行。
-     */
-    const last = grid.lastElementChild
-    geometry.planeWidth = PAD * 2 + columns * tileSize + Math.max(0, columns - 1) * GAP
-    // offsetTop 是相对网格内边距的边缘算的（已经含了上内边距），所以这里只需再补一个下内边距
-    geometry.planeHeight = last
-      ? last.offsetTop + last.offsetHeight + PAD
-      : Math.max(1, geometry.viewHeight)
-
-    // 窗口比视口大出一个步长：可见格子在窗口内的偏移量落在
-    // [0, view + step) 区间内，所以它们一定在窗口盒子里，不会被自己裁掉。
-    // （读 DOM 已经读完，这里再写样式不会有额外强制重排。）
-    wallWindow.style.width = `${Math.max(1, geometry.viewWidth + windowStep)}px`
-    wallWindow.style.height = `${Math.max(1, geometry.viewHeight + windowStep)}px`
+    // 平面尺寸就是网格自己的盒子（宽度是 max-content，高度由 17 行轨道撑开）
+    geometry.planeWidth = grid.offsetWidth
+    geometry.planeHeight = grid.offsetHeight
+    cacheSlots()
 
     const scale = Math.min(
       MINIMAP_MAX.width / Math.max(1, geometry.planeWidth),
@@ -335,6 +312,82 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     }
   }
 
+  /* ================================================================ */
+  /* 屏幕外格子不参与绘制                                                */
+  /* ================================================================ */
+
+  /**
+   * 量一遍每个格子的行列（只在布局变化后调用）。
+   *
+   * 布局是网格自动填充，行列本来由浏览器决定，但平移途中不能每帧回读 DOM，
+   * 所以这里量一次存下来；聚焦块跨 2×2，它的 span 一并记住。
+   */
+  function cacheSlots () {
+    slots.length = 0
+    slotPitch = Math.max(1, tileSize + GAP)
+    slotRows = 0
+    slotColumns = columns
+    let index = 0
+    for (const node of grid.children) {
+      const row = Math.max(0, Math.round((node.offsetTop - PAD) / slotPitch))
+      const column = Math.max(0, Math.round((node.offsetLeft - PAD) / slotPitch))
+      const rowSpan = Math.max(1, Math.round((node.offsetHeight + GAP) / slotPitch))
+      const columnSpan = Math.max(1, Math.round((node.offsetWidth + GAP) / slotPitch))
+      /*
+       * culled 必须从元素当前的类里读回来，不能一律当 false：
+       * 重算布局时（重建 / 改密度 / 聚焦块换位）元素上可能还留着上一次的 is-culled，
+       * 如果这里记成 false，updateCulling 会认为「状态没变」而不再写样式，
+       * 那些格子就永久隐藏了 —— 表现是拖回原点后画面里出现整条空带。
+       */
+      slots[index++] = {
+        node,
+        row,
+        column,
+        rowSpan,
+        columnSpan,
+        culled: node.classList.contains('is-culled')
+      }
+      slotRows = Math.max(slotRows, row + rowSpan)
+    }
+  }
+
+  /**
+   * 按当前位移决定哪些格子看得见，屏幕外的加 .is-culled（visibility: hidden）。
+   *
+   * 用 visibility 而不是 display:none —— 后者会让网格重新自动填充，
+   * 整面墙每次都会重排；visibility 只跳过绘制，布局一点不变。
+   * 只对「状态真的变了」的格子写样式，所以一帧通常只有进出画面边缘的那几个。
+   */
+  function updateCulling () {
+    if (!slots.length) return 0
+    const margin = 1
+    const firstRow = Math.floor((-pan.y - PAD) / slotPitch) - margin
+    const lastRow = Math.ceil((-pan.y + geometry.viewHeight - PAD) / slotPitch) + margin
+    const firstColumn = Math.floor((-pan.x - PAD) / slotPitch) - margin
+    const lastColumn = Math.ceil((-pan.x + geometry.viewWidth - PAD) / slotPitch) + margin
+
+    let changed = 0
+    for (const slot of slots) {
+      const visible = slot.row + slot.rowSpan - 1 >= firstRow && slot.row <= lastRow &&
+        slot.column + slot.columnSpan - 1 >= firstColumn && slot.column <= lastColumn
+      const culled = !visible
+      if (culled === slot.culled) continue
+      slot.culled = culled
+      slot.node.classList.toggle('is-culled', culled)
+      changed++
+    }
+    return changed
+  }
+
+  /** 平移途中不必每帧都算裁剪：按位移变化量节流，一帧最多一次 */
+  function scheduleCulling () {
+    if (cullTimer) return
+    cullTimer = requestAnimationFrame(() => {
+      cullTimer = null
+      updateCulling()
+    })
+  }
+
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
   /** 越界时按比例阻尼，做出「拉得动但拉不远」的手感 */
@@ -347,23 +400,14 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   /**
    * 只写样式、不算边界（调用方保证 pan 已经合法）。
    *
-   * 每帧只写窗口的 transform —— 那是唯一被合成器搬运的元素，而且只有视口大小。
-   * 网格的 transform 只在「跨过一格步长」时才需要重写（拖动 300px 才一次）。
+   * 平移直接作用在平面上：屏幕位置 = 平面内坐标 + pan，没有第二层变换，
+   * 也就没有「裁剪域跟着 transform 走」那类坑。
+   * 省绘制交给 updateCulling()（屏幕外的格子 visibility: hidden）。
    */
   function writePan () {
-    const step = Math.max(1, windowStep)
-    const originX = Math.floor(-pan.x / step) * step
-    const originY = Math.floor(-pan.y / step) * step
-    // 窗口位移 + 网格反向位移 = pan，屏幕位置始终等于 平面坐标 + pan
-    wallWindow.style.transform = `translate3d(${pan.x + originX}px, ${pan.y + originY}px, 0)`
-    const key = `${originX}|${originY}`
-    if (key !== windowPainted) {
-      windowPainted = key
-      windowOrigin.x = originX
-      windowOrigin.y = originY
-      grid.style.transform = `translate3d(${-originX}px, ${-originY}px, 0)`
-    }
+    grid.style.transform = `translate3d(${pan.x}px, ${pan.y}px, 0)`
     paintMinimap()
+    scheduleCulling()
     scheduleVisibleScan()
   }
 
@@ -707,17 +751,11 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     const next = computeLayout(albumList.length)
     columns = next.columns
     tileSize = next.size
-    /*
-     * 窗口步长：窗口原点只能取步长的整数倍，而窗口盒子又必须能装下「视口 + 一个步长」，
-     * 所以步长越小，每帧要栅格化的层就越小（代价 ∝ 层面积），但网格 transform
-     * 的改写就越频繁。实测这一步比想象中值钱，见 perf 输出里的步长对照。
-     */
-    windowStep = windowStepOverride > 0 ? windowStepOverride : Math.max(64, Math.round(tileSize / 2))
     grid.style.setProperty('--wall-columns', String(columns))
     grid.style.setProperty('--wall-size', `${tileSize}px`)
-    // 平面尺寸 / 窗口尺寸都变了，几何缓存必须跟着刷新（这里的一次强制重排是必要开销）
+    // 平面尺寸 / 格子行列都变了，几何缓存必须跟着刷新（这里的一次强制重排是必要开销）
     measureGeometry()
-    windowPainted = ''
+    updateCulling()
   }
 
   /** 布局 / 尺寸变化后重新收敛平移状态（reset=true 时回到平面左上角） */
@@ -981,10 +1019,6 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
    * 定位往往紧跟在一次 FLIP 之后，而 getBoundingClientRect 会把正在跑的
    * transform 算进去，量到的是动画中间的位置，算出来的目标就完全不对。
    * offsetLeft/offsetTop 是布局值，不受 transform 影响。
-   *
-   * 但布局值和屏幕位置之间还差一个窗口原点：格子的屏幕位置 =
-   * 视口 + pan + windowOrigin + offsetLeft（见 .wall-window 那套结构），
-   * 所以换算目标位移时必须把 windowOrigin 减掉，否则会差 0~一个步长的偏差。
    */
   function focusFeatured ({ animate = true } = {}) {
     if (!featuredKey) return false
@@ -997,8 +1031,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     if (!width || !height) return false
 
     const limit = bounds()
-    const nextX = clamp(limit.viewWidth / 2 - windowOrigin.x - node.offsetLeft - width / 2, limit.minX, limit.maxX)
-    const nextY = clamp(limit.viewHeight / 2 - windowOrigin.y - node.offsetTop - height / 2, limit.minY, limit.maxY)
+    const nextX = clamp(limit.viewWidth / 2 - node.offsetLeft - width / 2, limit.minX, limit.maxX)
+    const nextY = clamp(limit.viewHeight / 2 - node.offsetTop - height / 2, limit.minY, limit.maxY)
 
     if (Math.abs(nextX - pan.x) < 1 && Math.abs(nextY - pan.y) < 1) return true
     if (animate && !reduceMotion()) {
@@ -1142,13 +1176,11 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         tileSize: Math.round(tileSize),
         layout,
         pan: { x: Math.round(pan.x), y: Math.round(pan.y) },
-        // 窗口原点与步长：可见的平面范围由 pan 决定，窗口只是绘制范围的优化，
-        // 它必须始终覆盖可见范围（窗口盒 = 视口 + 一个步长）
-        windowOrigin: { x: windowOrigin.x, y: windowOrigin.y },
-        windowStep,
-        windowBox: { width: Math.round(wallWindow.offsetWidth), height: Math.round(wallWindow.offsetHeight) },
-        // 平面尺寸是算出来的（网格盒子已经收成窗口大小），这里读一次 DOM 内容范围做交叉验证
         planeScroll: { width: grid.scrollWidth, height: grid.scrollHeight },
+        // 裁剪统计：当前有多少格子被判定为屏幕外（不参与绘制）
+        culled: slots.filter((slot) => slot.culled).length,
+        slotRows,
+        slotColumns,
         // 最近一次「可见性兜底扫描」的结果（平移停稳后补加载新露出的封面）
         scan: lastScan,
         bounds: limit,
@@ -1163,66 +1195,73 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
       }
     },
     /**
-     * 自检用：改窗口步长（0 = 按格子尺寸自动），用来给「拖动帧率」做 A/B。
-     * 步长会同时改窗口盒子大小，所以必须走 applyLayout + flushPan 这一条正路。
-     */
-    debugSetWindowStep: (value) => {
-      windowStepOverride = Math.max(0, Math.round(Number(value) || 0))
-      applyLayout()
-      flushPan(false)
-      return { step: windowStep, origin: { x: windowOrigin.x, y: windowOrigin.y } }
-    },
-    /**
-     * 自检用：验证「窗口 + 网格反向位移」这套取景框是否严丝合缝。
+     * 自检用：在墙视口里做一次网格命中测试，回答「用户在这个位置看到的是不是格子」。
      *
-     * 三个不变量：
-     *  1. 格子的实际屏幕位置 === 网格左边缘 + 它的布局偏移
-     *     （两层 transform 恰好合成 pan，平面坐标没有被窗口原点污染）；
-     *  2. 窗口原点偏移量必须落在 [0, 步长] 之内 —— 超出就说明吸附算错了；
-     *  3. 窗口盒子必须完整覆盖视口 —— 否则被窗口裁掉的就是用户看得见的内容，
-     *     表现正是「拖到某处突然一块空白」。
-     *     （贴在窗口左/上边缘的格子本身被裁掉是正常的：那部分本来就在视口外。）
+     * 为什么非要这么做：DOM 上的 rect 相交并不能说明元素真的可见 ——
+     * 被祖先 overflow:hidden 裁掉、或者被判定为屏幕外而不绘制时，rect 依然相交。
+     * 之前正是靠 rect 判定通过了自检，而画面上其实只剩左上角一屏（拖到别处全白）。
+     * elementFromPoint 会遵守裁剪与命中规则，所以它是「是否真的看得见」的证据。
      */
-    debugVerifyWindow: () => {
+    debugHitTest: ({ columns = 6, rows = 4 } = {}) => {
       const box = viewport.getBoundingClientRect()
-      const winRect = wallWindow.getBoundingClientRect()
-      const gridRect = grid.getBoundingClientRect()
-      let worst = 0
-      let visible = 0
-      for (const tile of tiles.values()) {
-        const rect = tile.element.getBoundingClientRect()
-        worst = Math.max(
-          worst,
-          Math.abs(rect.left - (gridRect.left + tile.element.offsetLeft)),
-          Math.abs(rect.top - (gridRect.top + tile.element.offsetTop))
-        )
-        if (rect.right > box.left && rect.left < box.right &&
-          rect.bottom > box.top && rect.top < box.bottom) visible++
+      // 拖动期间格子是 pointer-events:none（避免拖动时触发悬停），
+      // 但这里问的是「看不看得见」，所以临时摘掉这个类，测完恢复
+      const wasPanning = viewport.classList.contains('is-panning')
+      if (wasPanning) viewport.classList.remove('is-panning')
+      const result = { tile: 0, empty: 0, culled: 0, other: 0, samples: [] }
+      for (let i = 1; i <= columns; i++) {
+        for (let j = 1; j <= rows; j++) {
+          const x = Math.round(box.left + (box.width * i) / (columns + 1))
+          const y = Math.round(box.top + (box.height * j) / (rows + 1))
+          const node = document.elementFromPoint(x, y)
+          if (!node) { result.empty++; continue }
+          const tile = node.closest ? node.closest('.wall-tile') : null
+          if (tile) {
+            result.tile++
+            if (tile.classList.contains('is-culled')) result.culled++
+          } else if (node === viewport || node === grid) {
+            result.empty++
+            if (result.samples.length < 3) {
+              // 这个点上几何上到底有没有格子、它可见吗
+              // （采样点可能正好落在 3px 的格子缝里，那属于正常情况）
+              const covering = slots.filter((slot) => {
+                const rect = slot.node.getBoundingClientRect()
+                return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+              })
+              result.samples.push(
+                `${x - Math.round(box.left)},${y - Math.round(box.top)} → 命中的是 ${(node.className || node.tagName).toString().slice(0, 16)}` +
+                `，该点上有 ${covering.length} 个格子` +
+                (covering.length
+                  ? `（第 ${covering[0].row} 行第 ${covering[0].column} 列，visibility=${getComputedStyle(covering[0].node).visibility}）`
+                  : '（落在格子缝或平面边缘，正常）')
+              )
+            }
+          } else {
+            result.other++
+          }
+        }
       }
-      const round = (value) => Math.round(value * 10) / 10
-      const coverage = {
-        left: round(box.left - winRect.left),
-        top: round(box.top - winRect.top),
-        right: round(winRect.right - box.right),
-        bottom: round(winRect.bottom - box.bottom)
+      if (wasPanning) viewport.classList.add('is-panning')
+      result.total = columns * rows
+      result.wasPanning = wasPanning
+      return result
+    },
+    /** 自检用：缓存的行列与 DOM 实际位置是否还对得上（布局变化后忘了刷新就会错位） */
+    debugSlotDrift: () => {
+      let drift = 0
+      let checked = 0
+      for (const slot of slots) {
+        if (!slot.node.isConnected) continue
+        checked++
+        const row = Math.round((slot.node.offsetTop - PAD) / slotPitch)
+        const column = Math.round((slot.node.offsetLeft - PAD) / slotPitch)
+        if (row !== slot.row || column !== slot.column) drift++
       }
-      const originOffset = { x: round(-pan.x - windowOrigin.x), y: round(-pan.y - windowOrigin.y) }
-      return {
-        positionError: round(worst),
-        visible,
-        covered: coverage.left >= -0.5 && coverage.top >= -0.5 &&
-          coverage.right >= -0.5 && coverage.bottom >= -0.5,
-        coverage,
-        originInRange: originOffset.x >= -0.5 && originOffset.x <= windowStep + 0.5 &&
-          originOffset.y >= -0.5 && originOffset.y <= windowStep + 0.5,
-        originOffset,
-        windowBox: { width: wallWindow.offsetWidth, height: wallWindow.offsetHeight }
-      }
+      return { drift, checked, pitch: slotPitch, rows: slotRows, columns: slotColumns }
     },
     /**
-     * 自检用：同步落一次平移（含样式写入与指示器更新），用来测「每帧平移的纯开销」。
-     * 刻意绕过 rAF 合流，这样测到的就是真实的一帧工作量；
-     * 正常情况下这里没有任何 DOM 读取，单次应当是微秒级。
+     * 自检用：同步落一次平移（含样式写入、裁剪与指示器更新），用来测「每帧平移的纯开销」。
+     * 刻意绕过 rAF 合流，这样测到的就是真实的一帧工作量。
      */
     debugApplyPan: (x, y) => {
       target.x = x
@@ -1232,7 +1271,11 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         panFrame = null
       }
       flushPan(false)
-      return { x: pan.x, y: pan.y }
+      if (cullTimer) {
+        cancelAnimationFrame(cullTimer)
+        cullTimer = null
+      }
+      return { x: pan.x, y: pan.y, culled: updateCulling() }
     },
 
     /** 自检用：重新构建整面墙并返回耗时（首屏卡顿主要来自这里） */

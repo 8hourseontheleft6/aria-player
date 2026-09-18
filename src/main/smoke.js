@@ -67,9 +67,16 @@ async function runSmoke ({ win, ctx }) {
     })
     record('渲染层启动', true)
 
-    await waitFor(win, 'window.__aria.store.get().library.loaded === true', {
-      label: '资料库加载', timeout: 120000
-    })
+    /*
+     * 等资料库既有内容、又完成加载。
+     * 只等 loaded 是不够的：全新的用户数据目录（自动化模式用的是独立的）第一次启动时
+     * 会先亮出「已加载」再跑全量扫描，此时 tracks 还是空的，
+     * 后面的检查会全部拿着空资料库去测（表现为「0 首 / 带封面 0 首」）。
+     */
+    await waitFor(win,
+      'window.__aria.store.get().library.loaded === true && window.__aria.store.get().library.tracks.length > 0',
+      { label: '资料库加载', timeout: 180000 })
+
     const library = await evaluate(win, `
       const state = window.__aria.store.get()
       return {
@@ -596,6 +603,99 @@ async function runSmoke ({ win, ctx }) {
       `播放靠后的专辑后聚焦块移到它自己的位置（距原点 ${JSON.stringify(wallView.distanceFromOrigin)}，order=${wallView.afterSwitchOrder}），标题《${wallView.afterSwitchTitle}》`)
     record('媒体墙打开专辑', wallView.openedAlbum, '点击方块角标可进入专辑详情')
 
+    /*
+     * ---------- 格子几何 ----------
+     *
+     * 这一组是补上来的：之前所有自检都只看「有没有格子、点了能不能打开」，
+     * 结果一个把整面墙压扁的 bug 溜了过去 —— 网格盒子收成「视口 + 一个步长」
+     * 有了确定高度之后，auto 行被压缩去填容器，148px 的行被压成 32px：
+     * 普通格子逐行重叠、聚焦块（跨 2 行）高度塌成 67px，封面被裁成一条。
+     * 所以这里直接量几何：格子必须是方的、行节奏必须等于格子尺寸、
+     * 聚焦块必须正好是 2 格 + 1 个间距、封面必须铺满格子。
+     */
+    const tileGeometry = await evaluate(win, `
+      const wall = window.__aria.views.mediaWall
+      // 前面那一步点进了专辑详情，几何必须在媒体墙可见时量
+      window.__aria.actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 700))
+      const state = wall.debugState()
+      const size = state.tileSize
+      const gap = 3
+      const grid = document.querySelector('.media-wall')
+      const tiles = [...document.querySelectorAll('.wall-tile')]
+      const box = (node) => {
+        const rect = node.getBoundingClientRect()
+        return { w: Math.round(rect.width), h: Math.round(rect.height), top: Math.round(rect.top), left: Math.round(rect.left) }
+      }
+      const normal = tiles.filter((tile) => !tile.classList.contains('is-featured')).slice(0, 60)
+      const featured = document.querySelector('.wall-tile.is-featured')
+
+      // 行节奏：同一列里相邻两行的纵向间距应当等于 格子 + 间距。
+      // 取「最小的正间距」而不是中位数：聚焦块占了 2×2，它所在的那一列会缺一格，
+      // 于是会出现 2 倍间距的差值，用最小值才拿到真实的单行步长。
+      const byColumn = new Map()
+      for (const tile of normal) {
+        const rect = box(tile)
+        const list = byColumn.get(rect.left) || []
+        list.push(rect.top)
+        byColumn.set(rect.left, list)
+      }
+      const pitches = []
+      for (const tops of byColumn.values()) {
+        tops.sort((a, b) => a - b)
+        for (let i = 1; i < tops.length; i++) {
+          const delta = tops[i] - tops[i - 1]
+          if (delta > 2) pitches.push(delta)
+        }
+      }
+      const pitch = pitches.length ? Math.min(...pitches) : null
+
+      // 封面是否铺满格子（悬停缩放不参与，这里只看静止状态）
+      const artMismatch = normal.filter((tile) => {
+        const img = tile.querySelector('.wall-tile__art img')
+        if (!img) return false
+        const t = box(tile)
+        const i = box(img)
+        return Math.abs(i.w - t.w) > 2 || Math.abs(i.h - t.h) > 2
+      }).length
+
+      const rows = getComputedStyle(grid).gridTemplateRows.split(' ')
+      const rowSizes = rows.map((value) => Math.round(Number.parseFloat(value))).filter((value) => Number.isFinite(value))
+      return {
+        size,
+        gap,
+        squares: normal.every((tile) => { const rect = box(tile); return Math.abs(rect.w - rect.h) <= 1 }),
+        normalBox: normal.length ? box(normal[0]) : null,
+        featuredBox: featured ? box(featured) : null,
+        pitch,
+        expectPitch: size + gap,
+        rowSizes,
+        rowCount: rowSizes.length,
+        rowsMatch: rowSizes.every((value) => Math.abs(value - size) <= 1),
+        artMismatch
+      }`)
+    const expectFeatured = tileGeometry.size * 2 + tileGeometry.gap
+    record('媒体墙格子是正方形',
+      tileGeometry.squares && tileGeometry.normalBox &&
+      Math.abs(tileGeometry.normalBox.w - tileGeometry.size) <= 1 &&
+      Math.abs(tileGeometry.normalBox.h - tileGeometry.size) <= 1,
+      `普通格子 ${tileGeometry.normalBox?.w}×${tileGeometry.normalBox?.h}，标称 ${tileGeometry.size}px；` +
+      `行尺寸 ${tileGeometry.rowCount} 行，${tileGeometry.rowsMatch ? '全部等于格子尺寸' : `异常：${tileGeometry.rowSizes.slice(0, 4).join('/')}`}`)
+    record('聚焦块正好是 2×2 格',
+      tileGeometry.featuredBox &&
+      Math.abs(tileGeometry.featuredBox.w - expectFeatured) <= 2 &&
+      Math.abs(tileGeometry.featuredBox.h - expectFeatured) <= 2,
+      `聚焦块 ${tileGeometry.featuredBox?.w}×${tileGeometry.featuredBox?.h}，应为 2×${tileGeometry.size}+${tileGeometry.gap}=${expectFeatured}`)
+    record('媒体墙行节奏不重叠',
+      tileGeometry.pitch !== null && Math.abs(tileGeometry.pitch - tileGeometry.expectPitch) <= 2,
+      `相邻两行的纵向间距 ${tileGeometry.pitch}px，应为 ${tileGeometry.expectPitch}px（${tileGeometry.size}+${tileGeometry.gap}）`)
+    record('封面铺满格子',
+      tileGeometry.artMismatch === 0,
+      tileGeometry.artMismatch === 0
+        ? `抽查的格子中，封面尺寸与格子一致（没有被裁成一截）`
+        : `${tileGeometry.artMismatch} 个格子的封面尺寸与格子不符`)
+
+
     /* ---------- 媒体墙的自由拖动（2D 画布） ---------- */
 
     const panCheck = await evaluate(win, `
@@ -742,14 +842,17 @@ async function runSmoke ({ win, ctx }) {
       !pan.fitState.horizontal && pan.canvasState.horizontal && pan.fitState.layout === 'fit' && pan.canvasState.layout === 'canvas',
       `适应宽度：横向不可拖（${pan.fitState.bounds.width}≈视口 ${pan.fitState.bounds.viewWidth}）；自由画布：横向可拖（${pan.canvasState.bounds.width} vs ${pan.canvasState.bounds.viewWidth}）`)
 
-    /* ---------- 窗口取景框：拖到任何位置，内容都必须在、且不错位 ----------
+    /* ---------- 拖到任何位置，屏幕上都得真的有格子 ----------
      *
-     * 媒体墙为了帧率做了「视口大小的窗口负责平移、网格反向滚动」这套结构
-     * （见 browse.css 顶部注释）。它有两个容易写错的地方，所以专门盯着测：
-     *   · 两层 transform 没有严丝合缝地合成 pan → 整墙会整体错位；
-     *   · 窗口取景框没有跟着平移滚动 → 拖到别处就只剩空白（这个 bug 真的出现过）。
+     * 这条是补上来的，因为之前所有的判定都用 rect 相交 —— 而 rect 相交并不能说明
+     * 元素真的看得见：被祖先 overflow:hidden 裁掉时 rect 照样相交。
+     * 结果就是「为了让拖动变快，把网格裁成视口大小」那版自检全绿，
+     * 而画面上其实只剩左上角一屏，拖到别处整片空白。
+     *
+     * 现在改为在墙视口里做网格命中测试：elementFromPoint 遵守裁剪与命中规则，
+     * 命中不到格子就说明用户看到的是空白。
      */
-    const windowCheck = await evaluate(win, `
+    const hitCheck = await evaluate(win, `
       const wall = window.__aria.views.mediaWall
       const base = wall.debugState()
       const points = [
@@ -763,44 +866,45 @@ async function runSmoke ({ win, ctx }) {
       for (const [x, y] of points) {
         wall.debugApplyPan(x, y)
         await new Promise((r) => requestAnimationFrame(r))
-        const verify = wall.debugVerifyWindow()
         const state = wall.debugState()
         stops.push({
           pan: state.pan,
-          positionError: verify.positionError,
-          visible: verify.visible,
-          covered: verify.covered,
-          coverage: verify.coverage,
-          originInRange: verify.originInRange,
-          originOffset: verify.originOffset,
-          windowBox: verify.windowBox,
+          hit: wall.debugHitTest({ columns: 6, rows: 4 }),
+          slotDrift: wall.debugSlotDrift().drift,
+          culled: state.culled,
           planeScroll: state.planeScroll,
-          plane: { width: Math.round(state.bounds.width), height: Math.round(state.bounds.height) }
+          plane: { width: Math.round(state.bounds.width), height: Math.round(state.bounds.height) },
+          tileCount: state.tileCount ?? null
         })
       }
       wall.debugApplyPan(0, 0)
       await new Promise((r) => requestAnimationFrame(r))
-      return { stops }`)
+      return { stops, total: wall.tileCount, culledAtOrigin: wall.debugState().culled }`)
 
-    const windowStops = windowCheck.stops
-    const windowError = Math.max(...windowStops.map((stop) => stop.positionError))
-    const windowVisible = Math.min(...windowStops.map((stop) => stop.visible))
-    const windowCoverage = Math.min(...windowStops.flatMap((stop) => Object.values(stop.coverage)))
-    const windowOriginOk = windowStops.every((stop) => stop.originInRange)
-    record('平移后窗口取景框不错位',
-      windowError <= 0.5 && windowVisible > 20 && windowCoverage >= -0.5 &&
-      windowOriginOk && windowStops.every((stop) => stop.covered),
-      `${windowStops.length} 个停靠点（含四角）：最大坐标误差 ${windowError}px，最少可见格子 ${windowVisible} 个，` +
-      `窗口盒 ${windowStops[0].windowBox.width}×${windowStops[0].windowBox.height} 覆盖视口余量 ${windowCoverage}px，` +
-      `原点偏移 ${windowStops.map((stop) => `${stop.originOffset.x},${stop.originOffset.y}`).join(' / ')}（都应在 0~步长内）`)
-    const planeDrift = Math.max(...windowStops.flatMap((stop) => [
+    const hitStops = hitCheck.stops
+    const hitRate = Math.min(...hitStops.map((stop) => stop.hit.tile / stop.hit.total))
+    const hitCulled = hitStops.reduce((sum, stop) => sum + stop.hit.culled, 0)
+    const hitDrift = Math.max(...hitStops.map((stop) => stop.slotDrift))
+    /*
+     * 阈值 0.75 而不是 1：格子之间有 3px 缝，采样点落在缝里（或平面边缘）是正常的，
+     * 24 个点里偶尔差一两个命中不代表画面有问题。
+     * 而真正出问题时的量级完全不同 —— 被裁掉那一版实测命中率是 0。
+     */
+    record('拖到任何位置画面都有内容',
+      hitRate >= 0.75 && hitCulled === 0 && hitDrift === 0,
+      `${hitStops.length} 个停靠点（含四角）各取 24 个点做命中测试：最差命中率 ${Math.round(hitRate * 100)}%，` +
+      `命中的格子里有 ${hitCulled} 个是隐藏的（应为 0），行列缓存错位 ${hitDrift} 个（应为 0）；` +
+      `各点命中 ${hitStops.map((stop) => stop.hit.tile).join('/')}，裁掉的格子数 ${hitStops.map((stop) => stop.culled).join('/')}` +
+      `${hitStops.some((stop) => stop.hit.samples.length) ? `；未命中的例子 ${hitStops.find((stop) => stop.hit.samples.length).hit.samples.join('；')}` : ''}`)
+    const planeDrift = Math.max(...hitStops.flatMap((stop) => [
       Math.abs(stop.planeScroll.width - stop.plane.width),
       Math.abs(stop.planeScroll.height - stop.plane.height)
     ]))
     record('平面尺寸与网格内容一致',
       planeDrift <= 8,
-      `按列数算出的平面 ${windowStops[0].plane.width}×${windowStops[0].plane.height}，` +
-      `网格实际内容范围 ${windowStops[0].planeScroll.width}×${windowStops[0].planeScroll.height}（相差 ${planeDrift}px）`)
+      `网格盒子 ${hitStops[0].plane.width}×${hitStops[0].plane.height}，` +
+      `内容范围 ${hitStops[0].planeScroll.width}×${hitStops[0].planeScroll.height}（相差 ${planeDrift}px）；` +
+      `共 ${hitCheck.total} 个格子，回到原点时裁掉 ${hitCheck.culledAtOrigin} 个`)
 
     /* ---------- 平移后新露出的格子要补加载封面 ----------
      *
@@ -845,13 +949,20 @@ async function runSmoke ({ win, ctx }) {
       return { rebuild, home, before, after, scan }`)
 
     const coverAfterPan = coverAfterPanCheck
-    record('平移后补加载新露出的封面',
-      coverAfterPan.before.withCover <= Math.max(4, coverAfterPan.before.total * 0.2) &&
-      coverAfterPan.after.withCover >= coverAfterPan.after.total * 0.6 &&
-      (coverAfterPan.scan?.added || 0) > 0,
-      `重建后回到起点：可见 ${coverAfterPan.home.total} 格 / 有封面 ${coverAfterPan.home.withCover} 格（观察者负责）；` +
-      `拖到对角：可见 ${coverAfterPan.before.total} 格 / 有封面 ${coverAfterPan.before.withCover} 格（新露出，还没加载）→ ` +
-      `6s 后 ${coverAfterPan.after.withCover} 格；` +
+    const coverRatio = coverAfterPan.after.total
+      ? coverAfterPan.after.withCover / coverAfterPan.after.total
+      : 0
+    /*
+     * 判据只看「拖过去之后，那一片格子里大多数有没有封面」。
+     * 不去比较「拖之前 vs 拖之后」的增长：渲染层的封面 blob 是带缓存的，
+     * 重建出来的格子也能瞬间拿到封面，所以「新露出的格子一开始没封面」这个前提
+     * 并不成立（这么写过，结果是一条永远绿的假检查）。
+     * 而回归时的症状很明确：新露出的格子停在灰底占位图上（当年是 20/129）。
+     */
+    record('平移后新露出的格子有封面',
+      coverRatio >= 0.6 && (coverAfterPan.scan?.added || 0) > 0,
+      `拖到对角：可见 ${coverAfterPan.after.total} 格 / 有封面 ${coverAfterPan.after.withCover} 格` +
+      `（${Math.round(coverRatio * 100)}%）；` +
       `兜底扫描入队 ${coverAfterPan.scan?.added ?? '—'} 个（候选 ${coverAfterPan.scan?.scanned ?? '—'} 个，耗时 ${coverAfterPan.scan?.elapsedMs ?? '—'}ms）`)
 
 
@@ -909,8 +1020,7 @@ async function runSmoke ({ win, ctx }) {
 
       // 对照微基准：如果每帧照旧读 DOM（offsetWidth / getBoundingClientRect），代价是多少。
       // 这不是被测代码，只是用来量化「缓存几何」省下了什么。
-      // 注意写的是 .wall-window 的 transform：它每帧都会被 writePan 重写，不会留下脏状态。
-      const stage = document.querySelector('.wall-window')
+      const stage = document.querySelector('.media-wall')
       const minimap = document.querySelector('.wall-minimap')
       const domRounds = 100
       const domStarted = performance.now()
@@ -1096,40 +1206,39 @@ async function runSmoke ({ win, ctx }) {
         : null
 
       /*
-       * 墙能滚的范围是有限的：目标专辑离平面边缘太近时，
-       * 「居中」做不到，会被 bounds 钳住 —— 这时候的偏差是布局的必然结果，
-       * 不能算定位失败（窗口越小越容易撞上）。所以真正的判据是
-       * 「实际位移 === 目标位移被钳制后的值」，而不是「偏差小于某个像素数」。
+       * 判据：目标专辑应当被摆到视口正中，除非那个方向已经顶到边界。
+       * 墙能滚的范围有限，专辑离平面边缘太近时「居中」做不到 ——
+       * 这时只要位移贴在边界上就是正确的，不能算定位失败。
+       *
+       * （不要用 offsetTop + windowOrigin 去反算「理论位移」：windowOrigin 是
+       *  跟着 pan 吸附变化的，量的时候它已经和定位那一刻不是同一个值，
+       *  算出来的期望值会差好几格。）
        */
       const finalState = wall.debugState()
-      const featuredNode = document.querySelector('.wall-tile.is-featured')
-      const ideal = featuredNode ? {
-        x: Math.round(finalState.bounds.viewWidth / 2 -
-          (featuredNode.offsetLeft + finalState.windowOrigin.x + featuredNode.offsetWidth / 2)),
-        y: Math.round(finalState.bounds.viewHeight / 2 -
-          (featuredNode.offsetTop + finalState.windowOrigin.y + featuredNode.offsetHeight / 2))
-      } : null
-      const clamped = ideal ? {
-        x: Math.min(0, Math.max(finalState.bounds.minX, ideal.x)),
-        y: Math.min(0, Math.max(finalState.bounds.minY, ideal.y))
-      } : null
+      const slack = {
+        x: Math.abs((afterReturn.center?.x ?? 0) - (afterReturn.viewportCenter?.x ?? 0)),
+        y: Math.abs((afterReturn.center?.y ?? 0) - (afterReturn.viewportCenter?.y ?? 0))
+      }
+      const atBoundary = {
+        x: finalState.pan.x <= finalState.bounds.minX + 1 || finalState.pan.x >= -1,
+        y: finalState.pan.y <= finalState.bounds.minY + 1 || finalState.pan.y >= -1
+      }
       return {
         afterEnter, away, afterReturn, distance, expectedKey: far.key.slice(0, 10),
-        ideal, clamped, pan: finalState.pan, wasClamped: Boolean(ideal && (ideal.x !== clamped.x || ideal.y !== clamped.y))
+        pan: finalState.pan, bounds: finalState.bounds, slack, atBoundary
       }
     `)
-    const focusTarget = focusCheck.clamped
-    const focusHit = Boolean(focusTarget && focusCheck.pan &&
-      Math.abs(focusCheck.pan.x - focusTarget.x) <= 2 &&
-      Math.abs(focusCheck.pan.y - focusTarget.y) <= 2)
+    const focusOk = Boolean(focusCheck.slack &&
+      (focusCheck.slack.x <= 4 || focusCheck.atBoundary.x) &&
+      (focusCheck.slack.y <= 4 || focusCheck.atBoundary.y))
     record('切回媒体墙定位到正在播放',
-      focusHit && focusCheck.afterReturn.featuredKey === focusCheck.expectedKey,
+      focusOk && focusCheck.afterReturn.featuredKey === focusCheck.expectedKey,
       `期望专辑 ${focusCheck.expectedKey}；` +
       `进入 ${JSON.stringify(focusCheck.afterEnter)}；` +
       `拖走 ${JSON.stringify(focusCheck.away)}；` +
       `回来 ${JSON.stringify(focusCheck.afterReturn)}；` +
-      `实际位移 ${JSON.stringify(focusCheck.pan)} = 目标位移钳制后的值 ${JSON.stringify(focusCheck.clamped)}` +
-      `${focusCheck.wasClamped ? '（目标专辑靠近平面边缘，居中被边界钳住属正常）' : ''}；偏差 ${focusCheck.distance}px`)
+      `偏离视口中心 ${focusCheck.slack.x}×${focusCheck.slack.y}px` +
+      `（x ${focusCheck.atBoundary.x ? '已顶到边界、属正常' : '未顶边界'}，y ${focusCheck.atBoundary.y ? '已顶到边界、属正常' : '未顶边界'}）`)
 
     /* ---------- 没有实际变化时不该打扰用户 ---------- */
 

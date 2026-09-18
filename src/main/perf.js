@@ -183,8 +183,8 @@ async function runPerf ({ win, ctx }) {
       await new Promise((r) => setTimeout(r, 300))
       await window.__perfQuiet()
       const viewport = document.querySelector('.wall-viewport')
-      const stage = document.querySelector('.wall-window')
       const grid = document.querySelector('.media-wall')
+      const stage = grid
       // 把平面拉回中间，保证每次测量的起点一致
       viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: -2000, deltaY: -2000 }))
       await new Promise((r) => setTimeout(r, 500))
@@ -239,28 +239,23 @@ async function runPerf ({ win, ctx }) {
 
   /*
    * 对照实验说明：
-   * 被平移的是「视口 + 一个步长」大小的 .wall-window，网格的盒子也收成同样大小
-   * 并 overflow:hidden，所以每帧要栅格化的范围只有窗口那么大。
-   * 步长越小窗口越小（代价 ∝ 层面积），但网格 transform 的改写越频繁。
+   * 平移直接作用在整面墙上，省绘制靠「屏幕外的格子 visibility: hidden」。
+   * 把这条 CSS 关掉，就等于让浏览器每帧栅格化全部 474 个格子 ——
+   * 那正是 9fps 的成因，也是这一整套裁剪手段存在的理由。
    */
-  const setStep = (value) => `
-    document.getElementById('perf-override')?.remove()
-    window.__aria.views.mediaWall.debugSetWindowStep(${value})`
-
-  console.log('\n  ── 拖动路径对照 ──')
-  results.wallPan = await panProbe('拖动（当前实现）', override(''))
-  results.wallPanStep151 = await panProbe('拖动（步长 151 = 一格）', setStep(151))
-  results.wallPanStep64 = await panProbe('拖动（步长 64）', setStep(64))
-  results.wallPanStep16 = await panProbe('拖动（步长 16）', setStep(16))
-  results.wallPanNoContainPaint = await panProbe('拖动（格子只留 contain:layout）', `${setStep(0)}
+  const noCulling = `
     document.getElementById('perf-override')?.remove()
     {
       const style = document.createElement('style')
       style.id = 'perf-override'
-      style.textContent = '.wall-tile { contain: layout !important; }'
+      style.textContent = '.wall-tile.is-culled { visibility: visible !important; }'
       document.head.appendChild(style)
-    }`)
-  results.wallPanRestored = await panProbe('拖动（复位后复测）', setStep(0))
+    }`
+
+  console.log('\n  ── 拖动路径对照 ──')
+  results.wallPan = await panProbe('拖动（当前实现）', override(''))
+  results.wallPanNoCulling = await panProbe('拖动（对照：不裁剪屏幕外格子）', noCulling)
+  results.wallPanRestored = await panProbe('拖动（复位后复测）', override(''))
 
   /*
    * 首次打开媒体墙：清掉封面缓存（含磁盘），切走再切回来，量封面涌入那几秒的帧间隔。

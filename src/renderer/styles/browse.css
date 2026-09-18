@@ -355,28 +355,18 @@
 /* ------------------------------ 媒体墙 ------------------------------ */
 
 /**
- * 媒体墙的三层结构：
+ * 媒体墙的平面。
  *
- *   .wall-viewport   视口大小、overflow:hidden —— 最外层的裁剪口
- *     .wall-window   视口 + 一个窗口步长，被 translate(pan + windowOrigin) 平移
- *       .media-wall  视口 + 一个窗口步长的盒子，overflow:hidden，网格轨道仍是整面墙，
- *                    用 translate(-windowOrigin) 在窗口里滚动
+ * 平移作用在这个元素上（transform），它本身是「整面墙」那么大（4684×2415 CSS px
+ * ≈ 8200×4200 设备像素）。直接平移一块这么大的平面，浏览器每帧要为它重新栅格化，
+ * 实测只有 9fps —— 但如果把它的盒子裁成视口大小，裁剪域会跟着 transform 一起移动，
+ * 于是只有左上角那一屏能看见，拖到别处整片空白（真的这么错过一次）。
  *
- * 为什么要这么绕（每一项都是量出来的，不是猜的）：
- *
- * 1. 整墙平面有 4000+ × 2500+ CSS px（@1.75x ≈ 8200×4200 设备像素）。
- *    如果被平移的元素本身就是整个平面，每帧要为这么大一块重新栅格化，
- *    拖动掉到 9fps；把平移放到「视口大小」的窗口上之后，
- *    被搬运的层只有视口那么大（实测 9fps → 55fps）。
- *
- * 2. 光有窗口还不够：裁剪必须落在「直接铺格子的那个元素」身上。
- *    如果窗口裁剪、而 .media-wall 的盒子仍是整面墙那么大，
- *    Chromium 会把全部 474 个格子都栅格化一遍 —— 实测 111ms/帧。
- *    把 .media-wall 的盒子也收成窗口大小并 overflow:hidden 之后是 18ms/帧。
- *    （6 倍的差距只来自这一条：裁剪所在的那一层才是栅格化的裁剪域。）
- *
- * 3. 网格轨道（grid-template-columns）依旧是整面墙的宽度，格子位置也没有变，
- *    所以拖到任何位置都有内容；窗口只是「哪一块被绘制」的滑动取景框。
+ * 所以这一版换了个思路：**不裁剪，改成让屏幕外的格子不参与绘制**。
+ * 每个格子上加 .is-culled（visibility: hidden）——
+ *   · 与 display:none 不同，它不影响布局，网格不会重排；
+ *   · 又和裁剪一样省掉绘制，绘制量只跟可见的那一片有关。
+ * 可见范围的判定用「格子行列 + 当前位移」直接算，不读 DOM。
  */
 .wall-viewport {
   flex: 1;
@@ -386,14 +376,6 @@
   touch-action: none;
   overscroll-behavior: none;
   background: var(--bg-window);
-}
-
-.wall-window {
-  position: absolute;
-  left: 0;
-  top: 0;
-  overflow: hidden;
-  will-change: transform;
 }
 
 .wall-viewport.is-panning {
@@ -415,13 +397,25 @@
   position: absolute;
   left: 0;
   top: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
   display: grid;
   grid-template-columns: repeat(var(--wall-columns, 6), var(--wall-size, 148px));
+  /*
+   * 行尺寸必须显式给：网格有确定高度时，auto 行会被压缩去填满容器 ——
+   * 实测 17 行各被压成 32px，普通格子靠 aspect-ratio 仍高 148px 于是逐行重叠，
+   * 聚焦块（跨 2 行、aspect-ratio:auto）高度塌成 67px，封面被裁成一条。
+   */
+  grid-auto-rows: var(--wall-size, 148px);
+  align-content: start;
+  justify-content: start;
   gap: 3px;
   padding: 3px;
+  width: max-content;
+  will-change: transform;
+}
+
+/* 屏幕外的格子：保留布局，但不参与绘制（这是拖动帧率的关键） */
+.wall-tile.is-culled {
+  visibility: hidden;
 }
 
 /* 右下角位置指示器：内容比视口大时才显示 */

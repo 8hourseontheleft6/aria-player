@@ -1,5 +1,6 @@
 'use strict'
 
+const path = require('node:path')
 const { app, BrowserWindow } = require('electron')
 
 const { createContext } = require('./registry')
@@ -15,6 +16,25 @@ const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = requir
 
 // 播放器需要程序化播放（自动下一曲），不要求用户手势
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+
+/*
+ * 自动化模式（自检 / 截图 / 帧率诊断 / 视觉审计）使用独立的用户数据目录。
+ *
+ * 两个原因，都是踩过的坑：
+ *  1) 单实例锁是按 userData 目录算的 —— 用户正开着播放器时，
+ *     `npm run smoke` 会因为拿不到锁直接退出，一行输出都没有（看起来像「脚本坏了」）；
+ *  2) 这些模式会读写真设置、灌封面缓存、退出时保存窗口尺寸 ——
+ *     隔离之后它们再也动不到用户自己那份。
+ * 顺带还有一个好处：每次都是全新的设置，测试结果更可复现。
+ */
+const AUTOMATION_FLAGS = ['--smoke', '--shots', '--perf', '--audit']
+const automationFlag = AUTOMATION_FLAGS.find((flag) => process.argv.includes(flag))
+if (automationFlag) {
+  // 四个模式共用同一份自动化目录：第一次跑要做一次全量扫描，
+  // 之后（含换了模式）都能直接复用扫描结果与封面缓存，跑起来快得多
+  app.setPath('userData', path.join(app.getPath('temp'), 'aria-dev-profile'))
+  console.log(`[main] 自动化模式 ${automationFlag}：使用独立用户数据目录，不影响你自己的设置与缓存`)
+}
 
 // 自定义协议必须在 app ready 之前声明
 registerSchemes()
