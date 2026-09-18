@@ -636,6 +636,11 @@ async function runSmoke ({ win, ctx }) {
       }
 
       // ② Alt + 左键往回拖
+      //    先把位置挪到可拖范围的中间：起始 pan 贴着 0（右/下方向的边界）时，
+      //    这一拖会被钳制成零位移，看起来就像「Alt 拖动失效」（窗口小的时候尤其容易撞上）
+      const altBounds = wall.debugState().bounds
+      wall.debugApplyPan(Math.round(altBounds.minX / 2), Math.round(altBounds.minY / 2))
+      await new Promise((r) => requestAnimationFrame(r))
       const beforeAlt = wall.debugState().pan
       pointer('pointerdown', cx, cy, { button: 0, buttons: 1, altKey: true })
       for (let i = 1; i <= 12; i++) pointer('pointermove', cx + i * 12, cy + i * 5, { button: 0, buttons: 1, altKey: true })
@@ -796,6 +801,59 @@ async function runSmoke ({ win, ctx }) {
       planeDrift <= 8,
       `按列数算出的平面 ${windowStops[0].plane.width}×${windowStops[0].plane.height}，` +
       `网格实际内容范围 ${windowStops[0].planeScroll.width}×${windowStops[0].planeScroll.height}（相差 ${planeDrift}px）`)
+
+    /* ---------- 平移后新露出的格子要补加载封面 ----------
+     *
+     * 回归现场：为了让拖动快起来，格子的裁剪被放到了 .media-wall 自己身上，
+     * 而平移只改祖先 transform（纯合成、不触发布局），IntersectionObserver
+     * 不再为「因此进入视口」的格子派发新回调 —— 拖到中段之后新露出来的格子
+     * 一直停在灰底占位图。现在靠「平移停稳后的几何兜底扫描」补上，这里盯着它。
+     */
+    const coverAfterPanCheck = await evaluate(win, `
+      const wall = window.__aria.views.mediaWall
+      const viewport = document.querySelector('.wall-viewport')
+      const countVisible = () => {
+        const box = viewport.getBoundingClientRect()
+        const visible = [...document.querySelectorAll('.wall-tile')].filter((tile) => {
+          const rect = tile.getBoundingClientRect()
+          return rect.right > box.left && rect.left < box.right &&
+            rect.bottom > box.top && rect.top < box.bottom
+        })
+        return {
+          total: visible.length,
+          withCover: visible.filter((tile) => tile.querySelector('img[src]')).length
+        }
+      }
+      // 先把整面墙重建成「一张封面都还没加载」的状态，
+      // 这样下面量到的差异只可能来自「平移之后的补加载」，和缓存是否热无关
+      const rebuild = wall.debugRebuild()
+      wall.debugApplyPan(0, 0)
+      await new Promise((r) => setTimeout(r, 700))
+      const home = countVisible()
+
+      // 再拖到对角：那一带的格子从没进过视口，封面自然还没开始加载
+      const state = wall.debugState()
+      wall.debugApplyPan(state.bounds.minX, state.bounds.minY)
+      await new Promise((r) => setTimeout(r, 250))
+      const before = countVisible()
+      // 兜底扫描在停稳 220ms 后跑，之后由节流慢慢出图（4 并发 / 每帧 3 个）
+      await new Promise((r) => setTimeout(r, 6000))
+      const after = countVisible()
+      const scan = wall.debugState().scan
+      wall.debugApplyPan(0, 0)
+      await new Promise((r) => setTimeout(r, 300))
+      return { rebuild, home, before, after, scan }`)
+
+    const coverAfterPan = coverAfterPanCheck
+    record('平移后补加载新露出的封面',
+      coverAfterPan.before.withCover <= Math.max(4, coverAfterPan.before.total * 0.2) &&
+      coverAfterPan.after.withCover >= coverAfterPan.after.total * 0.6 &&
+      (coverAfterPan.scan?.added || 0) > 0,
+      `重建后回到起点：可见 ${coverAfterPan.home.total} 格 / 有封面 ${coverAfterPan.home.withCover} 格（观察者负责）；` +
+      `拖到对角：可见 ${coverAfterPan.before.total} 格 / 有封面 ${coverAfterPan.before.withCover} 格（新露出，还没加载）→ ` +
+      `6s 后 ${coverAfterPan.after.withCover} 格；` +
+      `兜底扫描入队 ${coverAfterPan.scan?.added ?? '—'} 个（候选 ${coverAfterPan.scan?.scanned ?? '—'} 个，耗时 ${coverAfterPan.scan?.elapsedMs ?? '—'}ms）`)
+
 
     /* ---------- 平移的每帧开销（曾经每帧强制两次重排，导致一卡一卡） ---------- */
 
@@ -1036,15 +1094,42 @@ async function runSmoke ({ win, ctx }) {
             afterReturn.center.x - afterReturn.viewportCenter.x,
             afterReturn.center.y - afterReturn.viewportCenter.y))
         : null
-      return { afterEnter, away, afterReturn, distance, expectedKey: far.key.slice(0, 10) }
+
+      /*
+       * 墙能滚的范围是有限的：目标专辑离平面边缘太近时，
+       * 「居中」做不到，会被 bounds 钳住 —— 这时候的偏差是布局的必然结果，
+       * 不能算定位失败（窗口越小越容易撞上）。所以真正的判据是
+       * 「实际位移 === 目标位移被钳制后的值」，而不是「偏差小于某个像素数」。
+       */
+      const finalState = wall.debugState()
+      const featuredNode = document.querySelector('.wall-tile.is-featured')
+      const ideal = featuredNode ? {
+        x: Math.round(finalState.bounds.viewWidth / 2 -
+          (featuredNode.offsetLeft + finalState.windowOrigin.x + featuredNode.offsetWidth / 2)),
+        y: Math.round(finalState.bounds.viewHeight / 2 -
+          (featuredNode.offsetTop + finalState.windowOrigin.y + featuredNode.offsetHeight / 2))
+      } : null
+      const clamped = ideal ? {
+        x: Math.min(0, Math.max(finalState.bounds.minX, ideal.x)),
+        y: Math.min(0, Math.max(finalState.bounds.minY, ideal.y))
+      } : null
+      return {
+        afterEnter, away, afterReturn, distance, expectedKey: far.key.slice(0, 10),
+        ideal, clamped, pan: finalState.pan, wasClamped: Boolean(ideal && (ideal.x !== clamped.x || ideal.y !== clamped.y))
+      }
     `)
+    const focusTarget = focusCheck.clamped
+    const focusHit = Boolean(focusTarget && focusCheck.pan &&
+      Math.abs(focusCheck.pan.x - focusTarget.x) <= 2 &&
+      Math.abs(focusCheck.pan.y - focusTarget.y) <= 2)
     record('切回媒体墙定位到正在播放',
-      focusCheck.distance !== null && focusCheck.distance < 220 &&
-      focusCheck.afterReturn.featuredKey === focusCheck.expectedKey,
+      focusHit && focusCheck.afterReturn.featuredKey === focusCheck.expectedKey,
       `期望专辑 ${focusCheck.expectedKey}；` +
       `进入 ${JSON.stringify(focusCheck.afterEnter)}；` +
       `拖走 ${JSON.stringify(focusCheck.away)}；` +
-      `回来 ${JSON.stringify(focusCheck.afterReturn)}；偏差 ${focusCheck.distance}px`)
+      `回来 ${JSON.stringify(focusCheck.afterReturn)}；` +
+      `实际位移 ${JSON.stringify(focusCheck.pan)} = 目标位移钳制后的值 ${JSON.stringify(focusCheck.clamped)}` +
+      `${focusCheck.wasClamped ? '（目标专辑靠近平面边缘，居中被边界钳住属正常）' : ''}；偏差 ${focusCheck.distance}px`)
 
     /* ---------- 没有实际变化时不该打扰用户 ---------- */
 

@@ -174,8 +174,15 @@ function createMainWindow (ctx) {
   })
 
   /* ---------------- 窗口尺寸持久化 ---------------- */
+  /*
+   * 自动化模式（自检 / 截图 / 帧率诊断 / 视觉审计）不写回窗口尺寸：
+   * 它们会按自己的需要开窗，退出时如果照常保存，就会把用户上次的窗口大小覆盖掉
+   * —— 跑一次 npm run smoke 就把用户的窗口改成开发环境的尺寸，很难受。
+   */
+  const automated = ['--smoke', '--shots', '--perf', '--audit'].some((flag) => process.argv.includes(flag))
   let saveTimer = null
   const persistGeometry = () => {
+    if (automated) return
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
       saveTimer = null

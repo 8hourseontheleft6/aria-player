@@ -248,6 +248,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   let windowStep = 320
   let windowStepOverride = 0
   let windowPainted = ''
+  let visibleScanTimer = null
+  let lastScan = null
 
   /**
    * 几何缓存。
@@ -362,6 +364,25 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
       grid.style.transform = `translate3d(${-originX}px, ${-originY}px, 0)`
     }
     paintMinimap()
+    scheduleVisibleScan()
+  }
+
+  /**
+   * 平移停稳后补一次「可见性兜底扫描」。
+   *
+   * 平移只改祖先 transform（纯合成、不触发布局），IntersectionObserver
+   * 不一定会为因此进入视口的格子派发新回调，结果就是拖到中段之后新露出来的
+   * 格子一直是灰底占位图（见 lazy.scan 的注释）。这里在最后一次平移之后
+   * 220ms（手势的 resume 定在 180ms）自己按几何补一次，代价只在停稳时付一次。
+   */
+  function scheduleVisibleScan (delay = 220) {
+    if (visibleScanTimer) clearTimeout(visibleScanTimer)
+    visibleScanTimer = setTimeout(() => {
+      visibleScanTimer = null
+      if (!viewport.clientWidth || !viewport.clientHeight) return
+      const result = lazy.scan({ root: viewport })
+      if (result.added) lastScan = { ...result, at: Date.now() }
+    }, delay)
   }
 
   /** 把 target 落成 pan 并写 DOM */
@@ -1128,6 +1149,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
         windowBox: { width: Math.round(wallWindow.offsetWidth), height: Math.round(wallWindow.offsetHeight) },
         // 平面尺寸是算出来的（网格盒子已经收成窗口大小），这里读一次 DOM 内容范围做交叉验证
         planeScroll: { width: grid.scrollWidth, height: grid.scrollHeight },
+        // 最近一次「可见性兜底扫描」的结果（平移停稳后补加载新露出的封面）
+        scan: lastScan,
         bounds: limit,
         horizontal: limit.minX < -1,
         vertical: limit.minY < -1,

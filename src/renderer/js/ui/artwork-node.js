@@ -138,6 +138,61 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
       schedulePump()
     },
 
+    /**
+     * 按几何手动兜底扫描：把「已经落在 root 可视范围内」的待加载节点直接送进队列。
+     *
+     * 为什么需要它：媒体墙的平移是靠祖先的 transform 完成的（纯合成，不触发布局），
+     * 这种情况下 IntersectionObserver 不一定会为「因为平移而进入视口」的目标
+     * 派发新的相交回调 —— 实测拖到中段之后，新露出来的格子一直是灰底占位图
+     * （可见 129 格只有 20 格有封面，observing 正常但 queued/active 恒为 0）。
+     *
+     * 代价控制：
+     *  · 只在「平移停稳 / 布局变化」这类时刻调用一次，不在每帧路径上；
+     *  · 给了 root 时只看 root 子树内的节点，媒体墙之外的观察目标
+     *    （专辑网格、艺人列表）直接跳过；
+     *  · 每个节点只做一次 getBoundingClientRect，之后浏览器从布局缓存里读。
+     *
+     * @param {{ root?: Element|null, rootMargin?: number }} [options]
+     */
+    scan ({ root = null, rootMargin = 320 } = {}) {
+      if (suspended) return { added: 0, scanned: 0, elapsedMs: 0 }
+      const started = performance.now()
+      const box = root ? root.getBoundingClientRect() : null
+      // root 自己没尺寸（视图被隐藏）时不做，避免把别的视图的节点误判成可见
+      if (box && (!box.width || !box.height)) return { added: 0, scanned: 0, elapsedMs: 0 }
+      const left = (box ? box.left : 0) - rootMargin
+      const top = (box ? box.top : 0) - rootMargin
+      const right = (box ? box.right : window.innerWidth) + rootMargin
+      const bottom = (box ? box.bottom : window.innerHeight) + rootMargin
+
+      let added = 0
+      let scanned = 0
+      for (const node of [...pending]) {
+        if (!node.isConnected || node.querySelector('img')) {
+          pending.delete(node)
+          continue
+        }
+        if (root && !root.contains(node)) continue
+        scanned++
+        const rect = node.getBoundingClientRect()
+        // display:none 之类的零尺寸节点不参与，它们本来也显示不了封面
+        if (!rect.width && !rect.height) continue
+        if (rect.right < left || rect.left > right || rect.bottom < top || rect.top > bottom) continue
+        const track = wanted.get(node)
+        if (!track) {
+          pending.delete(node)
+          continue
+        }
+        // 先摘掉观察，避免同一个节点在两处重复排队
+        //（真重复了也无害：出队时会因为已经有 img 而跳过）
+        observer.unobserve(node)
+        queue.push({ node, track })
+        added++
+      }
+      if (added) schedulePump()
+      return { added, scanned, elapsedMs: Math.round((performance.now() - started) * 100) / 100 }
+    },
+
     /** 自检用：观察目标数、在途请求数、排队数 */
     get state () {
       return {
