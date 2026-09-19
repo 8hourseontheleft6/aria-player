@@ -258,6 +258,8 @@ ctx.define('lastfm', (ctx) => {
 | 新的封面来源 | `artworkProvider` 扩展点 |
 | 音频可视化 / 音效 | `audioTap` 扩展点 |
 | 侧边栏多一个视图项 | `src/renderer/js/ui/sidebar.js` 的 `VIEW_ITEMS`（顺序由 `settings.sidebarOrder` 决定，灵动岛共用同一份定义） |
+| 「来源」多一种（像文件夹 / 自建播放列表那样） | `core/selectors.js` 的 `selectVisibleTracks` + `ui.source`；列表页、播放、随机播放都是共用的，不用写第二套 |
+| 自建播放列表的数据结构 | `core/playlists.js`（纯函数：新建 / 加歌去重 / 移除 / 失效条目） |
 | 最小化时要一起释放的东西 | `src/renderer/js/core/background-release.js`（记得让它在释放期间拒绝重建，见文件里的注释） |
 
 ---

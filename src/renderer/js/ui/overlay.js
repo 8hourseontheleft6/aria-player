@@ -160,7 +160,11 @@ export function popoverRows (rows) {
     ].filter(Boolean)
 
     nodes.push(row.onClick
-      ? h('button', { class: 'popover__row', type: 'button', onClick: row.onClick }, children)
+      ? h('button', {
+        class: `popover__row${row.danger ? ' is-danger' : ''}`,
+        type: 'button',
+        onClick: row.onClick
+      }, children)
       : h('div', { class: 'popover__row' }, children))
   }
   return nodes

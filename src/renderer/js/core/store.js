@@ -102,6 +102,10 @@ export function initialState () {
       playOnSingleClick: false,
       // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
       sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
+      // 侧栏开着时是否也显示灵动岛（默认 false = 两者不同时出现）
+      islandWithSidebar: false,
+      // 用户自建播放列表：[{ id, name, trackIds, createdAt }]
+      playlists: [],
       onlineSources: false,
       musicSources: {},
       downloadDir: '',

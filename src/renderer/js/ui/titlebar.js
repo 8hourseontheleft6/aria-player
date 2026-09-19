@@ -46,8 +46,10 @@ export function createTitlebar ({ store, bus, actions }) {
    */
   function paintThumb () {
     const active = islandButtons.find((node) => node.dataset.view === activeKey)
-    // 两种情况下整条隐身：当前视图不在这四项里（如设置页），或侧边栏正开着
-    const visible = Boolean(active) && !store.get().ui.sidebarVisible
+    // 三种情况下整条隐身：当前视图不在这四项里（如设置页）、侧边栏正开着
+    // （默认两者不同时出现），或者用户把「一直显示」打开了
+    const showWithSidebar = store.get().settings.islandWithSidebar === true
+    const visible = Boolean(active) && (showWithSidebar || !store.get().ui.sidebarVisible)
     island.classList.toggle('is-visible', visible)
     if (!visible) return
     thumb.style.width = `${active.offsetWidth}px`
@@ -115,8 +117,9 @@ export function createTitlebar ({ store, bus, actions }) {
     paintThumb()
   })
 
-  // 侧栏开关也决定灵动岛要不要出现：两者不同时在场
+  // 侧栏开关与「一直显示灵动岛」的开关都决定它要不要出现
   store.select((state) => state.ui.sidebarVisible, () => paintThumb())
+  store.select((state) => state.settings.islandWithSidebar === true, () => paintThumb())
 
   let orderKey = ''
   store.select((state) => normalizeOrder(state.settings.sidebarOrder), (order) => {

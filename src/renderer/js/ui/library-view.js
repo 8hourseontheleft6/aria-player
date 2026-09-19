@@ -54,13 +54,15 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     type: 'button',
     title: '排序方式',
     onClick: () => {
+      // 自建播放列表的顺序是用户自己排的，所以「默认」在那里就是「列表顺序」
+      const inPlaylist = store.get().ui.source.type === 'playlist'
       openPopover({
         anchor: sortButton,
         placement: 'bottom-end',
         content: popoverRows([
           { title: '排序方式' },
           ...SORT_OPTIONS.map((option) => ({
-            label: option.label,
+            label: option.key === 'default' && inPlaylist ? '默认（播放列表顺序）' : option.label,
             value: store.get().ui.sort.key === option.key
               ? (store.get().ui.sort.direction === 'desc' ? '↓' : '↑')
               : '',
@@ -544,7 +546,19 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     /* 空状态 */
     clear(empty)
     let emptyContent = null
-    if (!state.library.folders.length) {
+    const playlist = actions.currentPlaylist ? actions.currentPlaylist() : null
+    if (playlist && !tracks.length && !state.ui.query) {
+      emptyContent = {
+        iconName: 'queueAdd',
+        title: `「${playlist.name}」还是空的`,
+        text: '在任意歌曲上右键 →「添加到播放列表…」就能加进来；歌曲列表、专辑详情、媒体墙里的歌都行。',
+        action: h('button', {
+          class: 'btn btn--primary',
+          type: 'button',
+          onClick: () => actions.setSource({ type: 'all', value: null })
+        }, '去全部歌曲里挑')
+      }
+    } else if (!state.library.folders.length) {
       emptyContent = {
         iconName: 'folder',
         title: '还没有音乐文件夹',

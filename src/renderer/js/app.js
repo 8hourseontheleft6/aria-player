@@ -22,6 +22,17 @@ import { createArtworkService } from './core/artwork.js'
 import { createPlayerController } from './core/player-controller.js'
 import { createLibraryIndex, splitArtists } from './core/grouping.js'
 import { createBackgroundRelease } from './core/background-release.js'
+import {
+  PLAYLIST_LIMIT,
+  normalizePlaylists,
+  findPlaylist,
+  makePlaylist,
+  tracksOf,
+  renamePlaylist as renamePlaylistIn,
+  removePlaylist as removePlaylistFrom,
+  addTracks as addTracksToPlaylistIn,
+  removeTrack as removeTrackFromPlaylistIn
+} from './core/playlists.js'
 import { selectVisibleTracks } from './core/selectors.js'
 import { createArtworkPrewarmer } from './core/artwork-prewarm.js'
 
@@ -189,6 +200,99 @@ async function main () {
       if (!list.length) return
       player.setMode('shuffle')
       player.playCollection(list, list[Math.floor(Math.random() * list.length)])
+    },
+
+    /* ---------------- 自建播放列表 ---------------- */
+
+    playlists () {
+      return normalizePlaylists(store.get().settings.playlists)
+    },
+
+    playlistTracks (id) {
+      const playlist = findPlaylist(this.playlists(), id)
+      return tracksOf(playlist, store.get().library.byId)
+    },
+
+    async createPlaylist (name) {
+      const playlists = this.playlists()
+      if (playlists.length >= PLAYLIST_LIMIT) {
+        toast({ message: `播放列表最多 ${PLAYLIST_LIMIT} 个`, type: 'info' })
+        return null
+      }
+      const playlist = makePlaylist(name)
+      await actions.setSetting({ playlists: [...playlists, playlist] })
+      return playlist
+    },
+
+    async renamePlaylist (id, name) {
+      const playlists = renamePlaylistIn(this.playlists(), id, name)
+      await actions.setSetting({ playlists })
+      return findPlaylist(playlists, id)
+    },
+
+    async deletePlaylist (id) {
+      const playlists = removePlaylistFrom(this.playlists(), id)
+      await actions.setSetting({ playlists })
+      // 正在看这个列表的话，回到全部歌曲，别停在一个已经不存在的来源上
+      if (store.get().ui.source.type === 'playlist' && store.get().ui.source.value === id) {
+        actions.setSource({ type: 'all', value: null })
+      }
+    },
+
+    /** 把一批曲目加进播放列表（已在里面的不重复加） */
+    async addTracksToPlaylist (id, trackIds, { silent = false } = {}) {
+      const ids = (Array.isArray(trackIds) ? trackIds : [trackIds]).filter(Boolean)
+      if (!ids.length) return { added: 0, skipped: 0 }
+      const result = addTracksToPlaylistIn(this.playlists(), id, ids)
+      await actions.setSetting({ playlists: result.playlists })
+      if (!silent) {
+        const playlist = findPlaylist(result.playlists, id)
+        const name = playlist ? playlist.name : '播放列表'
+        const message = result.added
+          ? `已添加 ${result.added} 首到「${name}」${result.skipped ? `（${result.skipped} 首已在列表里）` : ''}`
+          : `这些歌都已经在「${name}」里了`
+        bus.emit(EVENTS.TOAST, { message, type: result.added ? 'success' : 'info' })
+      }
+      return result
+    },
+
+    async removeTrackFromPlaylist (id, trackId) {
+      const playlists = removeTrackFromPlaylistIn(this.playlists(), id, trackId)
+      await actions.setSetting({ playlists })
+    },
+
+    openPlaylist (id) {
+      actions.setSource({ type: 'playlist', value: id })
+      actions.setView('songs')
+    },
+
+    /** 播放整个自建播放列表（顺序就是列表里的顺序） */
+    playPlaylist (id, startTrackId = null) {
+      const tracks = actions.playlistTracks(id)
+      if (!tracks.length) {
+        toast({ message: '这个播放列表还是空的', type: 'info' })
+        return
+      }
+      if (store.get().playback.mode === 'shuffle') player.setMode('loop-list')
+      const start = startTrackId ? tracks.find((track) => track.id === startTrackId) : null
+      player.playCollection(tracks.map((track) => track.id), (start || tracks[0]).id)
+    },
+
+    shufflePlaylist (id) {
+      const tracks = actions.playlistTracks(id)
+      if (!tracks.length) {
+        toast({ message: '这个播放列表还是空的', type: 'info' })
+        return
+      }
+      player.setMode('shuffle')
+      player.playCollection(tracks.map((track) => track.id), tracks[Math.floor(Math.random() * tracks.length)].id)
+    },
+
+    /** 当前是不是正在看某个自建播放列表 */
+    currentPlaylist () {
+      const { ui } = store.get()
+      if (ui.source.type !== 'playlist') return null
+      return findPlaylist(actions.playlists(), ui.source.value)
     },
 
     setQuery (query) {

@@ -677,6 +677,40 @@ button.popover__row:hover {
   background: var(--bg-hover);
 }
 
+/* 破坏性操作（删除播放列表、从列表移除） */
+button.popover__row.is-danger {
+  color: var(--danger);
+}
+
+button.popover__row.is-danger:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+/* ------------------------ 命名播放列表的小输入框 ------------------------ */
+
+.playlist-editor {
+  padding: 0 8px 8px;
+}
+
+.playlist-editor__input {
+  width: 220px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-callout);
+}
+
+.playlist-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+
 .popover__row .icon {
   width: 16px;
   height: 16px;

@@ -1830,7 +1830,180 @@ async function runSmoke ({ win, ctx }) {
       `恢复后：预热挂起=${resumedState.prewarmSuspended}，媒体墙重建 ${resumedState.wallTiles} 个格子 / ${resumedState.wallNodes} 个节点；` +
       `目录监听 ${watcherBefore} → 停止后 ${watcherPaused} → 恢复后 ${watcherResumed}；播放仍是 ${resumedState.status}`)
 
+    /* ---------- 自建播放列表：新建 / 加歌 / 播放 / 移除 / 删除 ---------- */
+    const playlistCheck = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const settle = async (ms = 420) => { await new Promise((r) => setTimeout(r, ms)) }
+
+      // 从干净状态开始
+      for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
+      await settle(400)
+
+      const tracks = store.get().library.tracks
+      const picked = tracks.slice(0, 3).map((track) => track.id)
+
+      // ① 新建
+      const created = await actions.createPlaylist('自检用列表')
+      await settle(400)
+      const afterCreate = actions.playlists().map((item) => ({ id: item.id, name: item.name, count: item.trackIds.length }))
+
+      // ② 加歌（含重复添加，应该被跳过）
+      const first = await actions.addTracksToPlaylist(created.id, picked, { silent: true })
+      const second = await actions.addTracksToPlaylist(created.id, [picked[0]], { silent: true })
+      await settle(400)
+      const stored = actions.playlists().find((item) => item.id === created.id)
+
+      // ③ 打开这个列表：侧栏出现这一行、列表页标题与内容都跟着它走
+      actions.openPlaylist(created.id)
+      await settle(900)
+      const viewState = {
+        source: store.get().ui.source.type,
+        value: store.get().ui.source.value,
+        view: store.get().ui.view,
+        title: document.querySelector('.library-view__title, .view-header__title')?.textContent ||
+          document.querySelector('.view-toolbar__title')?.textContent || '',
+        rows: document.querySelectorAll('.track-row').length,
+        sidebarRow: [...document.querySelectorAll('.sidebar__row')].some((node) => node.textContent.includes('自检用列表')),
+        sidebarCount: [...document.querySelectorAll('.sidebar__row')]
+          .filter((node) => node.textContent.includes('自检用列表'))
+          .map((node) => (node.querySelector('.sidebar__row-count') || {}).textContent || '')[0] || ''
+      }
+
+      // ④ 播放这个列表：队列应该正好是这三首
+      actions.playPlaylist(created.id)
+      await settle(1200)
+      const queueAfterPlay = player.playlist.queue.slice()
+      player.pause()
+
+      // ⑤ 从列表里移除一首
+      await actions.removeTrackFromPlaylist(created.id, picked[1])
+      await settle(500)
+      const afterRemove = (actions.playlists().find((item) => item.id === created.id) || {}).trackIds || []
+
+      // ⑥ 删除
+      await actions.deletePlaylist(created.id)
+      await settle(500)
+      const afterDelete = actions.playlists().length
+      const sourceAfterDelete = store.get().ui.source.type
+
+      actions.setView('songs')
+      actions.setSource({ type: 'all', value: null })
+      await settle(600)
+
+      return {
+        created: created ? { id: created.id, name: created.name } : null,
+        afterCreate,
+        added: first.added,
+        skipped: second.skipped,
+        storedCount: stored ? stored.trackIds.length : -1,
+        storedOrder: stored ? stored.trackIds.slice() : [],
+        picked,
+        viewState,
+        queueAfterPlay,
+        afterRemove,
+        afterDelete,
+        sourceAfterDelete
+      }
+    `)
+    record('播放列表：新建 / 加歌去重 / 打开 / 播放 / 移除 / 删除',
+      playlistCheck.created &&
+      playlistCheck.afterCreate.length === 1 &&
+      playlistCheck.afterCreate[0].name === '自检用列表' &&
+      playlistCheck.added === 3 &&
+      playlistCheck.skipped === 1 &&
+      playlistCheck.storedCount === 3 &&
+      playlistCheck.storedOrder.join() === playlistCheck.picked.join() &&
+      playlistCheck.viewState.source === 'playlist' &&
+      playlistCheck.viewState.value === playlistCheck.created.id &&
+      playlistCheck.viewState.view === 'songs' &&
+      playlistCheck.viewState.rows === 3 &&
+      playlistCheck.viewState.sidebarRow === true &&
+      playlistCheck.viewState.sidebarCount === '3' &&
+      playlistCheck.queueAfterPlay.join() === playlistCheck.picked.join() &&
+      playlistCheck.afterRemove.join() === [playlistCheck.picked[0], playlistCheck.picked[2]].join() &&
+      playlistCheck.afterDelete === 0 &&
+      playlistCheck.sourceAfterDelete === 'all',
+      `新建「${playlistCheck.created ? playlistCheck.created.name : '—'}」；加入 3 首（再重复加 1 首被跳过：added=${playlistCheck.added} / skipped=${playlistCheck.skipped}）；` +
+      `打开后 source=${playlistCheck.viewState.source} 标题「${playlistCheck.viewState.title}」列表 ${playlistCheck.viewState.rows} 行、侧栏出现该行=${playlistCheck.viewState.sidebarRow}（计数 ${playlistCheck.viewState.sidebarCount}）；` +
+      `播放时队列 = ${playlistCheck.queueAfterPlay.length} 首且顺序一致=${playlistCheck.queueAfterPlay.join() === playlistCheck.picked.join()}；` +
+      `移除一首后剩 ${playlistCheck.afterRemove.length} 首；删除后剩 ${playlistCheck.afterDelete} 个、来源回到 ${playlistCheck.sourceAfterDelete}`)
+
+    /* ---------- 队列要跟着「你在哪一页播放」变 ----------
+     *
+     * 回归现场：队列面板只在队列**长度**变化时重画。于是从媒体墙点了另一张
+     * 曲目数恰好一样的专辑，队列里还显示上一张专辑的歌。
+     */
+    const queueFollow = await evaluate(win, `
+      const { actions, player } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      // 找两张曲目数相同的专辑，这样"只比长度"的写法一定会露馅
+      const albums = actions.albums()
+      const byCount = new Map()
+      for (const album of albums) {
+        const list = byCount.get(album.trackCount) || []
+        list.push(album)
+        byCount.set(album.trackCount, list)
+      }
+      let pair = null
+      for (const [count, list] of byCount) {
+        if (count >= 2 && list.length >= 2) {
+          pair = list.slice(0, 2)
+          break
+        }
+      }
+      if (!pair) {
+        const two = albums.filter((album) => album.trackCount >= 1).slice(0, 2)
+        pair = two.length === 2 ? two : null
+      }
+      if (!pair) return { missing: true }
+
+      const titlesOf = () => [...document.querySelectorAll('.queue-item__title')].map((node) => node.textContent)
+      const expected = (album) => album.tracks.map((track) => track.title)
+
+      // 第一张：像点媒体墙的格子那样播放（整张专辑进队列）
+      actions.setView('wall')
+      await settle(700)
+      player.playCollection(pair[0].tracks.map((t) => t.id), pair[0].tracks[0].id)
+      actions.toggleQueue(true)
+      await settle(1200)
+      const firstTitles = titlesOf()
+      player.pause()
+
+      // 第二张：曲目数一样
+      player.playCollection(pair[1].tracks.map((t) => t.id), pair[1].tracks[0].id)
+      await settle(1200)
+      const secondTitles = titlesOf()
+      player.pause()
+
+      actions.toggleQueue(false)
+      actions.setView('songs')
+      await settle(500)
+
+      return {
+        missing: false,
+        firstAlbum: { name: pair[0].name, count: pair[0].trackCount },
+        secondAlbum: { name: pair[1].name, count: pair[1].trackCount },
+        sameLength: pair[0].trackCount === pair[1].trackCount,
+        firstTitles,
+        secondTitles,
+        expectedFirst: expected(pair[0]),
+        expectedSecond: expected(pair[1])
+      }
+    `)
+    const sameList = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i])
+    record('队列面板：换一页播放（曲目数相同）也跟着换',
+      queueFollow.missing === false &&
+      queueFollow.sameLength === true &&
+      sameList(queueFollow.firstTitles, queueFollow.expectedFirst) &&
+      sameList(queueFollow.secondTitles, queueFollow.expectedSecond),
+      queueFollow.missing
+        ? '资料库里没有两张曲目数相同的专辑，跳过'
+        : `《${queueFollow.firstAlbum.name}》(${queueFollow.firstAlbum.count} 首) → 队列显示 ${queueFollow.firstTitles.length} 行，与专辑一致=${sameList(queueFollow.firstTitles, queueFollow.expectedFirst)}；` +
+          `换成《${queueFollow.secondAlbum.name}》(${queueFollow.secondAlbum.count} 首，长度相同) → 队列 ${queueFollow.secondTitles.length} 行，与专辑一致=${sameList(queueFollow.secondTitles, queueFollow.expectedSecond)}，` +
+          `两页内容不同=${!sameList(queueFollow.firstTitles, queueFollow.secondTitles)}`)
+
     /* ---------- 多艺人的拆分 ---------- */
+
     // 真实资料库里两种合作写法：顿号（Taylor Swift、Kendrick Lamar）和
     // 不带空格的 &（Taylor Swift&Brendon Urie）。拆分规则要同时做到：
     // 合作拆开、乐队名不能拆（Tungevaag & Raaban / W&W / Tones And I）。
@@ -2295,6 +2468,107 @@ async function runSmoke ({ win, ctx }) {
       return { expected, time: Math.round(time * 10) / 10, lineTime: lines[expected] ? Math.round(lines[expected].time * 10) / 10 : null, active: document.querySelectorAll('.lyrics__line.is-active').length }`)
     record('点击歌词行跳转', lyricSeek.expected >= 0 && lyricSeek.active === 1,
       `跳到第 ${lyricSeek.expected + 1} 行 (${lyricSeek.lineTime}s) → 播放位置 ${lyricSeek.time}s，高亮 ${lyricSeek.active} 行`)
+
+    /* ---------- 歌词要能往下翻，也要能往上翻 ----------
+     *
+     * 回归现场：跟随时内容是靠 transform 推到正中的，而滚动容器的 scrollTop
+     * 一直是 0 —— 于是往后半段走之后，用户能往下滚却翻不上去。
+     * 这里用真实滚轮事件（sendInputEvent）走一遍：先往下，再往上，
+     * 两个方向都必须真的动，并且往上要能回到更早的歌词。
+     */
+    const lyricScrollBase = await evaluate(win, `
+      const { player, store } = window.__aria
+      const lines = store.get().lyrics.lines || []
+      // 挑一个靠后的行，好让跟随位移变成很负的值（这就是 bug 的前提）
+      const target = lines[Math.max(0, lines.length - 6)]
+      if (target) player.seek(target.time + 0.4)
+      await new Promise((r) => setTimeout(r, 1200))
+      const scroller = document.querySelector('.lyrics')
+      const rect = scroller.getBoundingClientRect()
+      return {
+        lines: lines.length,
+        seekedTo: target ? Math.round(target.time * 10) / 10 : null,
+        scrollHeight: scroller.scrollHeight,
+        clientHeight: scroller.clientHeight,
+        maxScroll: Math.max(0, scroller.scrollHeight - scroller.clientHeight),
+        scrollTop: Math.round(scroller.scrollTop),
+        center: { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
+      }
+    `)
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: lyricScrollBase.center.x, y: lyricScrollBase.center.y })
+    await sleep(200)
+    /*
+     * 注意 sendInputEvent 的鼠标滚轮 deltaY 与 DOM 的 WheelEvent.deltaY 是反的
+     * （负数 = 往下滚）—— 这里是真输入，走的是 Chromium 的输入管线，
+     * 所以按它的约定来。断言本身不依赖这个约定：只看 scrollTop 有没有按方向动。
+     */
+    win.webContents.sendInputEvent({
+      type: 'mouseWheel',
+      x: lyricScrollBase.center.x,
+      y: lyricScrollBase.center.y,
+      deltaX: 0,
+      deltaY: -300,
+      canScroll: true
+    })
+    await sleep(700)
+    const afterDown = await evaluate(win, `
+      const scroller = document.querySelector('.lyrics')
+      return { scrollTop: Math.round(scroller.scrollTop), transform: scroller.firstElementChild.style.transform }
+    `)
+    // 再一路往上翻：像用户连续拨轮一样反复发滚轮事件，直到翻到最开头。
+    // 修复前这一步是「纹丝不动」的（scrollTop 已经贴着 0，transform 又不受它管）。
+    let wheelUps = 0
+    let scrollTopAtTop = null
+    for (let i = 0; i < 12; i++) {
+      win.webContents.sendInputEvent({
+        type: 'mouseWheel',
+        x: lyricScrollBase.center.x,
+        y: lyricScrollBase.center.y,
+        deltaX: 0,
+        deltaY: 400,
+        canScroll: true
+      })
+      wheelUps++
+      await sleep(200)
+      scrollTopAtTop = await evaluate(win, `return Math.round(document.querySelector('.lyrics').scrollTop)`)
+      if (scrollTopAtTop === 0) break
+    }
+    await sleep(400)
+    const afterUp = await evaluate(win, `
+      const scroller = document.querySelector('.lyrics')
+      const lines = [...document.querySelectorAll('.lyrics__line')]
+      const rect = scroller.getBoundingClientRect()
+      // 当前视口里最靠上的那一行是第几行
+      const firstVisible = lines.findIndex((node) => node.getBoundingClientRect().bottom > rect.top + 2)
+      return {
+        scrollTop: Math.round(scroller.scrollTop),
+        firstVisible,
+        activeIndex: Number((document.querySelector('.lyrics__line.is-active') || {}).dataset?.index ?? -1),
+        resumeVisible: document.querySelector('.lyrics-resume')?.classList.contains('is-visible') === true
+      }
+    `)
+    record('歌词：往下能翻，往上也能一直翻到第一行',
+      lyricScrollBase.lines > 10 &&
+      lyricScrollBase.maxScroll > 200 &&
+      // 跟随后内容被推上去，交接的那一刻 scrollTop 应该已经大于 0（往上才有得翻）
+      afterDown.scrollTop > 0 &&
+      afterDown.scrollTop > lyricScrollBase.scrollTop &&
+      afterDown.transform === 'translateY(0px)' &&
+      // 关键：一路往上必须真的回到最开头
+      afterUp.scrollTop === 0 &&
+      afterUp.firstVisible === 0 &&
+      afterUp.activeIndex > 0 &&
+      afterUp.resumeVisible === true,
+      `歌词 ${lyricScrollBase.lines} 行，总可滚 ${lyricScrollBase.maxScroll}px；` +
+      `往下滚一段 → scrollTop ${afterDown.scrollTop}px（交接后 transform=${afterDown.transform || '(空)'}）；` +
+      `往上拨 ${wheelUps} 次 → scrollTop ${afterUp.scrollTop}px、视口第一行 #${afterUp.firstVisible + 1}（当前行 #${afterUp.activeIndex + 1}）；` +
+      `「回到当前」按钮已出现=${afterUp.resumeVisible}`)
+    // 收尾：让跟随恢复，别把暂停状态带给后面的检查
+    await evaluate(win, `
+      document.querySelector('.lyrics-resume')?.click()
+      await new Promise((r) => setTimeout(r, 800))
+      return true
+    `)
 
     // 右键菜单（含插件注册的动作）
     const menuResult = await evaluate(win, `

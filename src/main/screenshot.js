@@ -209,6 +209,21 @@ async function runScreenshots ({ win }) {
         await new Promise((r) => setTimeout(r, 900))
         return true`)
       await sleep(900)
+    }],
+    // 自建播放列表：拍完就把示例列表删掉，别留在自动化档案里污染后面的截图
+    ['17-playlist.png', '自建播放列表', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
+        for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
+        const created = await actions.createPlaylist('深夜通勤')
+        const tracks = store.get().library.tracks
+        const picked = [tracks[0], tracks[5], tracks[12], tracks[30], tracks[48]].filter(Boolean)
+        await actions.addTracksToPlaylist(created.id, picked.map((t) => t.id), { silent: true })
+        actions.openPlaylist(created.id)
+        await new Promise((r) => setTimeout(r, 1200))
+        return true`)
+      await sleep(1200)
     }]
   ]
 
@@ -222,6 +237,14 @@ async function runScreenshots ({ win }) {
     written.push(`${file}（${label}）`)
     console.log(`  ✓ ${file} — ${label}`)
   }
+
+  // 示例播放列表只在截图里出现，拍完就删掉，免得留在自动化档案里
+  await evaluate(win, `
+    const { actions } = window.__aria
+    for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
+    actions.setSource({ type: 'all', value: null })
+    return true`)
+  await sleep(400)
 
   console.log(`\n共 ${written.length} 张截图已写入 ${OUTPUT_DIR}\n`)
   return written.length

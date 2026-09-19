@@ -222,6 +222,11 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         control: switchControl(Boolean(settings.reduceMotion), (value) => actions.setSetting({ reduceMotion: value }))
       }),
       row({
+        title: '侧边栏打开时也显示灵动岛',
+        sub: '默认两者不同时出现：侧边栏开着时它就是导航，收起后才由标题栏正中的灵动岛接管。打开这个开关，灵动岛会一直在（位置与顺序都和侧栏一致）',
+        control: switchControl(settings.islandWithSidebar === true, (value) => actions.setSetting({ islandWithSidebar: value }))
+      }),
+      row({
         title: '显示帧率',
         sub: '在右下角显示实时帧率与帧耗时（最近两秒平均 · 最差）。拖动媒体墙、开合视图时可以直观看到数字，方便确认卡顿是否真的消失',
         control: switchControl(settings.showFps === true, (value) => actions.setSetting({ showFps: value }))

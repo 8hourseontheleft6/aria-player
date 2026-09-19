@@ -4,6 +4,18 @@
  *  - 用户手动滚动时暂停跟随，并提供「回到当前」
  *  - 支持翻译行、逐字（卡拉OK）高亮、纯文本歌词
  *  - 内置偏移与字号调节
+ *
+ * 关于「只能往下翻、翻不上去」的那个 bug：
+ *
+ * 跟随是靠 `transform: translateY(-N px)` 把当前行推到正中的，而 `.lyrics`
+ * 本身是个原生滚动容器（`overflow-y: auto`，滚动条隐藏）。当歌曲放到后半段时，
+ * transform 已经是很负的值（内容被推上去一大截），但**容器的 scrollTop 仍然是 0**
+ * —— transform 不产生滚动范围。于是用户能往下滚（scrollTop 增加），却没法往上滚
+ * （scrollTop 已经贴着 0 了），表现就是「歌词只能往下拖」。
+ *
+ * 修法是手动滚动开始时做一次交接：把当前的 transform 折成 scrollTop
+ * （`scrollTop = -translateY`）并把 transform 归零，视觉位置完全不变，
+ * 但从此上下两个方向都是原生滚动，随便翻。回正时再折回去。
  */
 
 import { h, on, clear } from '../core/dom.js'
@@ -14,10 +26,13 @@ import { createSlider } from './slider.js'
 import { openPopover } from './overlay.js'
 
 const RESUME_DELAY = 4200
+/** 拖动超过这么多像素才算「在拖歌词」，否则仍然算点击某一行 */
+const DRAG_THRESHOLD = 3
 
 export function createLyricsView ({ className = 'lyrics-region', store, bus, player }) {
   const inner = h('div', { class: 'lyrics__inner' })
-  const scroller = h('div', { class: 'lyrics scroll' }, inner)
+  // tabindex：容器要能拿到焦点，方向键/PageDown 才有地方生效
+  const scroller = h('div', { class: 'lyrics scroll', tabindex: '0' }, inner)
 
   const resumeButton = h('button', {
     class: 'lyrics-resume',
@@ -33,10 +48,15 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
   let activeIndex = -1
   let userScrolling = false
   let resumeTimer = null
-  let translateY = 0
+  /** 跟随播放时 inner 的位移（负数 = 内容被推上去） */
+  let followY = 0
   let lastKaraokeIndex = -1
   /** @type {HTMLElement|null} */
   let sourceNode = null
+  /** 拖动滚动用：{ pointerId, startY, moved, target } */
+  let dragState = null
+  /** 拖完紧跟着的那次 click 要吞掉（否则会顺带 seek 到那一行） */
+  let suppressClick = false
 
   /* ------------------------------ 渲染 ------------------------------ */
 
@@ -135,7 +155,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     lineNodes = []
     activeIndex = -1
     inner.style.transform = 'none'
-    translateY = 0
+    followY = 0
     inner.appendChild(h('div', { class: 'lyrics-empty' },
       icon(iconName, { className: 'icon icon--stroke' }),
       h('div', { class: 'lyrics-empty__title', text: title }),
@@ -192,6 +212,8 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
         type: 'button',
         dataset: { index: String(index) },
         onClick: () => {
+          // 刚拖过歌词的那一下不算点击，否则会顺带跳走
+          if (suppressClick) return
           player.seek(Math.max(0, line.time - 0.05))
           resumeFollow()
         }
@@ -201,7 +223,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     })
     inner.append(...lineNodes)
     activeIndex = -1
-    translateY = 0
+    followY = 0
     inner.style.transform = 'none'
   }
 
@@ -217,12 +239,12 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
 
     const lineRect = node.getBoundingClientRect()
     const scrollerRect = scroller.getBoundingClientRect()
-    // scrollTop 归零时，可视位置 = 布局位置 + 当前位移
-    const layoutTop = lineRect.top - scrollerRect.top + scroller.scrollTop - translateY
+    // 可视位置 = 布局位置 - scrollTop + 当前位移
+    const layoutTop = lineRect.top - scrollerRect.top + scroller.scrollTop - followY
     const target = viewHeight / 2 - layoutTop - lineRect.height / 2
 
-    if (Math.abs(target - translateY) < 1) return
-    translateY = target
+    if (Math.abs(target - followY) < 1) return
+    followY = target
     inner.style.transition = animated ? '' : 'none'
     inner.style.transform = `translateY(${target}px)`
     if (!animated) requestAnimationFrame(() => { inner.style.transition = '' })
@@ -246,11 +268,31 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     alignToActive()
   }
 
+  /** 当前最多能滚多远 */
+  function maxScrollTop () {
+    return Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+  }
+
   function pauseFollow () {
     if (!userScrolling) {
       userScrolling = true
       scroller.classList.add('is-user-scrolling')
       resumeButton.classList.add('is-visible')
+
+      /*
+       * 交接：把跟随用的位移折成 scrollTop，然后让 transform 归零。
+       * 视觉上完全不动（可视位置以前是 translateY，现在是 -scrollTop），
+       * 但从此上下都能滚 —— 这一步就是「翻不上去」的修法本体。
+       * 必须在加好 is-user-scrolling（Transition 关掉）之后做，否则会滑一下。
+       */
+      const handedOver = Math.min(Math.max(-followY, 0), maxScrollTop())
+      if (handedOver > 0) {
+        inner.style.transform = 'translateY(0)'
+        scroller.scrollTop = handedOver
+      } else if (followY > 0) {
+        // 开头几行本来就被推到了中间，往上没有内容，保持原样即可
+        scroller.scrollTop = 0
+      }
     }
     if (resumeTimer) clearTimeout(resumeTimer)
     resumeTimer = setTimeout(resumeFollow, RESUME_DELAY)
@@ -265,25 +307,73 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     userScrolling = false
     scroller.classList.remove('is-user-scrolling')
     resumeButton.classList.remove('is-visible')
+    setScrolling(false)
+
+    // 再把 scrollTop 折回位移，然后从当前位置平滑对齐到当前行
+    const handedBack = -scroller.scrollTop
     scroller.scrollTop = 0
-    // 先把位移归零，再按布局位置重新对齐
     inner.style.transition = 'none'
-    inner.style.transform = 'translateY(0)'
-    translateY = 0
+    inner.style.transform = `translateY(${handedBack}px)`
+    followY = handedBack
     void inner.offsetHeight
     alignToActive({ animated: true })
   }
 
+  function setScrolling (active) {
+    scroller.classList.toggle('is-dragging', active)
+  }
+
+  /* ------------------------------ 手动滚动 ------------------------------ */
+
   on(scroller, 'wheel', (event) => {
-    if (lineNodes.length) {
-      pauseFollow()
-      void event
-    }
+    if (!lineNodes.length) return
+    // 交接之后浏览器自己的滚动就能两个方向都走，这里只需要暂停跟随
+    pauseFollow()
+    void event
   }, { passive: true })
 
-  on(scroller, 'pointerdown', () => {
-    if (lineNodes.length) pauseFollow()
+  /*
+   * 指针拖动滚动：滚动条是隐藏的（scrollbar-width: none），光靠滚轮在触控板上
+   * 还能用，鼠标就没法拖了。这里补一条「抓住歌词上下拖」，顺手把小幅度抖动的
+   * 情况让给点击（点某一行要能 seek）。
+   */
+  on(scroller, 'pointerdown', (event) => {
+    if (!lineNodes.length || event.button !== 0) return
+    dragState = { pointerId: event.pointerId, startY: event.clientY, moved: false }
   })
+
+  on(scroller, 'pointermove', (event) => {
+    if (!dragState || event.pointerId !== dragState.pointerId) return
+    const dy = event.clientY - dragState.startY
+    if (!dragState.moved) {
+      if (Math.abs(dy) < DRAG_THRESHOLD) return
+      dragState.moved = true
+      dragState.startY = event.clientY
+      setScrolling(true)
+      // 拖之前先做交接，否则 scrollTop 还贴着 0，往上拖不动
+      pauseFollow()
+      return
+    }
+    event.preventDefault()
+    scroller.scrollTop -= event.clientY - dragState.startY
+    dragState.startY = event.clientY
+    pauseFollow()
+  })
+
+  function endDrag (event) {
+    if (!dragState || event.pointerId !== dragState.pointerId) return
+    const moved = dragState.moved
+    dragState = null
+    setScrolling(false)
+    if (moved) {
+      // 拖完紧接着的那一次 click 不该被当成「点了这一行」
+      suppressClick = true
+      setTimeout(() => { suppressClick = false }, 0)
+    }
+  }
+
+  on(scroller, 'pointerup', endDrag)
+  on(scroller, 'pointercancel', endDrag)
 
   on(scroller, 'keydown', (event) => {
     if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) pauseFollow()

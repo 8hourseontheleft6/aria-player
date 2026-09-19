@@ -4,6 +4,8 @@ import { h, on, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
 import { formatDurationLong } from '../core/format.js'
 import { flipReorder } from '../core/reorder.js'
+import { normalizePlaylists } from '../core/playlists.js'
+import { openPopover, popoverRows } from './overlay.js'
 import { EVENTS } from '../core/bus.js'
 
 /** 视图项的四个定义；顺序由 settings.sidebarOrder 决定（灵动岛用同一份顺序） */
@@ -210,6 +212,98 @@ export function createSidebar ({ store, bus, actions }) {
   }
 
   /* ------------------------------------------------------------------ */
+  /* 播放列表：新建 / 重命名 / 删除                                       */
+  /* ------------------------------------------------------------------ */
+
+  /** 一个小输入弹层：新建和重命名共用（Electron 里没有 window.prompt） */
+  function openPlaylistEditor ({ anchor, mode, playlist = null }) {
+    const input = h('input', {
+      class: 'playlist-editor__input',
+      type: 'text',
+      value: mode === 'create' ? '' : playlist.name,
+      placeholder: '播放列表名称',
+      maxlength: '60'
+    })
+
+    const popover = openPopover({
+      anchor,
+      placement: 'bottom-start',
+      content: [
+        h('div', { class: 'popover__title', text: mode === 'create' ? '新建播放列表' : '重命名播放列表' }),
+        h('div', { class: 'playlist-editor' }, input),
+        h('div', { class: 'playlist-editor__actions' },
+          h('button', {
+            class: 'btn btn--sm',
+            type: 'button',
+            text: '取消',
+            onClick: () => popover.close()
+          }),
+          h('button', {
+            class: 'btn btn--sm btn--primary',
+            type: 'button',
+            text: mode === 'create' ? '创建' : '保存',
+            onClick: async () => {
+              const name = input.value.trim()
+              if (!name) {
+                input.focus()
+                return
+              }
+              if (mode === 'create') {
+                const created = await actions.createPlaylist(name)
+                if (created) actions.openPlaylist(created.id)
+              } else {
+                await actions.renamePlaylist(playlist.id, name)
+              }
+              popover.close()
+            }
+          })
+        )
+      ]
+    })
+    setTimeout(() => input.focus(), 30)
+    on(input, 'keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        const confirmButton = popover.element?.querySelector('.btn--primary')
+        confirmButton?.click()
+      }
+    })
+    return popover
+  }
+
+  function openPlaylistMenu ({ anchor, playlist }) {
+    const popover = openPopover({
+      anchor,
+      placement: 'bottom-end',
+      content: popoverRows([
+        { title: playlist.name },
+        { label: '播放', value: '', onClick: () => { actions.playPlaylist(playlist.id); popover.close() } },
+        { label: '随机播放', value: '', onClick: () => { actions.shufflePlaylist(playlist.id); popover.close() } },
+        { separator: true },
+        {
+          label: '重命名…',
+          value: '',
+          onClick: () => {
+            popover.close()
+            openPlaylistEditor({ anchor, mode: 'rename', playlist })
+          }
+        },
+        {
+          label: '删除播放列表',
+          value: '',
+          danger: true,
+          onClick: () => {
+            popover.close()
+            actions.deletePlaylist(playlist.id)
+            bus.emit(EVENTS.TOAST, { message: `已删除「${playlist.name}」`, type: 'info' })
+          }
+        }
+      ])
+    })
+    return popover
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 渲染                                                                */
   /* ------------------------------------------------------------------ */
 
@@ -310,6 +404,48 @@ export function createSidebar ({ store, bus, actions }) {
     }
 
     scroll.appendChild(folderSection)
+
+    /* ---------------- 自建播放列表 ---------------- */
+    const playlists = normalizePlaylists(state.settings.playlists)
+    const playlistSection = h('div', { class: 'sidebar__section' },
+      h('div', { class: 'sidebar__section-head' },
+        h('span', { text: '播放列表' }),
+        h('button', {
+          class: 'sidebar__row-action',
+          type: 'button',
+          title: '新建播放列表',
+          onClick: (event) => openPlaylistEditor({ anchor: event.currentTarget, mode: 'create' })
+        }, icon('plus', { className: 'icon icon--stroke' }))
+      )
+    )
+
+    if (!playlists.length) {
+      playlistSection.appendChild(h('div', { class: 'sidebar__hint', text: '还没有播放列表，点右上角 + 新建；在歌曲上右键就能加进来。' }))
+    } else {
+      for (const playlist of playlists) {
+        const count = actions.playlistTracks(playlist.id).length
+        playlistSection.appendChild(row({
+          iconName: 'queueAdd',
+          label: playlist.name,
+          count: count || undefined,
+          selected: ui.source.type === 'playlist' && ui.source.value === playlist.id,
+          onClick: () => {
+            if (suppressClick) return
+            actions.openPlaylist(playlist.id)
+          },
+          action: h('span', {
+            class: 'sidebar__row-action',
+            title: '播放列表操作',
+            onClick: (event) => {
+              event.stopPropagation()
+              openPlaylistMenu({ anchor: event.currentTarget, playlist })
+            }
+          }, icon('ellipsis', { className: 'icon icon--stroke' }))
+        }))
+      }
+    }
+
+    scroll.appendChild(playlistSection)
 
     /* ---------------- 底部 ---------------- */
     footer.appendChild(row({

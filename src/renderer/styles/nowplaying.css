@@ -364,6 +364,19 @@ html[data-platform="darwin"] .now-playing__topbar {
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
+  /* 可以抓住歌词上下拖（滚动条是隐藏的，鼠标没别的办法翻） */
+  cursor: grab;
+  overscroll-behavior: contain;
+}
+
+.lyrics.is-dragging {
+  cursor: grabbing;
+  /* 拖动时不要选中歌词文字 */
+  user-select: none;
+}
+
+.lyrics:focus-visible {
+  outline: none;
 }
 
 .lyrics::-webkit-scrollbar {

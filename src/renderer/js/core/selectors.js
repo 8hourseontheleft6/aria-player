@@ -4,6 +4,7 @@
  */
 
 import { normalizeForSearch } from './format.js'
+import { findPlaylist, tracksOf } from './playlists.js'
 
 export const SORT_KEYS = ['default', 'title', 'artist', 'album', 'duration', 'year', 'added']
 
@@ -116,7 +117,14 @@ export function filterByQuery (tracks, query, options = {}) {
  */
 export function selectVisibleTracks (state, options = {}) {
   const { library, ui, settings } = state
-  let list = filterBySource(library.tracks, ui.source)
+  /*
+   * 自建播放列表：曲目与顺序都来自列表本身（不按资料库顺序走），
+   * 失效的条目在这里被跳过 —— 顺序是用户自己排的，不能被排序键覆盖。
+   */
+  const playlist = ui.source?.type === 'playlist'
+    ? findPlaylist(settings?.playlists, ui.source.value)
+    : null
+  let list = playlist ? tracksOf(playlist, library.byId) : filterBySource(library.tracks, ui.source)
   if (options.applyQuery !== false) {
     const scope = settings?.searchScope === 'deep' ? 'deep' : 'basic'
     /*
@@ -130,14 +138,19 @@ export function selectVisibleTracks (state, options = {}) {
     list = filterByQuery(list, ui.query, { scope, lyricsIds })
   }
   const sorted = list.slice()
-  sorted.sort(compareTracks(ui.sort))
+  // 播放列表只有用户显式选了排序方式才排；默认保持他自己排的顺序
+  if (!playlist || ui.sort.key !== 'default') sorted.sort(compareTracks(ui.sort))
   return sorted
 }
 
 /** 搜索关键词是否命中了某些曲目（用于视图标题） */
 export function selectTitle (state, fallback) {
-  const { ui } = state
+  const { ui, settings } = state
   if (ui.query) return '搜索结果'
+  if (ui.source?.type === 'playlist' && ui.source.value) {
+    const playlist = findPlaylist(settings?.playlists, ui.source.value)
+    return playlist ? playlist.name : '播放列表'
+  }
   if (ui.source?.type === 'folder' && ui.source.value) {
     return ui.source.value.split(/[\\/]/).filter(Boolean).pop() || '文件夹'
   }

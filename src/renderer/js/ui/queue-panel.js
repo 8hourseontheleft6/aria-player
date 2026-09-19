@@ -99,7 +99,14 @@ export function createQueuePanel ({ store, bus, player, artwork, actions }) {
     element.hidden = !open
     if (open) render()
   })
-  store.select((state) => state.playback.queue, render, { equals: (a, b) => a.length === b.length })
+  store.select((state) => state.playback.queue, render, {
+    /*
+     * 必须比内容，不能只比长度。
+     * 只比长度的话，从媒体墙点另一张专辑（曲目数恰好一样）时队列面板不会重画，
+     * 用户看到的就是「点了 evermore，队列里还是上一张专辑」。
+     */
+    equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index])
+  })
   store.select((state) => state.playback.trackId, () => {
     if (!element.hidden) render()
   })

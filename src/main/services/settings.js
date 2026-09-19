@@ -31,6 +31,10 @@ const DEFAULTS = {
   playOnSingleClick: false,
   // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
   sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
+  // 默认侧栏与灵动岛不同时出现；打开后侧栏开着也显示灵动岛
+  islandWithSidebar: false,
+  // 用户自建播放列表：[{ id, name, trackIds, createdAt }]
+  playlists: [],
   // 在线音源（用户自己放进来的音源脚本）：总开关默认关闭，与在线补全保持一致
   onlineSources: false,
   // 音源开关状态（id -> { enabled }）；脚本本身放在 <userData>/music-sources
