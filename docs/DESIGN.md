@@ -181,6 +181,10 @@ html[data-reduce-motion='true'] .row:hover {
   `.sidebar__row-action { opacity: 0 }`（只在行悬停时出现）而永远不可见 ——
   **组头不是行，放进去的按钮要自己保证可见**。
 - **列表**：虚拟滚动，行绝对定位在 `index * --row-h` 处，行高固定。
+- **多选工具条**（`.tracklist__selection`）：挂在 `createTrackList` 内部，所以歌曲列表、
+  专辑详情、艺人详情、自建播放列表都有，不用各写一套。**两首以上才出现** ——
+  单击本来总有选中项，单选也弹就是噪音（单首的操作在右键菜单里）。
+  选中态沿用 `--accent-soft` 底色（和「正在播放」那行同一个语言）。
 - **分段控件 / 灵动岛**：同心圆角 —— 外圆角 = 内圆角 + padding，
   例如容器 `--radius-md` + 2px padding → 滑块 `--radius-sm`。
 

@@ -7,6 +7,7 @@ import { h, on, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
 import { formatDuration } from '../core/format.js'
 import { highlightParts } from '../core/selectors.js'
+import { openPlaylistPicker } from './playlist-picker.js'
 import { EVENTS } from '../core/bus.js'
 
 const ROW_HEIGHT = 54
@@ -18,8 +19,7 @@ const SORT_COLUMNS = [
   { key: 'duration', label: '时长' }
 ]
 
-export function createTrackList ({ store, bus, player, artwork, actions, matchFor = null }) {
-  const canvas = h('div', { class: 'tracklist__canvas' })
+export function createTrackList ({ store, bus, player, artwork, actions, matchFor = null, playlistId = null }) {  const canvas = h('div', { class: 'tracklist__canvas' })
   const viewport = h('div', { class: 'tracklist__viewport scroll', tabindex: '0' }, canvas)
 
   /* ---------------- 表头 ---------------- */
@@ -42,14 +42,84 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     headCells[2]
   )
 
-  const element = h('div', { class: 'tracklist' }, head, viewport)
+  /* ---------------- 多选工具条 ---------------- */
+  const selectionCount = h('span', { class: 'tracklist__selection-count' })
+
+  /** 当前列表里被选中的曲目 id（顺序按列表顺序）—— 批量动作只认这一份 */
+  function selectedIdsInList () {
+    const selected = new Set(store.get().ui.selection || [])
+    return tracks.filter((track) => selected.has(track.id)).map((track) => track.id)
+  }
+
+  /** 正在看的是不是某个自建播放列表（决定面板里有没有「从列表中移除」） */
+  function currentPlaylistId () {
+    return typeof playlistId === 'function' ? playlistId() : playlistId
+  }
+
+  const selectAllButton = h('button', {
+    class: 'btn btn--sm',
+    type: 'button',
+    text: '全选',
+    title: '选中当前列表里的全部歌曲 (Ctrl+A)',
+    onClick: () => {
+      const selected = new Set(store.get().ui.selection)
+      const all = tracks.length > 0 && tracks.every((track) => selected.has(track.id))
+      actions.setSelection(all ? [] : tracks.map((track) => track.id))
+    }
+  })
+
+  const selectionBar = h('div', { class: 'tracklist__selection', hidden: true },
+    h('div', { class: 'tracklist__selection-info' },
+      icon('checkmark', { className: 'icon icon--stroke' }),
+      selectionCount),
+    h('div', { class: 'tracklist__selection-actions' },
+      h('button', {
+        class: 'btn btn--sm btn--primary',
+        type: 'button',
+        text: '添加到播放列表…',
+        onClick: (event) => openPlaylistPicker({
+          anchor: event.currentTarget,
+          actions,
+          bus,
+          // 只加「这个列表里被选中的那些」：多选可能跨视图残留（虽然切视图会清，
+          // 但按列表取一次更稳，加进去的数量和工具条上显示的永远一致）
+          trackIds: selectedIdsInList(),
+          playlistId: currentPlaylistId(),
+          onDone: () => actions.clearSelection()
+        })
+      }),
+      h('button', {
+        class: 'btn btn--sm',
+        type: 'button',
+        text: '下一首播放',
+        title: '插到当前播放的下一首',
+        onClick: () => actions.queueSelection('next', tracks)
+      }),
+      h('button', {
+        class: 'btn btn--sm',
+        type: 'button',
+        text: '加入队列',
+        title: '追加到播放队列末尾',
+        onClick: () => actions.queueSelection('end', tracks)
+      }),
+      selectAllButton,
+      h('button', {
+        class: 'btn btn--sm',
+        type: 'button',
+        text: '取消选择',
+        onClick: () => actions.clearSelection()
+      }))
+  )
+
+  const element = h('div', { class: 'tracklist' }, head, selectionBar, viewport)
 
   /* ---------------- 状态 ---------------- */
   /** @type {Array<object>} */
   let tracks = []
   /** @type {Map<number, HTMLElement>} */
   const rendered = new Map()
-  let selectedId = null
+  /** 选中集合（每帧只从 store 同步一次，避免每行都去查数组） */
+  let selection = new Set()
   let scheduled = false
 
   function schedule () {
@@ -100,9 +170,23 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     ), right)
     paintRow(row, track, index)
 
+    /*
+     * 点击语义（和桌面上的文件列表一致）：
+     *   · 普通点击：只选中这一首（清掉之前的选择）；开了「单击直接播放」时顺带起播
+     *   · Ctrl / Cmd 点击：把它加进选择或从中去掉，不播放
+     *   · Shift 点击：从锚点到这一首整段选中，不播放
+     * 多选状态下双击仍然只播这一首（双击本来就是「播这首」）。
+     */
     on(row, 'click', (event) => {
-      selectedId = track.id
-      refreshSelection()
+      if (event.shiftKey) {
+        selectRangeTo(index)
+        return
+      }
+      if (event.ctrlKey || event.metaKey) {
+        actions.toggleSelection(track.id)
+        return
+      }
+      actions.setSelection([track.id], track.id)
       // 设置里的「单击歌曲直接播放」打开时，单击也起播；默认仍然只选中
       if (store.get().settings.playOnSingleClick !== true) return
       // 行内已有自己的行为的小按钮不要连带触发（它们多数已经 stopPropagation，这里再兜一层）
@@ -112,19 +196,31 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     on(row, 'dblclick', () => actions.playTrack(track, tracks))
     on(row, 'contextmenu', (event) => {
       event.preventDefault()
-      selectedId = track.id
-      refreshSelection()
-      actions.openTrackMenu(track, event)
+      // 右键点在「已选中的一批」里 → 菜单作用于整批；否则右键就是「只选这一首」
+      const current = store.get().ui.selection
+      if (!current.includes(track.id)) actions.setSelection([track.id], track.id)
+      actions.openTrackMenu(track, event, { list: tracks })
     })
 
     return row
+  }
+
+  /** Shift 点选：从锚点到目标这一段的 id */
+  function selectRangeTo (index) {
+    const anchorId = store.get().ui.selectionAnchor
+    const anchorIndex = anchorId ? tracks.findIndex((item) => item.id === anchorId) : -1
+    const from = anchorIndex < 0 ? index : anchorIndex
+    const [start, end] = from <= index ? [from, index] : [index, from]
+    const ids = tracks.slice(start, end + 1).map((track) => track.id)
+    // 锚点保持不变，这样连续 Shift 点选是「以锚点为中心」伸缩，而不是逐段累加
+    actions.setSelection(ids, anchorId || tracks[index].id)
   }
 
   function paintRow (row, track, index) {
     const state = store.get()
     const isCurrent = state.playback.trackId === track.id
     row.classList.toggle('is-current', isCurrent)
-    row.classList.toggle('is-selected', selectedId === track.id)
+    row.classList.toggle('is-selected', selection.has(track.id))
 
     const indexCell = row.children[0]
     clear(indexCell)
@@ -247,10 +343,25 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     }
   }
 
-  function refreshSelection () {
+  /** 把 store 里的选择同步到已渲染的行 + 工具条 */
+  function syncSelection () {
+    const selected = store.get().ui.selection || []
+    selection = new Set(selected)
     for (const node of rendered.values()) {
-      node.classList.toggle('is-selected', node.dataset.id === selectedId)
+      node.classList.toggle('is-selected', selection.has(node.dataset.id))
     }
+    paintSelectionBar(selected.length)
+  }
+
+  function paintSelectionBar (count) {
+    // 单选不弹工具条：普通单击总会有选中项，弹出来只会挡住列表；
+    // 这些批量动作的意义在「多首」时才成立（单首走右键菜单）
+    selectionBar.hidden = count < 2
+    if (count < 2) return
+    const total = tracks.length
+    const allSelected = total > 0 && count >= total
+    selectionCount.textContent = allSelected ? `已选全部 ${total} 首` : `已选 ${count} 首`
+    selectAllButton.textContent = allSelected ? '取消全选' : '全选'
   }
 
   function refreshCurrent () {
@@ -267,6 +378,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     // 保留了行元素但索引含义变了，直接全部重建更安全
     for (const node of rendered.values()) node.remove()
     rendered.clear()
+    syncSelection()
     schedule()
   }
 
@@ -287,16 +399,21 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   on(viewport, 'keydown', (event) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
-      const currentIndex = tracks.findIndex((track) => track.id === selectedId)
+      const currentIndex = tracks.findIndex((track) => track.id === store.get().ui.selectionAnchor)
       const nextIndex = Math.max(0, Math.min(tracks.length - 1, (currentIndex < 0 ? -1 : currentIndex) + (event.key === 'ArrowDown' ? 1 : -1)))
       const track = tracks[nextIndex]
       if (!track) return
-      selectedId = track.id
+      actions.setSelection([track.id], track.id)
       scrollToIndex(nextIndex, { center: false })
-      refreshSelection()
     } else if (event.key === 'Enter') {
-      const track = tracks.find((item) => item.id === selectedId)
+      const track = tracks.find((item) => item.id === store.get().ui.selectionAnchor)
       if (track) actions.playTrack(track, tracks)
+    } else if (event.key === 'a' && (event.ctrlKey || event.metaKey)) {
+      // 列表里按 Ctrl+A 就是「全选当前列表」
+      event.preventDefault()
+      actions.setSelection(tracks.map((track) => track.id))
+    } else if (event.key === 'Escape') {
+      actions.clearSelection()
     }
   })
 
@@ -317,6 +434,12 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   store.select((state) => `${state.playback.trackId}|${state.playback.status}|${state.settings.showRowArtwork}`,
     () => schedule())
   store.select((state) => state.ui.sort, paintSortHeaders)
+  // 选择可能是别处改的（工具条、右键菜单、切视图时清空），统一在这里同步
+  store.select((state) => state.ui.selection, syncSelection, {
+    equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index])
+  })
+  store.select((state) => state.ui.source, () => syncSelection())
+  syncSelection()
   paintSortHeaders()
 
   return {

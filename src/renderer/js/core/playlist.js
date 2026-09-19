@@ -176,6 +176,16 @@ export function createPlaylist ({ random = Math.random } = {}) {
       return this
     },
 
+    /** 追加到队列末尾（不动当前播放位置） */
+    append (ids) {
+      const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean)
+      if (!list.length) return this
+      const start = queue.length
+      queue.push(...list)
+      for (let offset = 0; offset < list.length; offset++) order.push(start + offset)
+      return this
+    },
+
     /** 从队列中移除曲目 */
     remove (id) {
       const removed = queue.indexOf(id)

@@ -43,7 +43,17 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     return { ...info, parts }
   }
 
-  const trackList = createTrackList({ store, bus, player, artwork, actions, matchFor, ...trackListOptions })
+  const trackList = createTrackList({
+    store,
+    bus,
+    player,
+    artwork,
+    actions,
+    matchFor,
+    // 正在看自建播放列表时，多选面板里多一条「从列表中移除」
+    playlistId: () => (store.get().ui.source.type === 'playlist' ? store.get().ui.source.value : null),
+    ...trackListOptions
+  })
 
   /* ---------------- 工具栏 ---------------- */
   const compactTitle = h('div', { class: 'view-toolbar__title', text: '全部歌曲' })

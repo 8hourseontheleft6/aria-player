@@ -143,6 +143,9 @@ async function main () {
   /* ------------------------------------------------------------------ */
   /* 动作（UI 只调用这里，不直接改 store / 播放器）                        */
   /* ------------------------------------------------------------------ */
+  /** 换视图 / 换来源 / 换搜索词时都要清掉多选：列表已经不是同一批歌了 */
+  const clearedSelection = { selection: [], selectionAnchor: null }
+
   const actions = {
     setView (view) {
       store.set((state) => ({
@@ -150,6 +153,7 @@ async function main () {
         ui: {
           ...state.ui,
           view,
+          ...clearedSelection,
           // 从侧边栏切换视图时总是回到列表页，不保留上一次的专辑/艺人详情
           detail: null
         }
@@ -163,10 +167,78 @@ async function main () {
         ui: {
           ...state.ui,
           source,
+          ...clearedSelection,
           detail: null,
           view: state.ui.view === 'settings' ? 'songs' : state.ui.view
         }
       }))
+    },
+
+    /* ---------- 多选 ---------- */
+
+    /**
+     * 整批替换选择。
+     * @param {string[]} ids
+     * @param {string|null} anchor 范围选择的锚点（Shift 点选时用）
+     */
+    setSelection (ids, anchor = null) {
+      const selection = Array.isArray(ids) ? ids.filter(Boolean) : []
+      store.set((state) => ({
+        ...state,
+        ui: {
+          ...state.ui,
+          selection,
+          selectionAnchor: anchor && selection.includes(anchor)
+            ? anchor
+            : (selection.length ? selection[selection.length - 1] : null)
+        }
+      }))
+    },
+
+    /** Ctrl/Cmd 点选：加进选择或从中移除，锚点跟着走 */
+    toggleSelection (id) {
+      const selection = store.get().ui.selection
+      const next = selection.includes(id) ? selection.filter((value) => value !== id) : [...selection, id]
+      actions.setSelection(next, id)
+    },
+
+    clearSelection () {
+      if (!store.get().ui.selection.length) return
+      store.set((state) => ({ ...state, ui: { ...state.ui, ...clearedSelection } }))
+    },
+
+    /** 当前页面（歌曲列表 / 专辑详情 / 艺人详情）显示的那一批曲目 */
+    currentListTracks () {
+      const { ui } = store.get()
+      if (ui.detail?.type === 'album') return actions.albumByKey(ui.detail.key)?.tracks || []
+      if (ui.detail?.type === 'artist') return actions.artistByKey(ui.detail.key)?.tracks || []
+      return visibleTracks()
+    },
+
+    /** 当前这批选择对应的曲目（顺序按列表里的顺序，不是点击顺序） */
+    selectedTracks (order = null) {
+      const selection = new Set(store.get().ui.selection)
+      if (!selection.size) return []
+      const source = Array.isArray(order) ? order : actions.currentListTracks()
+      return source.filter((track) => selection.has(track.id))
+    },
+
+    /** 选中的歌曲进队列：next = 插到当前曲目之后，end = 追加到末尾 */
+    queueSelection (mode = 'next', order = null) {
+      const tracks = actions.selectedTracks(order)
+      if (!tracks.length) return 0
+      const ids = tracks.map((track) => track.id)
+      if (mode === 'next') player.playNext(ids)
+      else player.appendToQueue(ids)
+      actions.clearSelection()
+      return ids.length
+    },
+
+    /** 播放选中的这些（顺序按列表顺序） */
+    playSelection (order = null) {
+      const tracks = actions.selectedTracks(order)
+      if (!tracks.length) return
+      player.playCollection(tracks.map((track) => track.id), tracks[0].id)
     },
 
     /* ---------- 专辑 / 艺人浏览 ---------- */
@@ -297,7 +369,7 @@ async function main () {
     },
 
     setQuery (query) {
-      store.set((state) => ({ ...state, ui: { ...state.ui, query } }))
+      store.set((state) => ({ ...state, ui: { ...state.ui, query, ...clearedSelection } }))
       // 深度搜索时歌词要问主进程，这里跟着防抖触发
       requestSearchLyrics()
       // 在线音源搜索同样防抖；总开关没开时它自己会清空结果
@@ -559,8 +631,8 @@ async function main () {
       libraryView.focusTrack(id)
     },
 
-    openTrackMenu (track, event) {
-      trackMenu.open(track, event)
+    openTrackMenu (track, event, options = {}) {
+      trackMenu.open(track, event, options)
     },
 
     /** 拖入歌曲后播放（主进程已经完成路径校验与资料库归属判断） */
@@ -1101,6 +1173,23 @@ async function main () {
         }
         if (store.get().ui.nowPlayingOpen) {
           actions.closeNowPlaying()
+          event.preventDefault()
+          return
+        }
+        // 都没得关的时候，Esc 用来清掉多选
+        if (store.get().ui.selection.length) {
+          actions.clearSelection()
+          event.preventDefault()
+        }
+        return
+      }
+
+      // Ctrl+A：列表聚焦时由列表自己处理（它知道当前列表有哪几首），
+      // 这里兜住焦点不在列表上的情况（例如刚点过工具条）
+      if (mod && event.key.toLowerCase() === 'a' && !isTextInput(event.target)) {
+        const list = actions.currentListTracks ? actions.currentListTracks() : null
+        if (list && list.length) {
+          actions.setSelection(list.map((track) => track.id))
           event.preventDefault()
         }
         return

@@ -298,10 +298,25 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
   }
 
   function playNext (trackIds) {
-    playlist.insertNext(trackIds)
+    const list = (Array.isArray(trackIds) ? trackIds : [trackIds]).filter(Boolean)
+    if (!list.length) return
+    playlist.insertNext(list)
     syncQueueState()
     bus.emit(EVENTS.QUEUE_CHANGED, playlist.queue.slice())
-    bus.emit(EVENTS.TOAST, { message: '已添加到播放队列的下一首', type: 'success' })
+    bus.emit(EVENTS.TOAST, {
+      message: list.length > 1 ? `已添加 ${list.length} 首到播放队列的下一首` : '已添加到播放队列的下一首',
+      type: 'success'
+    })
+  }
+
+  /** 追加到队列末尾 */
+  function appendToQueue (trackIds) {
+    const list = (Array.isArray(trackIds) ? trackIds : [trackIds]).filter(Boolean)
+    if (!list.length) return
+    playlist.append(list)
+    syncQueueState()
+    bus.emit(EVENTS.QUEUE_CHANGED, playlist.queue.slice())
+    bus.emit(EVENTS.TOAST, { message: `已加入队列末尾（${list.length} 首）`, type: 'success' })
   }
 
   function jumpToQueuePosition (position) {
@@ -726,6 +741,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     jumpToQueuePosition,
     removeFromQueue,
     playNext,
+    appendToQueue,
     // 模式
     setMode,
     cycleMode,

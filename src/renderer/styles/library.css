@@ -65,6 +65,55 @@
   padding-bottom: 24px;
 }
 
+/* ------------------------------ 多选工具条 ------------------------------ */
+/* 有选中时才出现，压在表头下面；出现/消失时高度做一次过渡，别硬跳 */
+
+.tracklist__selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  height: 38px;
+  margin: 0 0 4px;
+  padding: 0 10px 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  animation: selection-in var(--dur) var(--ease-ios);
+}
+
+.tracklist__selection[hidden] {
+  display: none;
+}
+
+@keyframes selection-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tracklist__selection-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.tracklist__selection-info .icon {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.4;
+}
+
+.tracklist__selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
 .tracklist__canvas {
   position: relative;
   width: 100%;

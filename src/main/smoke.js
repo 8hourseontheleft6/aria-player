@@ -2167,6 +2167,196 @@ async function runSmoke ({ win, ctx }) {
           `换成《${queueFollow.secondAlbum.name}》(${queueFollow.secondAlbum.count} 首，长度相同) → 队列 ${queueFollow.secondTitles.length} 行，与专辑一致=${sameList(queueFollow.secondTitles, queueFollow.expectedSecond)}，` +
           `两页内容不同=${!sameList(queueFollow.firstTitles, queueFollow.secondTitles)}`)
 
+    /* ---------- 批量选择歌曲加入播放列表 ---------- */
+    const batchCheck = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const settle = async (ms = 420) => { await new Promise((r) => setTimeout(r, ms)) }
+      const rows = () => [...document.querySelectorAll('.track-row')]
+      const realClick = (node, options = {}) => {
+        const rect = node.getBoundingClientRect()
+        const base = {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: Math.round(rect.left + rect.width / 2),
+          clientY: Math.round(rect.top + rect.height / 2)
+        }
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          node.dispatchEvent(new MouseEvent(type, {
+            ...base, buttons: type.includes('down') ? 1 : 0, ...options
+          }))
+        }
+      }
+
+      for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
+      actions.setView('songs')
+      actions.setQuery('')
+      actions.setSource({ type: 'all', value: null })
+      await settle(900)
+      const trackCount = store.get().library.tracks.length
+
+      // ① 普通单击：只选中一首
+      realClick(rows()[1])
+      await settle(300)
+      const single = {
+        selection: store.get().ui.selection.slice(),
+        highlighted: document.querySelectorAll('.track-row.is-selected').length,
+        barHidden: document.querySelector('.tracklist__selection').hidden
+      }
+
+      // ② Ctrl 点击：加进选择
+      realClick(rows()[3], { ctrlKey: true })
+      realClick(rows()[5], { ctrlKey: true })
+      await settle(300)
+      const ctrl = {
+        selection: store.get().ui.selection.slice(),
+        highlighted: document.querySelectorAll('.track-row.is-selected').length,
+        count: (document.querySelector('.tracklist__selection-count') || {}).textContent || '',
+        barHidden: document.querySelector('.tracklist__selection').hidden
+      }
+
+      // ③ Shift 点击：从锚点（最后一次点选的行，第 6 行）到目标整段选中
+      realClick(rows()[9], { shiftKey: true })
+      await settle(300)
+      const shift = {
+        selection: store.get().ui.selection.slice(),
+        // 这段的 id 应该正好是第 6~10 行那五首
+        expected: rows().slice(5, 10).map((node) => node.dataset.id),
+        highlighted: document.querySelectorAll('.track-row.is-selected').length
+      }
+
+      // ④ Ctrl+A 全选
+      const viewport = document.querySelector('.tracklist__viewport')
+      viewport.focus()
+      viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }))
+      await settle(400)
+      const selectAll = {
+        selection: store.get().ui.selection.length,
+        count: (document.querySelector('.tracklist__selection-count') || {}).textContent || ''
+      }
+
+      // ⑤ Esc 清空
+      viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      await settle(400)
+      const afterEscape = {
+        selection: store.get().ui.selection.length,
+        barHidden: document.querySelector('.tracklist__selection').hidden,
+        highlighted: document.querySelectorAll('.track-row.is-selected').length
+      }
+
+      // ⑥ 重新选 4 首 → 用工具条加进新建的播放列表
+      for (const index of [0, 1, 2, 3]) realClick(rows()[index], { ctrlKey: index > 0 })
+      await settle(400)
+      const picked = store.get().ui.selection.slice()
+      const bar = document.querySelector('.tracklist__selection')
+      const addButton = [...bar.querySelectorAll('.btn')].find((node) => node.textContent.includes('添加到播放列表'))
+      const buttonHit = (() => {
+        const rect = addButton.getBoundingClientRect()
+        const hit = document.elementFromPoint(Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2))
+        return Boolean(hit && (hit === addButton || addButton.contains(hit)))
+      })()
+      addButton.click()
+      await settle(500)
+      const picker = document.querySelector('.popover')
+      const pickerRow = picker ? [...picker.querySelectorAll('.popover__row')].find((node) => node.textContent.includes('新建播放列表')) : null
+      const pickerTitle = picker ? (picker.querySelector('.popover__title') || {}).textContent || '' : ''
+      if (pickerRow) pickerRow.click()
+      await settle(900)
+      const createdPlaylist = actions.playlists()[0] || null
+      const afterAdd = {
+        pickerTitle,
+        playlists: actions.playlists().length,
+        tracks: createdPlaylist ? createdPlaylist.trackIds.slice() : [],
+        selectionCleared: store.get().ui.selection.length === 0,
+        barHidden: document.querySelector('.tracklist__selection').hidden
+      }
+
+      // ⑦ 批量「下一首播放」：整批插到当前曲目之后
+      const albumForQueue = actions.albums()[0]
+      player.playCollection(albumForQueue.tracks.map((t) => t.id), albumForQueue.tracks[0].id)
+      await settle(700)
+      for (const index of [0, 1, 2]) realClick(rows()[index], { ctrlKey: index > 0 })
+      await settle(300)
+      const queueBefore = player.playlist.queue.length
+      const queuePicked = store.get().ui.selection.slice()
+      const nextButton = [...document.querySelector('.tracklist__selection').querySelectorAll('.btn')]
+        .find((node) => node.textContent === '下一首播放')
+      nextButton.click()
+      await settle(600)
+      const queueAfter = player.playlist.queue.slice()
+      player.pause()
+
+      // ⑧ 右键菜单在「已选中的一批」上时是批量菜单
+      for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
+      realClick(rows()[0])
+      await settle(200)
+      realClick(rows()[1], { ctrlKey: true })
+      await settle(200)
+      const rowNode = rows()[1]
+      rowNode.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true,
+        clientX: Math.round(rowNode.getBoundingClientRect().left + 40),
+        clientY: Math.round(rowNode.getBoundingClientRect().top + 10)
+      }))
+      await settle(400)
+      const menu = document.querySelector('.menu')
+      const menuText = menu ? menu.textContent : ''
+      const batchItems = {
+        header: menu ? (menu.querySelector('.menu__header') || {}).textContent || '' : '',
+        text: menuText,
+        itemCount: menu ? menu.querySelectorAll('.menu__item').length : 0
+      }
+      if (menu) menu.remove()
+      actions.clearSelection()
+      actions.setView('songs')
+      await settle(300)
+
+      return {
+        trackCount, single, ctrl, shift, selectAll, afterEscape, picked, buttonHit, afterAdd,
+        queueBefore, queueAfter, queuePicked, batchItems
+      }
+    `)
+    const batchQueueOk = batchCheck.queuePicked.length === 3 &&
+      batchCheck.queueAfter.length === batchCheck.queueBefore + 3 &&
+      batchCheck.queuePicked.every((id, offset) => batchCheck.queueAfter[1 + offset] === id)
+    record('多选：普通点击 / Ctrl 点 / Shift 段选 / Ctrl+A / Esc',
+      batchCheck.single.selection.length === 1 &&
+      batchCheck.single.highlighted === 1 &&
+      batchCheck.single.barHidden === true &&
+      batchCheck.ctrl.selection.length === 3 &&
+      batchCheck.ctrl.highlighted === 3 &&
+      batchCheck.ctrl.barHidden === false &&
+      batchCheck.ctrl.count === '已选 3 首' &&
+      batchCheck.shift.selection.length === 5 &&
+      batchCheck.shift.selection.join() === batchCheck.shift.expected.join() &&
+      batchCheck.shift.highlighted === 5 &&
+      batchCheck.selectAll.selection === batchCheck.trackCount &&
+      batchCheck.selectAll.count === `已选全部 ${batchCheck.trackCount} 首` &&
+      batchCheck.afterEscape.selection === 0 &&
+      batchCheck.afterEscape.barHidden === true &&
+      batchCheck.afterEscape.highlighted === 0,
+      `单击 → 选中 ${batchCheck.single.selection.length} 首（高亮 ${batchCheck.single.highlighted} 行，工具条隐藏=${batchCheck.single.barHidden}，单选不弹工具条）；` +
+      `Ctrl 点两次 → ${batchCheck.ctrl.selection.length} 首（「${batchCheck.ctrl.count}」）；` +
+      `Shift 点第 10 行 → 从锚点整段 ${batchCheck.shift.selection.length} 首（与第 6~10 行一致=${batchCheck.shift.selection.join() === batchCheck.shift.expected.join()}）；` +
+      `Ctrl+A → ${batchCheck.selectAll.selection}/${batchCheck.trackCount} 首（「${batchCheck.selectAll.count}」）；` +
+      `Esc → ${batchCheck.afterEscape.selection} 首、工具条隐藏=${batchCheck.afterEscape.barHidden}`)
+    record('多选：一键加进播放列表 / 批量进队列 / 右键批量菜单',
+      batchCheck.picked.length === 4 &&
+      batchCheck.buttonHit === true &&
+      batchCheck.afterAdd.pickerTitle.includes('4 首') &&
+      batchCheck.afterAdd.playlists === 1 &&
+      batchCheck.afterAdd.tracks.length === 4 &&
+      batchCheck.afterAdd.tracks.join() === batchCheck.picked.join() &&
+      batchCheck.afterAdd.selectionCleared === true &&
+      batchCheck.afterAdd.barHidden === true &&
+      batchQueueOk &&
+      batchCheck.batchItems.header.includes('已选中 2 首') &&
+      batchCheck.batchItems.text.includes('播放这 2 首') &&
+      batchCheck.batchItems.text.includes('添加到播放列表') &&
+      batchCheck.batchItems.text.includes('取消选择'),
+      `选中 ${batchCheck.picked.length} 首 → 工具条按钮命中=${batchCheck.buttonHit}，面板标题「${batchCheck.afterAdd.pickerTitle}」，` +
+      `新建的列表收到 ${batchCheck.afterAdd.tracks.length} 首且顺序一致=${batchCheck.afterAdd.tracks.join() === batchCheck.picked.join()}，加完自动清空选择=${batchCheck.afterAdd.selectionCleared}；` +
+      `批量「下一首播放」：队列 ${batchCheck.queueBefore} → ${batchCheck.queueAfter.length} 首，3 首插在当前曲目之后=${batchQueueOk}；` +
+      `右键已选中的一批 → 菜单标题「${batchCheck.batchItems.header}」、${batchCheck.batchItems.itemCount} 项（含批量文案=${batchCheck.batchItems.text.includes('这 2 首')}）`)
+
     /* ---------- 多艺人的拆分 ---------- */
 
     // 真实资料库里两种合作写法：顿号（Taylor Swift、Kendrick Lamar）和

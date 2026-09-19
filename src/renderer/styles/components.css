@@ -761,6 +761,23 @@ button.popover__row.is-danger:hover {
   pointer-events: none;
 }
 
+.menu__item.is-danger {
+  color: var(--danger);
+}
+
+.menu__item.is-danger:hover {
+  background: var(--danger);
+  color: var(--accent-label);
+}
+
+/* 分组标题（「已选中 12 首」）：不可点 */
+.menu__header {
+  padding: 4px 10px 6px;
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  color: var(--label-3);
+}
+
 .menu__item .icon {
   width: 16px;
   height: 16px;

@@ -1,65 +1,23 @@
-/** 曲目右键菜单：内置动作 + 插件注册的 trackAction */
+/** 曲目右键菜单：内置动作 + 插件注册的 trackAction（选中多首时切换成批量菜单） */
 
-import { showContextMenu, openPopover, popoverRows, closeAllLayers } from './overlay.js'
+import { showContextMenu } from './overlay.js'
+import { openPlaylistPicker } from './playlist-picker.js'
 import { EVENTS } from '../core/bus.js'
 import { formatDuration } from '../core/format.js'
 
 export function createTrackMenu ({ store, bus, player, host, actions }) {
-  /**
-   * 「添加到播放列表」：列出所有自建播放列表，最后一项是新建。
-   * 菜单里不嵌套子菜单（右键菜单没有二级），所以这里另开一个小面板。
-   */
-  function openPlaylistPicker ({ anchor, track }) {
-    const playlist = actions.currentPlaylist()
-    const rows = actions.playlists().map((item) => ({
-      label: item.name,
-      value: `${item.trackIds.length} 首`,
-      onClick: async () => {
-        closeAllLayers()
-        await actions.addTracksToPlaylist(item.id, [track.id])
-      }
-    }))
-
-    if (playlist) {
-      rows.push({ separator: true })
-      rows.push({
-        label: `从「${playlist.name}」中移除`,
-        value: '',
-        danger: true,
-        onClick: async () => {
-          closeAllLayers()
-          await actions.removeTrackFromPlaylist(playlist.id, track.id)
-          bus.emit(EVENTS.TOAST, { message: `已从「${playlist.name}」移除`, type: 'info' })
-        }
-      })
-    }
-
-    rows.push({ separator: true })
-    rows.push({
-      label: '新建播放列表…',
-      value: '',
-      onClick: async () => {
-        closeAllLayers()
-        const created = await actions.createPlaylist(`播放列表 ${actions.playlists().length + 1}`)
-        if (!created) return
-        await actions.addTracksToPlaylist(created.id, [track.id], { silent: true })
-        bus.emit(EVENTS.TOAST, { message: `已新建「${created.name}」并加入 1 首`, type: 'success' })
-      }
-    })
-
-    openPopover({
-      anchor,
-      placement: 'bottom-start',
-      content: popoverRows([
-        { title: playlist ? `添加到播放列表（当前：${playlist.name}）` : '添加到播放列表' },
-        ...rows
-      ])
-    })
-  }
-
-  function open (track, event) {
+  function open (track, event, options = {}) {
     if (!track) return
     const state = store.get()
+    const selection = state.ui.selection || []
+    /*
+     * 右键点在「已经选中的一批」里 → 整批操作。
+     * 只选了一首不算批量（那就是普通菜单），否则每个单项操作都会多一层确认。
+     */
+    if (selection.length > 1 && selection.includes(track.id)) {
+      openBatch(selection, options.list || null, event)
+      return
+    }
     const isCurrent = state.playback.trackId === track.id
     const inQueue = player.playlist.queue.includes(track.id)
 
@@ -77,7 +35,13 @@ export function createTrackMenu ({ store, bus, player, host, actions }) {
       {
         label: '添加到播放列表…',
         icon: 'queueAdd',
-        onClick: () => openPlaylistPicker({ anchor: { getBoundingClientRect: () => anchorRect(event) }, track })
+        onClick: (point) => openPlaylistPicker({
+          anchor: fakeAnchor(point),
+          actions,
+          bus,
+          trackIds: [track.id],
+          playlistId: actions.currentPlaylist()?.id || null
+        })
       },
       {
         label: '从队列中移除',
@@ -86,6 +50,18 @@ export function createTrackMenu ({ store, bus, player, host, actions }) {
         onClick: () => player.removeFromQueue(track.id)
       },
       { separator: true },
+      {
+        label: '选择多首',
+        icon: 'checkmark',
+        onClick: () => {
+          actions.setSelection([track.id], track.id)
+          bus.emit(EVENTS.TOAST, {
+            message: '按住 Ctrl 点其它歌可以多选，Shift 点选一整段',
+            type: 'info',
+            duration: 3200
+          })
+        }
+      },
       {
         label: '在文件夹中显示',
         icon: 'folder',
@@ -133,11 +109,59 @@ export function createTrackMenu ({ store, bus, player, host, actions }) {
     showContextMenu({ x, y, items })
   }
 
-  /** 右键菜单是浮层，没有 DOM 锚点 —— 用点击位置做一个假锚点给它定位 */
-  function anchorRect (event) {
+  /** 批量菜单：只列「一批歌」才有意义的动作 */
+  function openBatch (selection, order, event) {
+    const count = selection.length
+    const items = [
+      { header: true, label: `已选中 ${count} 首` },
+      {
+        label: `播放这 ${count} 首`,
+        icon: 'play',
+        onClick: () => actions.playSelection(order)
+      },
+      {
+        label: '下一首播放',
+        icon: 'arrowRight',
+        onClick: () => actions.queueSelection('next', order)
+      },
+      {
+        label: '添加到播放列表…',
+        icon: 'queueAdd',
+        onClick: (point) => openPlaylistPicker({
+          anchor: fakeAnchor(point),
+          actions,
+          bus,
+          trackIds: selection,
+          playlistId: actions.currentPlaylist()?.id || null,
+          onDone: () => actions.clearSelection()
+        })
+      },
+      {
+        label: '从队列中移除',
+        icon: 'minus',
+        onClick: () => {
+          for (const id of selection) player.removeFromQueue(id)
+          bus.emit(EVENTS.TOAST, { message: `已从队列移除 ${count} 首`, type: 'info' })
+          actions.clearSelection()
+        }
+      },
+      { separator: true },
+      {
+        label: '取消选择',
+        icon: 'close',
+        onClick: () => actions.clearSelection()
+      }
+    ]
     const x = event?.clientX ?? event?.x ?? window.innerWidth / 2
     const y = event?.clientY ?? event?.y ?? window.innerHeight / 2
-    return { left: x, right: x, top: y, bottom: y, width: 0, height: 0 }
+    showContextMenu({ x, y, items })
+  }
+
+  /** 右键菜单是浮层，没有 DOM 锚点 —— 用点击位置做一个假锚点给它定位 */
+  function fakeAnchor (event) {
+    const x = event?.clientX ?? event?.x ?? window.innerWidth / 2
+    const y = event?.clientY ?? event?.y ?? window.innerHeight / 2
+    return { getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y, width: 0, height: 0 }) }
   }
 
   function describe (track) {

@@ -236,6 +236,22 @@ async function runScreenshots ({ win }) {
         await new Promise((r) => setTimeout(r, 1400))
         return true`)
       await sleep(900)
+    }],
+    // 多选：歌曲列表上选中几首，工具条给出批量动作
+    ['19-selection.png', '批量选择歌曲', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        await actions.setSetting({ theme: 'system' })
+        actions.setView('songs')
+        actions.setSource({ type: 'all', value: null })
+        actions.setQuery('')
+        if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
+        await new Promise((r) => setTimeout(r, 1400))
+        const tracks = actions.currentListTracks()
+        actions.setSelection([2, 3, 4, 5, 6].map((index) => tracks[index] && tracks[index].id).filter(Boolean))
+        await new Promise((r) => setTimeout(r, 700))
+        return true`)
+      await sleep(900)
     }]
   ]
 
@@ -256,6 +272,7 @@ async function runScreenshots ({ win }) {
     const { actions, store } = window.__aria
     for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
     actions.setSource({ type: 'all', value: null })
+    actions.clearSelection()
     await actions.setSetting({ theme: 'system' })
     if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
     return true`)
