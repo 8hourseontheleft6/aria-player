@@ -398,11 +398,14 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     }
     if (!relevant.results.length) {
       const failed = relevant.perSource.filter((item) => item.error)
+      // LX 音乐音源按官方规范只做解析、不做搜索，这里要把原因说清楚，别让用户以为是坏了
+      const resolverOnly = relevant.perSource.filter((item) => item.skipped === 'lx-resolver-only')
       onlineList.append(h('div', { class: 'online-results__hint' },
         h('div', { text: failed.length && failed.length === relevant.perSource.length
           ? '所有音源都出错了：'
           : '音源没有返回结果。' }),
-        ...failed.slice(0, 3).map((item) => h('div', { class: 'online-results__error', text: `${item.name}：${item.error}` }))
+        ...failed.slice(0, 3).map((item) => h('div', { class: 'online-results__error', text: `${item.name}：${item.error}` })),
+        ...resolverOnly.slice(0, 3).map((item) => h('div', { class: 'online-results__error', text: `${item.name}：${item.note}` }))
       ))
       return
     }

@@ -113,6 +113,14 @@
   font-size: var(--text-caption);
 }
 
+.settings__source-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-caption);
+}
+
 .settings__source-sub {
   font-size: var(--text-caption);
   color: var(--label-3);

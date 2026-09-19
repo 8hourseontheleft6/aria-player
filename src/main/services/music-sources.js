@@ -162,11 +162,92 @@ function createMusicSourcesService (ctx) {
     return dir
   }
 
-  /** 把脚本代码装进沙箱并执行，拿到它的 module.exports */
+  /**
+   * 把脚本代码装进沙箱并执行，拿到它的 module.exports。
+   *
+   * 同时提供一套 **LX Music 自定义源兼容宿主**：LX 的音源脚本不导出对象，
+   * 而是通过全局 `lx` 用事件协议跟宿主通信（文档：
+   * https://lxmusic.toside.cn/desktop/custom-source）。它们第一句通常就是
+   * `const { EVENT_NAMES, request, on, send } = globalThis.lx` ——
+   * 没有这个全局就会直接抛 "Cannot destructure property 'EVENT_NAMES'"。
+   *
+   * 注意（很重要）：按官方规范，LX 音源只负责 `musicUrl` / `lyric` / `pic`，
+   * **不负责搜索**（搜索是 LX 客户端自己用内置源做的）。所以这类脚本在我们这里
+   * 只能当解析器，不会产生搜索结果，界面上会明确标出来。
+   */
   function evaluate (code, file) {
+    const lxState = {
+      inited: null,
+      handlers: new Map(),
+      errors: []
+    }
+
+    const lxEvents = { request: 'request', inited: 'inited', updateAlert: 'updateAlert' }
+
+    const emitToScript = (event, payload) => {
+      const list = lxState.handlers.get(event) || []
+      return list.map((handler) => handler(payload))
+    }
+
+    const lxHost = {
+      EVENT_NAMES: lxEvents,
+      version: '2.0.0',
+      env: 'desktop',
+      currentScriptInfo: {
+        name: path.basename(file, '.js'),
+        description: '',
+        version: ''
+      },
+      on (event, handler) {
+        if (typeof handler !== 'function') return
+        const list = lxState.handlers.get(event) || []
+        list.push(handler)
+        lxState.handlers.set(event, list)
+      },
+      off (event, handler) {
+        const list = lxState.handlers.get(event) || []
+        lxState.handlers.set(event, list.filter((item) => item !== handler))
+      },
+      send (event, payload) {
+        if (event === lxEvents.inited) lxState.inited = payload || {}
+        return true
+      },
+      // 旧版回调风格：lx.request(url, options, (err, response, body) => {})
+      request (url, options, callback) {
+        const promise = createRequest(() => null)(url, options || {})
+        if (typeof callback === 'function') {
+          promise.then(
+            (response) => callback(null, response, response.body),
+            (err) => callback(err)
+          )
+          return undefined
+        }
+        return promise
+      },
+      utils: {
+        crypto: {
+          createHash: (...args) => crypto.createHash(...args),
+          createHmac: (...args) => crypto.createHmac(...args),
+          randomBytes: (...args) => crypto.randomBytes(...args),
+          md5: (data) => crypto.createHash('md5').update(data).digest('hex'),
+          aesEncrypt: (buffer, mode, key, iv) => {
+            const cipher = crypto.createCipheriv(mode, key, iv)
+            return Buffer.concat([cipher.update(buffer), cipher.final()])
+          },
+          rsaEncrypt: (buffer, key) => crypto.publicEncrypt(key, buffer),
+          randomBytes: (size) => crypto.randomBytes(size)
+        },
+        buffer: {
+          from: (...args) => Buffer.from(...args),
+          bufToString: (buffer, format) => Buffer.from(buffer).toString(format)
+        }
+      }
+    }
+
     const sandbox = {
       module: { exports: {} },
       exports: {},
+      lx: lxHost,
       console: {
         log: (...args) => console.log(`[source:${path.basename(file)}]`, ...args),
         warn: (...args) => console.warn(`[source:${path.basename(file)}]`, ...args),
@@ -201,26 +282,70 @@ function createMusicSourcesService (ctx) {
     // timeout 只管同步执行；异步部分由调用方的墙钟超时兜住
     script.runInContext(context, { timeout: SOURCE_LOAD_TIMEOUT })
     const exported = sandbox.module.exports
-    if (exported && typeof exported === 'object' && Object.keys(exported).length === 0) {
-      return sandbox.exports
+    const fromModule = exported && typeof exported === 'object' && Object.keys(exported).length > 0
+      ? exported
+      : (sandbox.exports && Object.keys(sandbox.exports).length > 0 ? sandbox.exports : null)
+
+    return { exported: fromModule, lx: lxState }
+  }
+
+  /** LX 音源声明的子音源（{ key: { name, type, actions, qualitys } }） */
+  function lxSourcesOf (entry) {
+    const declared = entry.lx?.inited?.sources
+    if (!declared || typeof declared !== 'object') return []
+    return Object.entries(declared).map(([key, value]) => ({
+      key,
+      name: String(value?.name || key),
+      type: String(value?.type || 'music'),
+      actions: Array.isArray(value?.actions) ? value.actions.map(String) : [],
+      qualitys: Array.isArray(value?.qualitys) ? value.qualitys.map(String) : []
+    }))
+  }
+
+  /** 往 LX 音源派发一次 request（官方协议：{ source, action, info }） */
+  async function lxRequest (entry, { source, action, info }) {
+    const handlers = entry.lx?.handlers?.get('request') || []
+    if (!handlers.length) throw new Error('该脚本没有注册 request 处理器')
+    const payload = { source, action, info }
+    let lastError = null
+    for (const handler of handlers) {
+      try {
+        const result = await handler(payload)
+        if (result !== undefined && result !== null) return result
+      } catch (err) {
+        lastError = err
+      }
     }
-    return exported
+    if (lastError) throw lastError
+    throw new Error(`音源没有对 ${action} 返回结果`)
   }
 
   function describe (entry) {
     const mod = entry.module || {}
+    const lxSources = entry.lx ? lxSourcesOf(entry) : []
     return {
       id: entry.id,
       file: path.basename(entry.file),
-      name: String(mod.name || entry.id),
-      description: String(mod.description || ''),
+      name: String(mod.name || entry.lx?.inited?.name || entry.id),
+      description: String(mod.description || (lxSources.length
+        ? `LX 音乐音源：声明了 ${lxSources.map((item) => item.name).join('、')}；按官方规范它只提供解析，不含搜索`
+        : '')),
       version: String(mod.version || ''),
       enabled: isEnabled(entry.id),
       error: entry.error || null,
+      // 'module' = 本项目接口；'lx' = LX 音乐自定义源（只解析，不搜索）
+      kind: mod.search || mod.resolveUrl ? 'module' : 'lx',
+      lxSources: lxSources.map((item) => ({
+        key: item.key,
+        name: item.name,
+        type: item.type,
+        actions: item.actions,
+        qualitys: item.qualitys
+      })),
       capabilities: {
         search: typeof mod.search === 'function',
-        resolveUrl: typeof mod.resolveUrl === 'function',
-        lyrics: typeof mod.resolveLyrics === 'function',
+        resolveUrl: typeof mod.resolveUrl === 'function' || Boolean(entry.lx?.inited),
+        lyrics: typeof mod.resolveLyrics === 'function' || Boolean(entry.lx?.inited),
         cover: typeof mod.resolveCover === 'function'
       }
     }
@@ -249,17 +374,35 @@ function createMusicSourcesService (ctx) {
       const existing = loaded.get(id)
       if (existing && existing.mtimeMs === Math.round(stat.mtimeMs)) continue
 
-      const entry = { id, file, name: id, description: '', version: '', module: null, error: null, mtimeMs: Math.round(stat.mtimeMs) }
+      const entry = {
+        id,
+        file,
+        name: id,
+        description: '',
+        version: '',
+        module: null,
+        lx: null,
+        error: null,
+        mtimeMs: Math.round(stat.mtimeMs)
+      }
       try {
         const code = await fsp.readFile(file, 'utf8')
-        const exported = evaluate(code, file)
-        if (!exported || typeof exported !== 'object') {
-          throw new Error('脚本没有导出对象（应当 module.exports = { search, resolveUrl }）')
+        const result = evaluate(code, file)
+        const isModuleStyle = result.exported &&
+          (typeof result.exported.search === 'function' || typeof result.exported.resolveUrl === 'function')
+        // LX 风格：脚本通过 send(inited, …) 声明自己支持的源
+        const isLxStyle = Boolean(result.lx?.inited)
+        if (!isModuleStyle && !isLxStyle) {
+          if (result.lx?.inited === null && (result.lx?.handlers?.get('request')?.length || 0) > 0) {
+            throw new Error('脚本注册了 request 处理器，但没有发送 inited 事件（LX 音源需要在初始化后 send(EVENT_NAMES.inited, …)）')
+          }
+          throw new Error('无法识别的音源脚本：既没有导出 { search, resolveUrl }，也不是 LX 音乐的自定义源')
         }
-        if (typeof exported.search !== 'function' && typeof exported.resolveUrl !== 'function') {
-          throw new Error('脚本既没有 search 也没有 resolveUrl')
+        if (isLxStyle && result.lx.inited.status === false) {
+          throw new Error(`脚本自报初始化失败${result.lx.inited.message ? `：${result.lx.inited.message}` : ''}`)
         }
-        entry.module = exported
+        entry.module = isModuleStyle ? result.exported : null
+        entry.lx = result.lx
       } catch (err) {
         entry.error = String(err?.message || err)
         console.warn(`[sources] ${name} 装载失败：${entry.error}`)
@@ -305,14 +448,23 @@ function createMusicSourcesService (ctx) {
     await ensureDir()
     const file = path.join(dir, `${base}.js`)
     // 先验证能装载再落盘，避免把坏脚本留在目录里
-    const exported = evaluate(code, file)
-    if (!exported || typeof exported !== 'object') throw new Error('脚本没有导出对象')
-    if (typeof exported.search !== 'function' && typeof exported.resolveUrl !== 'function') {
-      throw new Error('脚本既没有 search 也没有 resolveUrl')
+    const result = evaluate(code, file)
+    const isModuleStyle = result.exported &&
+      (typeof result.exported.search === 'function' || typeof result.exported.resolveUrl === 'function')
+    const isLxStyle = Boolean(result.lx?.inited)
+    if (!isModuleStyle && !isLxStyle) {
+      throw new Error(
+        '无法识别的音源脚本：既没有导出 { search, resolveUrl }，也没有按 LX 音乐的规范 ' +
+        '发送 inited 事件（LX 音源需要在初始化后 send(EVENT_NAMES.inited, …)）'
+      )
     }
     await fsp.writeFile(file, code, 'utf8')
     await load()
-    return { id: toId(`${base}.js`), name: String(exported.name || base) }
+    return {
+      id: toId(`${base}.js`),
+      kind: isLxStyle && !isModuleStyle ? 'lx' : 'module',
+      name: String(result.exported?.name || result.lx?.inited?.name || base)
+    }
   }
 
   async function remove (id) {
@@ -357,6 +509,20 @@ function createMusicSourcesService (ctx) {
       if (!isEnabled(entry.id)) return false
       return typeof entry.module?.search === 'function'
     })
+
+    // LX 音源按官方规范不提供搜索：这里把它们单独列出来，让界面能说清「为什么没结果」
+    const resolverOnly = [...loaded.values()]
+      .filter((entry) => !only || only.has(entry.id))
+      .filter((entry) => isEnabled(entry.id) && typeof entry.module?.search !== 'function' && entry.lx?.inited)
+      .map((entry) => ({
+        id: entry.id,
+        name: describe(entry).name,
+        count: 0,
+        elapsedMs: 0,
+        error: null,
+        skipped: 'lx-resolver-only',
+        note: 'LX 音乐音源：按官方规范只提供解析（musicUrl / lyric / pic），搜索由客户端自己完成，所以这里不会出结果'
+      }))
 
     const started = performance.now()
     const controller = new AbortController()
@@ -423,17 +589,26 @@ function createMusicSourcesService (ctx) {
 
     return {
       results,
-      perSource: perSource.map(({ results: _dropped, ...rest }) => rest),
+      perSource: [
+        ...perSource.map(({ results: _dropped, ...rest }) => rest),
+        ...resolverOnly
+      ],
       elapsedMs: Math.round((performance.now() - started) * 100) / 100
     }
   }
 
-  /** 解析某条结果的播放地址 */
+  /**
+   * 解析某条结果的播放地址。
+   *
+   * 支持两种脚本：
+   *   · 本项目接口：module.exports.resolveUrl(track, api)
+   *   · LX 音乐自定义源：把 track.payload.lx（{ source, musicInfo }）按官方协议
+   *     派发成 request({ source, action: 'musicUrl', info: { type, musicInfo } })
+   */
   async function resolveUrl (input = {}) {
     if (!loadedOnce) await load()
     const entry = loaded.get(String(input.sourceId || ''))
-    if (!entry?.module) throw new Error('音源不存在或未成功装载')
-    if (typeof entry.module.resolveUrl !== 'function') throw new Error('该音源没有提供 resolveUrl')
+    if (!entry?.module && !entry?.lx?.inited) throw new Error('音源不存在或未成功装载')
     const controller = new AbortController()
     const track = {
       id: input.sourceTrackId ?? null,
@@ -444,6 +619,29 @@ function createMusicSourcesService (ctx) {
       quality: input.quality || '',
       payload: input.payload ?? null
     }
+
+    if (typeof entry.module?.resolveUrl !== 'function' && entry.lx?.inited) {
+      const lxInfo = track.payload?.lx
+      if (!lxInfo?.musicInfo) {
+        throw new Error(
+          '这是 LX 音乐音源：它只能解析「LX 搜索结果里的歌曲信息」，' +
+          '而本项目没有 LX 内置搜索，所以拿不到可解析的对象'
+        )
+      }
+      const output = await withTimeout(
+        lxRequest(entry, {
+          source: lxInfo.source || track.payload?.source,
+          action: 'musicUrl',
+          info: { type: input.quality || '320k', musicInfo: lxInfo.musicInfo }
+        }),
+        RESOLVE_TIMEOUT,
+        `${describe(entry).name} 解析地址`
+      )
+      const url = typeof output === 'string' ? output : String(output?.url || '')
+      if (!/^https?:/i.test(url)) throw new Error('音源没有返回可用的 http(s) 地址')
+      return { url, headers: null, sourceId: entry.id, sourceName: describe(entry).name, title: track.title, artist: track.artist }
+    }
+
     const output = await withTimeout(
       Promise.resolve(entry.module.resolveUrl(track, {
         quality: input.quality || '320k',
@@ -469,12 +667,32 @@ function createMusicSourcesService (ctx) {
     }
   }
 
-  /** 音源提供的歌词（可选接口） */
+  /** 音源提供的歌词（可选接口；LX 音源走官方协议的 lyric 动作） */
   async function resolveLyrics (input = {}) {
     if (!loadedOnce) await load()
     const entry = loaded.get(String(input.sourceId || ''))
-    if (!entry?.module || typeof entry.module.resolveLyrics !== 'function') return null
     const controller = new AbortController()
+
+    if (typeof entry?.module?.resolveLyrics !== 'function' && entry?.lx?.inited) {
+      const lxInfo = input.payload?.lx
+      if (!lxInfo?.musicInfo) return null
+      const output = await withTimeout(
+        lxRequest(entry, {
+          source: lxInfo.source || input.payload?.source,
+          action: 'lyric',
+          info: { musicInfo: lxInfo.musicInfo }
+        }),
+        RESOLVE_TIMEOUT,
+        `${describe(entry).name} 取歌词`
+      )
+      const text = typeof output === 'string'
+        ? output
+        : String(output?.lyric || output?.tlyric || output?.lxlyric || '')
+      if (!text.trim()) return null
+      return { text, sourceId: entry.id, sourceName: describe(entry).name }
+    }
+
+    if (!entry?.module || typeof entry.module.resolveLyrics !== 'function') return null
     const text = await withTimeout(
       Promise.resolve(entry.module.resolveLyrics({
         id: input.sourceTrackId ?? null,

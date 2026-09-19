@@ -411,14 +411,19 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           ? `搜索 ${call.search} 次 · 成功 ${call.ok} · 失败 ${call.failed}` +
             `${call.lastMs ? ` · 最近 ${call.lastMs}ms` : ''}`
           : '本次会话还没有调用过'
+        const isLx = item.kind === 'lx'
         sourcesHost.append(h('div', { class: 'settings__source' },
           h('div', { class: 'settings__source-main' },
             h('div', { class: 'settings__source-name' },
               item.name,
               item.version ? h('span', { class: 'settings__source-version', text: `v${item.version}` }) : null,
+              isLx ? h('span', { class: 'settings__source-tag', text: 'LX 兼容 · 仅解析' }) : null,
               item.error ? h('span', { class: 'settings__source-error', text: '装载失败' }) : null
             ),
             h('div', { class: 'settings__source-sub', text: item.error || item.description || item.file }),
+            item.lxSources?.length
+              ? h('div', { class: 'settings__source-sub', text: `声明的音源：${item.lxSources.map((sub) => `${sub.name}(${sub.key})${sub.actions?.length ? ` [${sub.actions.join(',')}]` : ''}`).join('、')}` })
+              : null,
             h('div', { class: 'settings__source-sub', text: callText })
           ),
           switchControl(item.enabled, async (value) => {

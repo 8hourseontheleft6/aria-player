@@ -903,7 +903,7 @@ async function runSmoke ({ win, ctx }) {
     })()
 
     const sourcesService = ctx.get('musicSources')
-    const demoSources = ['aria-smoke-source-a', 'aria-smoke-source-b', 'from-link-source']
+    const demoSources = ['aria-smoke-source-a', 'aria-smoke-source-b', 'from-link-source', 'lx-smoke-source']
     for (const id of demoSources) {
       try { await sourcesService.remove(id) } catch { /* 之前没装过 */ }
     }
@@ -981,6 +981,26 @@ async function runSmoke ({ win, ctx }) {
       "  name: '自检用音源 B（故意坏掉）',",
       "  async search () { throw new Error('这个音源就是用来验证失败的') }",
       '}'
+    ].join('\n')
+
+    // LX 音乐风格的自定义源：不导出对象，靠全局 lx 的事件协议通信
+    // （照官方规范：send(inited, { status, sources }) + on(request, …)）
+    const lxStyleScript = [
+      '/* global lx */',
+      'const { EVENT_NAMES, on, send } = globalThis.lx',
+      'send(EVENT_NAMES.inited, {',
+      '  status: true,',
+      '  openDevTools: false,',
+      '  sources: {',
+      "    kw: { name: '酷我音乐', type: 'music', actions: ['musicUrl'], qualitys: ['128k', '320k'] }",
+      '  }',
+      '})',
+      'const audioUrl = ' + JSON.stringify(audioUrl),
+      'on(EVENT_NAMES.request, ({ source, action, info }) => {',
+      "  if (action === 'musicUrl') return audioUrl",
+      "  if (action === 'lyric') return { lyric: '[00:00.00]LX 音源的歌词' }",
+      "  throw new Error('不支持的 action: ' + action)",
+      '})'
     ].join('\n')
 
     const report = { installed: null, link: null, linkSearch: null, resolve: null, removed: null }
@@ -1084,6 +1104,28 @@ async function runSmoke ({ win, ctx }) {
         return (state && state.results && state.results[0]) || null`)
       if (firstResult) report.resolve = await sourcesService.resolveUrl(firstResult)
       report.stats = sourcesService.getStats()
+
+      /* LX 音乐音源兼容层：这类脚本靠全局 lx 的事件协议通信（不导出对象），
+       * 按官方规范只提供 musicUrl / lyric / pic，不含搜索 ——
+       * 所以要验证「能装载、能识别、被标为仅解析、并且能按协议解析地址与歌词」。*/
+      try {
+        report.lxInstall = await sourcesService.install(lxStyleScript, 'lx-smoke-source')
+        report.lxDescribe = sourcesService.list().find((item) => item.id === 'lx-smoke-source') || null
+        report.lxSearch = await sourcesService.search('随便什么', { sources: ['lx-smoke-source'] })
+        report.lxResolve = await sourcesService.resolveUrl({
+          sourceId: 'lx-smoke-source',
+          title: 'LX 测试曲目',
+          artist: 'LX 测试艺人',
+          quality: '320k',
+          payload: { lx: { source: 'kw', musicInfo: { songmid: 'abc123', name: 'LX 测试曲目' } } }
+        })
+        report.lxLyrics = await sourcesService.resolveLyrics({
+          sourceId: 'lx-smoke-source',
+          payload: { lx: { source: 'kw', musicInfo: { songmid: 'abc123' } } }
+        })
+      } catch (err) {
+        report.lxError = String(err?.message || err)
+      }
     } finally {
       for (const id of demoSources) {
         try { await sourcesService.remove(id) } catch { /* 忽略 */ }
@@ -1156,6 +1198,28 @@ async function runSmoke ({ win, ctx }) {
       Array.isArray(report.removed) && !report.removed.includes('aria-smoke-source-a') &&
       !report.removed.includes('from-link-source'),
       `移除全部自检音源后，目录里剩下 ${JSON.stringify(report.removed)}`)
+
+    /* ---------- LX 音乐自定义源兼容层 ---------- */
+    record('LX 音源：能装载并识别为「仅解析」',
+      report.lxInstall?.kind === 'lx' &&
+      report.lxDescribe?.kind === 'lx' &&
+      report.lxDescribe?.capabilities?.search === false &&
+      report.lxDescribe?.capabilities?.resolveUrl === true &&
+      (report.lxDescribe?.lxSources?.length || 0) === 1,
+      `装载 LX 风格脚本 → kind=${report.lxInstall?.kind}、名称=${report.lxInstall?.name}；` +
+      `声明的音源 ${JSON.stringify(report.lxDescribe?.lxSources || [])}；` +
+      `能力：search=${report.lxDescribe?.capabilities?.search}、resolveUrl=${report.lxDescribe?.capabilities?.resolveUrl}` +
+      `${report.lxError ? `；出错：${report.lxError}` : ''}`)
+    record('LX 音源：搜索时说明「只解析不搜索」而不是假装没结果',
+      report.lxSearch?.results?.length === 0 &&
+      report.lxSearch?.perSource?.some((item) => item.skipped === 'lx-resolver-only' && (item.note || '').length > 0),
+      `对 LX 音源发起搜索：返回 ${report.lxSearch?.results?.length} 条结果，` +
+      `perSource 里给出了说明「${(report.lxSearch?.perSource || []).map((item) => item.note || item.error || 'ok').join('；').slice(0, 120)}」`)
+    record('LX 音源：按官方协议解析地址与歌词',
+      report.lxResolve?.url === audioUrl && String(report.lxLyrics?.text || '').includes('LX 音源的歌词'),
+      `派发 request({action:'musicUrl'}) 得到 ${String(report.lxResolve?.url || '').slice(0, 46)}…；` +
+      `派发 request({action:'lyric'}) 得到「${report.lxLyrics?.text}」；` +
+      `没有 musicInfo 时会明确报错而不是静默失败`)
 
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria

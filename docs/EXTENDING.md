@@ -344,6 +344,35 @@ module.exports = {
 单次搜索 15 秒、解析地址 20 秒超时；某个音源抛错或超时只影响它自己，
 界面上会把它标成出错、其他音源照常出结果。
 
+### LX 音乐音源的兼容层
+
+很多人手里已经有 LX Music（洛雪音乐）的自定义源脚本。这类脚本**不导出对象**，
+而是通过宿主提供的全局 `lx` 用事件协议通信，第一句通常就是：
+
+```js
+const { EVENT_NAMES, request, on, send } = globalThis.lx
+send(EVENT_NAMES.inited, { status: true, sources: { kw: { name: '酷我音乐', type: 'music', actions: ['musicUrl'], qualitys: ['128k','320k'] } } })
+on(EVENT_NAMES.request, ({ source, action, info }) => { /* musicUrl / lyric / pic */ })
+```
+
+没有这个全局，脚本会直接抛 `Cannot destructure property 'EVENT_NAMES' of 'globalThis.lx'`。
+所以宿主里内置了一套兼容实现（规范见 LX 官方文档的「自定义源脚本编写说明」）：
+`EVENT_NAMES` / `send` / `on` / `off` / `request`（含旧版回调风格）/ `utils.crypto` / `utils.buffer` /
+`version` / `env` / `currentScriptInfo`，并在装载时接收脚本发来的 `inited` 事件。
+
+**但要说清楚一件事**：按官方规范，LX 音源只负责 `musicUrl`（拿播放地址）、
+`lyric`（拿歌词）、`pic`（拿封面）—— **没有搜索**。搜索是 LX 客户端自己用它内置的源完成的。
+所以在任何不自带那套搜索的宿主里（包括本项目），LX 音源都**不会产生搜索结果**，
+它只能当解析器用。
+
+因此本项目的处理是：
+
+- LX 脚本照常装载，在设置里标成 **「LX 兼容 · 仅解析」**，并列出它声明的音源与动作；
+- 搜索时它会出现一条说明（「按官方规范只提供解析…」），而不是默默没有结果；
+- 如果将来有一个能搜索的脚本把结果里的 `payload.lx = { source, musicInfo }` 递过来，
+  宿主就会按官方协议派发 `request({ source, action: 'musicUrl', info: { type, musicInfo } })`
+  去解析地址，歌词同理（`action: 'lyric'`）。
+
 ### 目前的行为
 
 - 搜索结果分两块：**网络结果**（音源返回，可收起，每行带来源与质量标签）与**本地结果**（原有列表）；
