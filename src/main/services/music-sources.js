@@ -145,6 +145,24 @@ function createMusicSourcesService (ctx) {
   /** 每个音源的调用统计（本次会话内；用来在设置里看哪个音源好用） */
   const stats = { calls: {}, downloads: 0 }
 
+  /*
+   * 播放代理令牌表：解析出来的真实地址与请求头留在主进程，
+   * 渲染层只拿到 remote://stream/<token>（见 protocols.js 的 remote:// 处理器）。
+   */
+  const streamTargets = new Map()
+  const STREAM_TTL = 30 * 60 * 1000
+  let streamSeq = 0
+
+  function registerStreamTarget (target) {
+    const now = Date.now()
+    for (const [key, value] of streamTargets) {
+      if (now - value.at > STREAM_TTL) streamTargets.delete(key)
+    }
+    const token = `t${++streamSeq}-${Math.random().toString(36).slice(2, 10)}`
+    streamTargets.set(token, { ...target, at: now })
+    return token
+  }
+
   function bump (id, field, extra = {}) {
     const key = String(id || '?')
     const entry = stats.calls[key] || { search: 0, ok: 0, failed: 0, lastMs: 0, lastError: null }
@@ -358,6 +376,90 @@ function createMusicSourcesService (ctx) {
   }
 
   /** 扫描目录并装载全部音源（可重复调用，按 mtime 判断是否需要重载） */
+  /* ================================================================ */
+  /* 内置音源：Internet Archive（公共领域 / CC 授权音频，免密钥）           */
+  /* ================================================================ */
+
+  /*
+   * 这是本项目**唯一**内置的音源，刻意选它是因为它合法且不需要密钥：
+   * Internet Archive 提供公开检索接口，收录大量公共领域与知识共享授权的音频。
+   * 那些需要密钥、或者要绕开商业平台授权才能拿到的音源，本项目一律不内置 ——
+   * 那类音源由使用者自己准备脚本导入（见 docs/EXTENDING.md）。
+   */
+  const BUILTIN_ARCHIVE_ID = 'builtin-internet-archive'
+
+  const archiveBuiltin = {
+    name: 'Internet Archive（公共领域 / CC）',
+    description: 'Internet Archive 的公开音频检索：公共领域与知识共享授权作品，免密钥。结果多为现场录音、古典、独立音乐，不是商业曲库。',
+    version: '1.0.0',
+    builtin: true,
+
+    async search (query, { limit = 20 } = {}) {
+      const params = new URLSearchParams()
+      params.set('q', `(${query}) AND mediatype:(audio)`)
+      params.set('fl[]', 'identifier')
+      params.append('fl[]', 'title')
+      params.append('fl[]', 'creator')
+      params.append('fl[]', 'year')
+      params.set('rows', String(Math.max(1, Math.min(40, limit))))
+      params.set('page', '1')
+      params.set('output', 'json')
+      const response = await net.fetch(`https://archive.org/advancedsearch.php?${params.toString()}`, {
+        headers: { 'User-Agent': USER_AGENT }
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const payload = await response.json()
+      const docs = payload?.response?.docs || []
+      return docs.map((doc) => ({
+        id: String(doc.identifier || ''),
+        title: String(doc.title || doc.identifier || ''),
+        artist: Array.isArray(doc.creator) ? doc.creator.join(', ') : String(doc.creator || 'Internet Archive'),
+        album: 'Internet Archive',
+        duration: 0,
+        quality: 'archive',
+        payload: { identifier: doc.identifier, year: doc.year || null }
+      })).filter((item) => item.id)
+    },
+
+    async resolveUrl (track) {
+      const identifier = track?.payload?.identifier || track?.id
+      if (!identifier) throw new Error('缺少 Internet Archive 条目 id')
+      const response = await net.fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, {
+        headers: { 'User-Agent': USER_AGENT }
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const meta = await response.json()
+      const files = Array.isArray(meta?.files) ? meta.files : []
+      const audio = files.filter((file) => {
+        const format = String(file.format || '').toLowerCase()
+        const name = String(file.name || '').toLowerCase()
+        return /mp3|ogg|flac|wave|wav|mpeg/.test(format) || /\.(mp3|ogg|flac|wav|m4a)$/.test(name)
+      })
+      if (!audio.length) throw new Error('这个条目里没有可直接播放的音频文件')
+      // 优先 mp3（浏览器兼容性最好），其次 ogg，最后随便挑一个音频
+      const pick = audio.find((file) => /mp3/.test(String(file.format).toLowerCase()) || /\.mp3$/i.test(file.name)) ||
+        audio.find((file) => /ogg/.test(String(file.format).toLowerCase())) ||
+        audio[0]
+      return {
+        url: `https://archive.org/download/${encodeURIComponent(identifier)}/${encodeURIComponent(pick.name)}`,
+        headers: null
+      }
+    }
+  }
+
+  /** 把内置音源挂进装载表（它不是脚本，就是一个普通对象） */
+  function mountBuiltins () {
+    loaded.set(BUILTIN_ARCHIVE_ID, {
+      id: BUILTIN_ARCHIVE_ID,
+      file: '(内置)',
+      builtin: true,
+      module: archiveBuiltin,
+      lx: null,
+      error: null,
+      mtimeMs: 0
+    })
+  }
+
   async function load () {
     await ensureDir()
     let files = []
@@ -428,10 +530,12 @@ function createMusicSourcesService (ctx) {
       }
       loaded.set(id, entry)
     }
-    // 目录里已经没有的，清掉
+    // 目录里已经没有的，清掉（内置音源不参与这个清理）
     for (const id of [...loaded.keys()]) {
+      if (loaded.get(id)?.builtin) continue
       if (!seen.has(id)) loaded.delete(id)
     }
+    mountBuiltins()
     loadedOnce = true
     return list()
   }
@@ -669,7 +773,17 @@ function createMusicSourcesService (ctx) {
       )
       const url = typeof output === 'string' ? output : String(output?.url || '')
       if (!/^https?:/i.test(url)) throw new Error('音源没有返回可用的 http(s) 地址')
-      return { url, headers: null, sourceId: entry.id, sourceName: describe(entry).name, title: track.title, artist: track.artist }
+      const lxToken = registerStreamTarget({ url, headers: null })
+      return {
+        url: `remote://stream/${lxToken}`,
+        realUrl: url,
+        headers: null,
+        streamToken: lxToken,
+        sourceId: entry.id,
+        sourceName: describe(entry).name,
+        title: track.title,
+        artist: track.artist
+      }
     }
 
     const output = await withTimeout(
@@ -687,9 +801,13 @@ function createMusicSourcesService (ctx) {
       throw new Error('音源没有返回可用的 http(s) 地址')
     }
     const headers = (output && typeof output === 'object' && output.headers) || null
+    // 登记成播放代理目标：渲染层拿到的是 remote://stream/<token>，避免 CORS 与缺请求头
+    const token = registerStreamTarget({ url, headers })
     return {
-      url,
+      url: `remote://stream/${token}`,
+      realUrl: url,
       headers,
+      streamToken: token,
       sourceId: entry.id,
       sourceName: describe(entry).name,
       title: track.title,
@@ -781,7 +899,8 @@ function createMusicSourcesService (ctx) {
     const dir = String(input.dir || '').trim() || defaultDownloadDir()
     await fsp.mkdir(dir, { recursive: true })
     const resolved = await resolveUrl(input)
-    const response = await net.fetch(resolved.url, {
+    // 下载走真实地址（代理地址是给渲染层播放用的）
+    const response = await net.fetch(resolved.realUrl || resolved.url, {
       headers: { 'User-Agent': USER_AGENT, ...(resolved.headers || {}) }
     })
     if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`)
@@ -858,6 +977,8 @@ function createMusicSourcesService (ctx) {
     resolveLyrics,
     download,
     defaultDownloadDir,
+    /** remote:// 播放代理用：按令牌取回真实地址与请求头 */
+    getStreamTarget: (token) => streamTargets.get(String(token || '')) || null,
     getDir: () => dir,
     getStats: () => ({
       dir,

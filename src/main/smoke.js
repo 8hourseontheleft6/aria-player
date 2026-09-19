@@ -1071,6 +1071,16 @@ async function runSmoke ({ win, ctx }) {
         })
         await waitFor(() => store.get().lyrics.lines.length > 0, 8000)
         const playback = store.get().playback
+        // 播放地址必须是主进程代理（remote://），而且代理真的能把字节吐出来 ——
+        // 直链会被 CORS 挡掉（音频分析会给 <audio> 设 crossOrigin），代理之后才放得出来
+        let proxied = null
+        try {
+          const response = await fetch(track.onlineUrl)
+          const buffer = await response.arrayBuffer()
+          proxied = { status: response.status, bytes: buffer.byteLength, url: String(track.onlineUrl) }
+        } catch (err) {
+          proxied = { error: String((err && err.message) || err), url: String(track.onlineUrl) }
+        }
         return {
           skipped: false,
           id: track.id,
@@ -1079,6 +1089,7 @@ async function runSmoke ({ win, ctx }) {
           status: playback.status,
           duration: Math.round((playback.duration || 0) * 100) / 100,
           played,
+          proxied,
           lyricsStatus: store.get().lyrics.status,
           lyricsSource: store.get().lyrics.source,
           lyricsLines: store.get().lyrics.lines.length,
@@ -1104,6 +1115,29 @@ async function runSmoke ({ win, ctx }) {
         return (state && state.results && state.results[0]) || null`)
       if (firstResult) report.resolve = await sourcesService.resolveUrl(firstResult)
       report.stats = sourcesService.getStats()
+
+      /* 内置音源（Internet Archive：公共领域 / CC，免密钥）—— 这是本项目唯一内置的音源，
+       * 目的是让「搜索 → 播放 → 下载」这条链路有东西可跑；网络不可达时只报告不算失败。*/
+      try {
+        const builtin = sourcesService.list().find((item) => item.id === 'builtin-internet-archive')
+        report.builtin = {
+          present: Boolean(builtin),
+          enabled: builtin?.enabled ?? null,
+          capabilities: builtin?.capabilities || null
+        }
+        const found = await sourcesService.search('beethoven', { sources: ['builtin-internet-archive'], limit: 3 })
+        report.builtinSearch = {
+          count: found.results.length,
+          elapsedMs: found.elapsedMs,
+          first: found.results[0] || null,
+          error: found.perSource.find((item) => item.id === 'builtin-internet-archive')?.error || null
+        }
+        if (found.results[0]) {
+          report.builtinResolve = await sourcesService.resolveUrl(found.results[0])
+        }
+      } catch (err) {
+        report.builtinError = String(err?.message || err)
+      }
 
       /* LX 音乐音源兼容层：这类脚本靠全局 lx 的事件协议通信（不导出对象），
        * 按官方规范只提供 musicUrl / lyric / pic，不含搜索 ——
@@ -1171,13 +1205,15 @@ async function runSmoke ({ win, ctx }) {
     record('在线音源：可以直接播放并加载音源歌词',
       report.play && !report.play.skipped && report.play.played &&
       report.play.playbackId === report.play.id &&
-      report.play.lyricsLines >= 2,
+      report.play.lyricsLines >= 2 &&
+      report.play.proxied && report.play.proxied.bytes === wavBuffer.length,
       report.play?.skipped
         ? '没有可播放的在线结果'
-        : `点播放后播放状态切到 online 曲目 ${report.play.id}（时长 ${report.play.duration}s、状态 ${report.play.status}，` +
-          `说明直链真的能播）` +
-          `；歌词来自「${report.play.lyricsSource}」共 ${report.play.lyricsLines} 行，首句「${report.play.lyricsText}」` +
-          `；本次会话合成 ${report.play.onlineTracks?.length} 个在线曲目（不进本地列表）`)
+        : `点播放后播放状态切到 online 曲目 ${report.play.id}（时长 ${report.play.duration}s、状态 ${report.play.status}）` +
+          `；播放地址走主进程代理 ${String(report.play.proxied?.url || '').slice(0, 40)}…，` +
+          `代理取回 ${report.play.proxied?.bytes} 字节（源文件 ${wavBuffer.length} 字节）` +
+          `${report.play.proxied?.error ? `，代理出错：${report.play.proxied.error}` : ''}` +
+          `；歌词来自「${report.play.lyricsSource}」共 ${report.play.lyricsLines} 行，首句「${report.play.lyricsText}」`)
     record('在线音源：下载到指定目录',
       report.download && report.download.bytes === wavBuffer.length,
       report.download
@@ -1199,6 +1235,23 @@ async function runSmoke ({ win, ctx }) {
       !report.removed.includes('from-link-source'),
       `移除全部自检音源后，目录里剩下 ${JSON.stringify(report.removed)}`)
 
+    /* ---------- 内置音源：Internet Archive（公共领域 / CC，免密钥） ---------- */
+    record('内置音源：Internet Archive 可用（搜索 → 解析直链）',
+      report.builtin?.present === true &&
+      report.builtin?.enabled === true &&
+      report.builtin?.capabilities?.search === true &&
+      (report.builtinSearch?.error
+        ? true // 网络不可达时不判失败，只报告
+        : report.builtinSearch?.count > 0 && Boolean(report.builtinResolve?.realUrl)),
+      `内置音源 present=${report.builtin?.present}、enabled=${report.builtin?.enabled}、` +
+      `能力 search=${report.builtin?.capabilities?.search}；` +
+      (report.builtinSearch?.error
+        ? `搜索失败（可能是网络不可达）：${report.builtinSearch.error}`
+        : `搜「beethoven」得 ${report.builtinSearch?.count} 条（${report.builtinSearch?.elapsedMs}ms），` +
+          `首条「${report.builtinSearch?.first?.title}」（${report.builtinSearch?.first?.artist}）；` +
+          `解析出直链 ${String(report.builtinResolve?.realUrl || '').slice(0, 64)}…` +
+          `，播放地址走代理 ${String(report.builtinResolve?.url || '').slice(0, 32)}…`))
+
     /* ---------- LX 音乐自定义源兼容层 ---------- */
     record('LX 音源：能装载并识别为「仅解析」',
       report.lxInstall?.kind === 'lx' &&
@@ -1216,8 +1269,10 @@ async function runSmoke ({ win, ctx }) {
       `对 LX 音源发起搜索：返回 ${report.lxSearch?.results?.length} 条结果，` +
       `perSource 里给出了说明「${(report.lxSearch?.perSource || []).map((item) => item.note || item.error || 'ok').join('；').slice(0, 120)}」`)
     record('LX 音源：按官方协议解析地址与歌词',
-      report.lxResolve?.url === audioUrl && String(report.lxLyrics?.text || '').includes('LX 音源的歌词'),
-      `派发 request({action:'musicUrl'}) 得到 ${String(report.lxResolve?.url || '').slice(0, 46)}…；` +
+      report.lxResolve?.realUrl === audioUrl &&
+      String(report.lxLyrics?.text || '').includes('LX 音源的歌词'),
+      `派发 request({action:'musicUrl'}) 得到真实地址 ${String(report.lxResolve?.realUrl || '').slice(0, 46)}…` +
+      `（对外暴露成代理地址 ${String(report.lxResolve?.url || '').slice(0, 32)}…）；` +
       `派发 request({action:'lyric'}) 得到「${report.lxLyrics?.text}」；` +
       `没有 musicInfo 时会明确报错而不是静默失败`)
 

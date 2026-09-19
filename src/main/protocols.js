@@ -1,6 +1,6 @@
 'use strict'
 
-const { protocol } = require('electron')
+const { protocol, net } = require('electron')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
@@ -38,6 +38,25 @@ const SCHEMES = [
   },
   {
     scheme: 'media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true
+    }
+  },
+  {
+    /*
+     * remote: —— 在线音源的播放代理。
+     *
+     * 为什么必须有它：直链交给渲染层的 <audio> 时，跨源会撞上 CORS
+     * （音频分析插件会设 crossOrigin，浏览器就会做 CORS 检查），
+     * 而绝大多数音源返回的地址不会带 Access-Control-Allow-Origin。
+     * 代理一层之后，渲染层拿到的是同应用内的地址，而且主进程可以顺手
+     * 补上 Referer/User-Agent 之类的请求头 —— 很多音源没有这个头就 403。
+     */
+    scheme: 'remote',
     privileges: {
       standard: true,
       secure: true,
@@ -216,9 +235,65 @@ function registerMediaHandler (ctx) {
   })
 }
 
+/**
+ * remote:// —— 在线音源的流式代理。
+ *
+ * 音源解析出来的直链登记在 musicSources 的令牌表里，渲染层只拿到
+ * `remote://stream/<token>`；真实地址与请求头留在主进程，页面拿不到也不需要。
+ * Range 透传给上游（这样拖动进度条仍然能 seek）。
+ */
+function registerRemoteHandler (ctx) {
+  protocol.handle('remote', async (request) => {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS_HEADERS })
+    }
+    const url = new URL(request.url)
+    const token = url.pathname.replace(/^\/+/, '').split('/').pop()
+    if (!token || !ctx.has('musicSources')) {
+      return new Response('Bad Request', { status: 400, headers: CORS_HEADERS })
+    }
+    const entry = ctx.get('musicSources').getStreamTarget(token)
+    if (!entry) return new Response('Not Found', { status: 404, headers: CORS_HEADERS })
+
+    const range = request.headers.get('range')
+    const headers = { ...(entry.headers || {}) }
+    if (range) headers.Range = range
+    if (!headers['User-Agent'] && !headers['user-agent']) {
+      headers['User-Agent'] = 'Aria/0.0.0-dev (local music player)'
+    }
+
+    let upstream
+    try {
+      upstream = await net.fetch(entry.url, { headers, redirect: 'follow' })
+    } catch (err) {
+      return new Response(`Upstream error: ${err.message}`, { status: 502, headers: CORS_HEADERS })
+    }
+    if (!upstream.ok && upstream.status !== 206) {
+      return new Response(`Upstream HTTP ${upstream.status}`, { status: upstream.status, headers: CORS_HEADERS })
+    }
+
+    const out = {
+      'Content-Type': upstream.headers.get('content-type') || 'audio/mpeg',
+      'Accept-Ranges': upstream.headers.get('accept-ranges') || 'bytes',
+      'Cache-Control': 'no-cache',
+      ...CORS_HEADERS
+    }
+    const length = upstream.headers.get('content-length')
+    if (length) out['Content-Length'] = length
+    const contentRange = upstream.headers.get('content-range')
+    if (contentRange) out['Content-Range'] = contentRange
+
+    if (request.method === 'HEAD' || !upstream.body) {
+      return new Response(null, { status: upstream.status, headers: out })
+    }
+    return new Response(upstream.body, { status: upstream.status, headers: out })
+  })
+}
+
 function registerProtocols (ctx) {
   protocol.handle('app', handleAppRequest)
   registerMediaHandler(ctx)
+  registerRemoteHandler(ctx)
 }
 
 /** 渲染层用来引用本地文件的 URL 构造器（同时给 main 内部使用） */
