@@ -2357,6 +2357,90 @@ async function runSmoke ({ win, ctx }) {
       `批量「下一首播放」：队列 ${batchCheck.queueBefore} → ${batchCheck.queueAfter.length} 首，3 首插在当前曲目之后=${batchQueueOk}；` +
       `右键已选中的一批 → 菜单标题「${batchCheck.batchItems.header}」、${batchCheck.batchItems.itemCount} 项（含批量文案=${batchCheck.batchItems.text.includes('这 2 首')}）`)
 
+    /* ---------- 勾选框：选中的打勾、没选的空着 ---------- */
+    const checkboxCheck = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      const rows = () => [...document.querySelectorAll('.track-row')]
+      const state = () => {
+        const nodes = rows()
+        const checks = nodes.map((row) => row.querySelector('.track-row__check'))
+        return {
+          rows: nodes.length,
+          checked: checks.filter((node) => node && node.classList.contains('is-checked')).length,
+          visible: checks.filter((node) => node && getComputedStyle(node).opacity === '1').length,
+          // 悬停那一行本来就是「露出来」的（真实指针可能正停在列表上），
+          // 所以判断「平时藏着」要把它排除掉
+          visibleUnhovered: nodes.filter((row) => !row.matches(':hover'))
+            .map((row) => row.querySelector('.track-row__check'))
+            .filter((node) => node && getComputedStyle(node).opacity === '1').length,
+          ariaChecked: checks.filter((node) => node && node.getAttribute('aria-checked') === 'true').length,
+          selecting: document.querySelector('.tracklist').classList.contains('is-selecting'),
+          headChecked: document.querySelector('.tracklist__check').classList.contains('is-checked'),
+          headPartial: document.querySelector('.tracklist__check').classList.contains('is-partial')
+        }
+      }
+
+      actions.setView('songs')
+      actions.setQuery('')
+      actions.setSource({ type: 'all', value: null })
+      actions.clearSelection()
+      await settle(900)
+      const idle = state()
+
+      // 选中两首：勾选框应该全部露出来，其中两首打勾
+      const ids = rows().slice(0, 2).map((node) => node.dataset.id)
+      actions.setSelection(ids, ids[0])
+      await settle(500)
+      const selecting = state()
+
+      // 点第 5 行的勾选框：它被打勾，且不该顺手起播
+      const before = store.get().playback.trackId
+      const targetRow = rows()[4]
+      const targetId = targetRow.dataset.id
+      targetRow.querySelector('.track-row__check').click()
+      await settle(500)
+      const afterToggle = { ...state(), trackId: store.get().playback.trackId, before, targetId, checkedId: targetId }
+
+      // 表头全选
+      document.querySelector('.tracklist__check').click()
+      await settle(600)
+      const all = state()
+      const selectionSize = store.get().ui.selection.length
+
+      // 再点一次表头：取消全选，勾选框重新藏起来
+      document.querySelector('.tracklist__check').click()
+      await settle(600)
+      const cleared = state()
+      const total = store.get().library.tracks.length
+
+      return { idle, selecting, afterToggle, all, selectionSize, cleared, total }
+    `)
+    record('多选：勾选框（选中的打勾、没选的空着）',
+      checkboxCheck.idle.rows > 5 &&
+      checkboxCheck.idle.checked === 0 &&
+      checkboxCheck.idle.visibleUnhovered === 0 &&
+      checkboxCheck.idle.selecting === false &&
+      checkboxCheck.selecting.checked === 2 &&
+      checkboxCheck.selecting.ariaChecked === 2 &&
+      // 多选状态下每一行的框都要露出来，才能一眼看出哪些没选
+      checkboxCheck.selecting.visible === checkboxCheck.selecting.rows &&
+      checkboxCheck.selecting.selecting === true &&
+      checkboxCheck.selecting.headPartial === true &&
+      checkboxCheck.afterToggle.checked === 3 &&
+      checkboxCheck.afterToggle.trackId === checkboxCheck.afterToggle.before &&
+      checkboxCheck.all.checked === checkboxCheck.all.rows &&
+      checkboxCheck.all.headChecked === true &&
+      checkboxCheck.all.headPartial === false &&
+      checkboxCheck.selectionSize === checkboxCheck.total &&
+      checkboxCheck.cleared.checked === 0 &&
+      checkboxCheck.cleared.visibleUnhovered === 0 &&
+      checkboxCheck.cleared.selecting === false,
+      `未选中时：${checkboxCheck.idle.rows} 行里可见勾选框 ${checkboxCheck.idle.visible} 个（除悬停那一行外 ${checkboxCheck.idle.visibleUnhovered} 个 —— 平时藏着，悬停才出现）；` +
+      `选中 2 首后：可见 ${checkboxCheck.selecting.visible}/${checkboxCheck.selecting.rows} 个、打勾 ${checkboxCheck.selecting.checked} 个（aria-checked=${checkboxCheck.selecting.ariaChecked}）、表头半选=${checkboxCheck.selecting.headPartial}；` +
+      `点第 5 行的框 → 打勾变成 ${checkboxCheck.afterToggle.checked} 个，且没有起播（曲目未变=${checkboxCheck.afterToggle.trackId === checkboxCheck.afterToggle.before}）；` +
+      `点表头 → 全部 ${checkboxCheck.all.checked}/${checkboxCheck.all.rows} 行打勾（共选中 ${checkboxCheck.selectionSize}/${checkboxCheck.total} 首）；` +
+      `再点表头 → 打勾 ${checkboxCheck.cleared.checked} 个、可见 ${checkboxCheck.cleared.visible} 个（收起）`)
     /* ---------- 多艺人的拆分 ---------- */
 
     // 真实资料库里两种合作写法：顿号（Taylor Swift、Kendrick Lamar）和

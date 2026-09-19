@@ -23,6 +23,20 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   const viewport = h('div', { class: 'tracklist__viewport scroll', tabindex: '0' }, canvas)
 
   /* ---------------- 表头 ---------------- */
+  const checkIcon = (className) => icon('checkmark', { className: 'icon icon--stroke' })
+
+  // 表头上那颗 = 全选 / 取消全选；部分选中时显示成短横
+  const headCheck = h('button', {
+    class: 'tracklist__check',
+    type: 'button',
+    title: '全选 / 取消全选 (Ctrl+A)',
+    onClick: () => {
+      const selected = new Set(store.get().ui.selection)
+      const all = tracks.length > 0 && tracks.every((track) => selected.has(track.id))
+      actions.setSelection(all ? [] : tracks.map((track) => track.id))
+    }
+  }, checkIcon())
+
   const headIndex = h('span', { text: '#' })
   const headCells = SORT_COLUMNS.map((column) => {
     const arrow = icon('chevronDown', { className: 'icon icon--stroke' })
@@ -36,6 +50,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   })
 
   const head = h('div', { class: 'tracklist__head' },
+    headCheck,
     headIndex,
     headCells[0],
     headCells[1],
@@ -139,6 +154,20 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       style: { top: `${index * ROW_HEIGHT}px` }
     })
 
+    // 勾选框：选中的打勾、没选的空着。平时藏起来，行悬停或多选状态下出现
+    const check = h('button', {
+      class: 'track-row__check',
+      type: 'button',
+      role: 'checkbox',
+      title: '选择这一首（Ctrl / Shift 可以多选）',
+      'aria-checked': 'false',
+      onClick: (event) => {
+        event.stopPropagation()
+        actions.toggleSelection(track.id)
+      }
+    }, checkIcon())
+    row.__check = check
+
     const indexCell = h('div', { class: 'track-row__index' })
     const artCell = h('div', { class: 'track-row__art' }, icon('music'))
     const titleNode = h('div', { class: 'track-row__title' })
@@ -157,12 +186,12 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
         title: '更多操作',
         onClick: (event) => {
           event.stopPropagation()
-          actions.openTrackMenu(track, event)
+          actions.openTrackMenu(track, event, { list: tracks })
         }
       }, icon('ellipsis'))
     )
 
-    row.append(indexCell, main, h('div', { class: 'track-row__album truncate' },
+    row.append(check, indexCell, main, h('div', { class: 'track-row__album truncate' },
       h('span', { class: 'track-row__album-text truncate' }),
       // 悬停时才出现的「为什么搜到它」：默认 display:none，
       // 与专辑名共用同一个格子，所以显示出来不会让行高/列宽发生变化
@@ -172,10 +201,14 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
 
     /*
      * 点击语义（和桌面上的文件列表一致）：
-     *   · 普通点击：只选中这一首（清掉之前的选择）；开了「单击直接播放」时顺带起播
-     *   · Ctrl / Cmd 点击：把它加进选择或从中去掉，不播放
-     *   · Shift 点击：从锚点到这一首整段选中，不播放
-     * 多选状态下双击仍然只播这一首（双击本来就是「播这首」）。
+     *   · Ctrl / Cmd 点击：加进选择或去掉，不播放；
+     *   · Shift 点击：从锚点到这一首整段选中，不播放；
+     *   · 开了「单击歌曲直接播放」时：点行就播（这个设置是用户明确要求的，
+     *     不能被多选状态悄悄顶掉），多选走勾选框 / Ctrl / Shift；
+     *   · 其余情况：已经在多选里 → 点行 = 勾选 / 取消勾选这一首
+     *     （勾选框就摆在眼前，这时候「点一下把其它选择全清掉」才奇怪）；
+     *     还没开始多选 → 只选中这一首。
+     * 勾选框自己有 stopPropagation，不会走到这里。
      */
     on(row, 'click', (event) => {
       if (event.shiftKey) {
@@ -186,12 +219,19 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
         actions.toggleSelection(track.id)
         return
       }
+      const playing = store.get().settings.playOnSingleClick === true
+      if (playing) {
+        actions.setSelection([track.id], track.id)
+        // 行内已有自己的行为的小按钮不要连带触发（它们多数已经 stopPropagation，这里再兜一层）
+        if (event.target?.closest?.('.track-row__more, .track-row__play')) return
+        actions.playTrack(track, tracks)
+        return
+      }
+      if (store.get().ui.selection.length > 0) {
+        actions.toggleSelection(track.id)
+        return
+      }
       actions.setSelection([track.id], track.id)
-      // 设置里的「单击歌曲直接播放」打开时，单击也起播；默认仍然只选中
-      if (store.get().settings.playOnSingleClick !== true) return
-      // 行内已有自己的行为的小按钮不要连带触发（它们多数已经 stopPropagation，这里再兜一层）
-      if (event.target?.closest?.('.track-row__more, .track-row__play')) return
-      actions.playTrack(track, tracks)
     })
     on(row, 'dblclick', () => actions.playTrack(track, tracks))
     on(row, 'contextmenu', (event) => {
@@ -219,8 +259,13 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   function paintRow (row, track, index) {
     const state = store.get()
     const isCurrent = state.playback.trackId === track.id
+    const checked = selection.has(track.id)
     row.classList.toggle('is-current', isCurrent)
-    row.classList.toggle('is-selected', selection.has(track.id))
+    row.classList.toggle('is-selected', checked)
+    if (row.__check) {
+      row.__check.classList.toggle('is-checked', checked)
+      row.__check.setAttribute('aria-checked', checked ? 'true' : 'false')
+    }
 
     const indexCell = row.children[0]
     clear(indexCell)
@@ -343,19 +388,32 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     }
   }
 
-  /** 把 store 里的选择同步到已渲染的行 + 工具条 */
+  /** 把 store 里的选择同步到已渲染的行 + 工具条 + 表头的全选框 */
   function syncSelection () {
     const selected = store.get().ui.selection || []
     selection = new Set(selected)
+    const selecting = selected.length > 0
+    // 多选状态下每一行都露出勾选框：一眼能看出选了哪几首
+    element.classList.toggle('is-selecting', selecting)
     for (const node of rendered.values()) {
-      node.classList.toggle('is-selected', selection.has(node.dataset.id))
+      const checked = selection.has(node.dataset.id)
+      node.classList.toggle('is-selected', checked)
+      if (node.__check) {
+        node.__check.classList.toggle('is-checked', checked)
+        node.__check.setAttribute('aria-checked', checked ? 'true' : 'false')
+      }
     }
-    paintSelectionBar(selected.length)
+    const selectedInList = tracks.filter((track) => selection.has(track.id)).length
+    const all = tracks.length > 0 && selectedInList >= tracks.length
+    headCheck.classList.toggle('is-checked', all)
+    headCheck.classList.toggle('is-partial', selectedInList > 0 && !all)
+    headCheck.setAttribute('aria-checked', all ? 'true' : selectedInList > 0 ? 'mixed' : 'false')
+    paintSelectionBar(selectedInList)
   }
 
   function paintSelectionBar (count) {
     // 单选不弹工具条：普通单击总会有选中项，弹出来只会挡住列表；
-    // 这些批量动作的意义在「多首」时才成立（单首走右键菜单）
+    // 这些批量动作的意义在「多首」时才成立（单首走右键菜单或勾选框）
     selectionBar.hidden = count < 2
     if (count < 2) return
     const total = tracks.length

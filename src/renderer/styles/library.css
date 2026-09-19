@@ -3,6 +3,7 @@
    ========================================================================== */
 
 .tracklist {
+  --col-check: 30px;
   --col-index: 46px;
   --col-album: minmax(120px, 1fr);
   --col-duration: 68px;
@@ -14,16 +15,86 @@
 
 .tracklist__head {
   display: grid;
-  grid-template-columns: var(--col-index) minmax(200px, 2.2fr) var(--col-album) var(--col-duration);
+  grid-template-columns: var(--col-check) var(--col-index) minmax(200px, 2.2fr) var(--col-album) var(--col-duration);
   align-items: center;
   gap: 12px;
   height: 30px;
-  padding: 0 20px;
+  padding: 0 20px 0 8px;
   font-size: var(--text-footnote);
   font-weight: 500;
   color: var(--label-3);
   border-bottom: 0.5px solid var(--separator);
   flex: none;
+}
+
+/* ------------------------------ 复选框 ------------------------------ */
+/*
+ * 勾选框平时藏起来（列表上铺满空框太吵），两种情况出现：
+ *   · 鼠标悬停到那一行 —— 这样能「点着框」开始多选；
+ *   · 列表进入多选状态（.is-selecting）—— 从此每一行都显示勾选框，
+ *     选中的打勾、没选的空着，一眼能看出选了哪几首。
+ */
+.track-row__check,
+.tracklist__check {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-2xs);
+  border: 1.5px solid var(--label-4);
+  color: transparent;
+  background: transparent;
+  transition:
+    background var(--dur-fast) var(--ease-ios),
+    border-color var(--dur-fast) var(--ease-ios),
+    color var(--dur-fast) var(--ease-ios);
+}
+
+.track-row__check .icon,
+.tracklist__check .icon {
+  width: 11px;
+  height: 11px;
+  stroke-width: 3;
+}
+
+.track-row__check {
+  opacity: 0;
+}
+
+.track-row:hover .track-row__check,
+.tracklist.is-selecting .track-row__check {
+  opacity: 1;
+}
+
+.track-row__check:hover,
+.tracklist__check:hover {
+  border-color: var(--label-2);
+}
+
+.track-row__check.is-checked,
+.tracklist__check.is-checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-label);
+}
+
+/* 部分选中：中间一条短横，和「全选」的勾区分开 */
+.tracklist__check.is-partial {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-label);
+}
+
+.tracklist__check.is-partial .icon {
+  display: none;
+}
+
+.tracklist__check.is-partial::after {
+  content: '';
+  width: 8px;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-label);
 }
 
 .tracklist__sort {
@@ -125,10 +196,10 @@
   right: 0;
   height: var(--row-h);
   display: grid;
-  grid-template-columns: var(--col-index) minmax(200px, 2.2fr) var(--col-album) var(--col-duration);
+  grid-template-columns: var(--col-check) var(--col-index) minmax(200px, 2.2fr) var(--col-album) var(--col-duration);
   align-items: center;
   gap: 12px;
-  padding: 0 20px;
+  padding: 0 20px 0 8px;
   border-radius: 0;
   contain: layout style;
   transition:

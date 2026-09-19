@@ -240,7 +240,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     scroll.appendChild(group('播放', [
       row({
         title: '单击歌曲直接播放',
-        sub: '打开后，单击列表里的歌曲就直接播放（默认需要双击，单击只选中）。这个设置对歌曲列表、专辑详情、艺人详情都生效',
+        sub: '打开后，单击列表里的歌曲就直接播放（默认需要双击，单击只选中）。这个设置对歌曲列表、专辑详情、艺人详情都生效；多选请用行首的勾选框或 Ctrl / Shift 点击',
         control: switchControl(settings.playOnSingleClick === true,
           (value) => actions.setSetting({ playOnSingleClick: value }))
       }),
