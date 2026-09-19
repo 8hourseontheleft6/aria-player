@@ -1813,6 +1813,85 @@ async function runSmoke ({ win, ctx }) {
       themeLifts.every((item) => item.islandActive === true && item.islandWidth > 100),
       themeLifts.map((item) => `${item.theme}：data-theme=${item.theme}，translateY=${rowLift(item.transform)}px，阴影=${item.boxShadow !== 'none' ? '有' : '无'}，灵动岛 ${item.islandWidth}px`).join('；'))
 
+    /* ---------- 最小宽度下灵动岛不挤到两侧 ---------- */
+    // 窗口最小宽度是 940（main/window.js 的 minWidth）。最挤的时刻是：
+    // 正在扫描（右侧多出一颗进度胶囊）+ 鼠标指着灵动岛（展开到最宽）。
+    // 这里把窗口拉到最小，并让扫描提示按最长的文案显示，量三个盒子的边界。
+    const boundsBefore = win.getBounds()
+    // getBounds 是窗口外框，innerWidth 是内容区，两者在 frameless 窗口下也可能差几个
+    // 像素（缩放取整）。要断言"还原成功"就得比同一个量：都用内容区宽度。
+    const viewportBefore = await evaluate(win, 'return window.innerWidth')
+    const [minWidth, minHeight] = win.getMinimumSize()
+    win.setSize(minWidth, Math.min(boundsBefore.height, minHeight))
+    await sleep(800)
+    const narrowBase = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('songs')
+      await new Promise((r) => setTimeout(r, 500))
+      const island = document.querySelector('.island')
+      const scan = document.querySelector('.titlebar__scan')
+      const label = scan ? scan.querySelector('span') : null
+      // 扫描提示平时是隐藏的（.hidden → display:none）。这里直接把它显示出来并
+      // 填一段最长文案，量的才是"最挤的时候"，而不是"什么都不显示的时候"
+      if (scan && label) {
+        scan.classList.remove('hidden')
+        label.textContent = '正在扫描 128/807'
+      }
+      await new Promise((r) => setTimeout(r, 300))
+      const box = (node) => {
+        const r = node.getBoundingClientRect()
+        return { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) }
+      }
+      return {
+        viewport: window.innerWidth,
+        island: box(island),
+        left: box(document.querySelector('.titlebar__left')),
+        right: box(document.querySelector('.titlebar__right')),
+        scanShown: scan ? !scan.classList.contains('hidden') : false,
+        compact: island.classList.contains('island--compact')
+      }
+    `)
+    const islandCenterX = Math.round((narrowBase.island.left + narrowBase.island.right) / 2)
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: islandCenterX, y: 20 })
+    await sleep(900)
+    const narrowHovered = await evaluate(win, `
+      const island = document.querySelector('.island')
+      const r = island.getBoundingClientRect()
+      const box = (node) => {
+        const b = node.getBoundingClientRect()
+        return { left: Math.round(b.left), right: Math.round(b.right), width: Math.round(b.width) }
+      }
+      return {
+        hovered: island.matches(':hover'),
+        island: { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) },
+        labels: [...island.querySelectorAll('.island__label')].filter((n) => n.getBoundingClientRect().width > 4).length,
+        left: box(document.querySelector('.titlebar__left')),
+        right: box(document.querySelector('.titlebar__right'))
+      }
+    `)
+    // 还原：重新藏起扫描提示 + 恢复窗口尺寸
+    await evaluate(win, `
+      const scan = document.querySelector('.titlebar__scan')
+      if (scan) scan.classList.add('hidden')
+      return true
+    `)
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 620 })
+    win.setSize(boundsBefore.width, boundsBefore.height)
+    await sleep(700)
+    const restoredViewport = await evaluate(win, 'return window.innerWidth')
+    record('窄窗口（最小宽度）：灵动岛既不压侧栏按钮，也不压扫描与窗口按钮',
+      Math.abs(narrowBase.viewport - minWidth) <= 5 &&
+      narrowBase.scanShown === true &&
+      narrowHovered.hovered === true &&
+      narrowHovered.island.left > narrowHovered.left.right &&
+      narrowHovered.island.right < narrowHovered.right.left &&
+      // 还原后内容区宽度会有 1~3px 的取整差（窗口尺寸是物理像素，内容宽度是
+      // 分数再取整），所以比的是"回到同一档"，不是逐像素相等
+      Math.abs(restoredViewport - viewportBefore) <= 4,
+      `宽度 ${narrowBase.viewport}px（窗口最小宽度 ${minWidth}px）：左侧簇到 ${narrowBase.left.right}px，右侧簇从 ${narrowHovered.right.left}px 起（宽 ${narrowHovered.right.width}px）；` +
+      `灵动岛 ${narrowHovered.island.left}~${narrowHovered.island.right}px（宽 ${narrowHovered.island.width}px，展开可见标签 ${narrowHovered.labels}/4，紧凑模式=${narrowBase.compact}）；` +
+      `两侧余量 ${narrowHovered.island.left - narrowHovered.left.right}px / ${narrowHovered.right.left - narrowHovered.island.right}px；窗口已还原 ${restoredViewport}px（原 ${viewportBefore}px）`)
+
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria
       actions.openNowPlaying({ lyrics: true })
