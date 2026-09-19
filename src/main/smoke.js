@@ -1242,6 +1242,7 @@ async function runSmoke ({ win, ctx }) {
             kind: installed.kind,
             error: null,
             lxSources: described?.lxSources || [],
+            lxEvents: described?.lxEvents || [],
             capabilities: described?.capabilities || null
           })
         } catch (err) {
@@ -1263,8 +1264,9 @@ async function runSmoke ({ win, ctx }) {
         ? '仓库根目录里没有 LX 音源文件，跳过（放进 music-sources 目录或从设置里导入即可）'
         : userSourceIds.map((item) => item.error
           ? `${item.file} → 失败：${item.error}`
-          : `${item.file} → ${item.kind}（声明 ${item.lxSources.map((sub) => sub.name).join('/') || '—'}；` +
-            `搜索=${item.capabilities?.search}、解析=${item.capabilities?.resolveUrl}）`).join('；'))
+          : `${item.file} → ${item.kind}｜订阅事件 ${JSON.stringify(item.lxEvents)}｜` +
+            `声明音源 ${item.lxSources.map((sub) => `${sub.name}:${JSON.stringify(sub.actions || [])}`).join('、') || '—'}｜` +
+            `搜索=${item.capabilities?.search} 解析=${item.capabilities?.resolveUrl}`).join('；'))
 
 
     const uiResult = await evaluate(win, `

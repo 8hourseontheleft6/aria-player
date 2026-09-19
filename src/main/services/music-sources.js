@@ -63,6 +63,8 @@ const USER_AGENT = 'Aria/0.0.0-dev (local music player)'
 const SEARCH_TIMEOUT = 15000
 const RESOLVE_TIMEOUT = 20000
 const SOURCE_LOAD_TIMEOUT = 4000
+/** LX 脚本可能在初始化时先请求自己的接口再发 inited，所以要等一会儿 */
+const LX_INIT_WAIT = 4000
 const MAX_RESULTS_PER_SOURCE = 40
 
 /** 文件名 → 稳定的音源 id */
@@ -323,6 +325,8 @@ function createMusicSourcesService (ctx) {
   function describe (entry) {
     const mod = entry.module || {}
     const lxSources = entry.lx ? lxSourcesOf(entry) : []
+    // 脚本通过 on(...) 订阅了哪些事件、每个音源声明了哪些动作 —— 用来判断它到底能干什么
+    const lxEvents = entry.lx?.handlers ? [...entry.lx.handlers.keys()] : []
     return {
       id: entry.id,
       file: path.basename(entry.file),
@@ -335,6 +339,8 @@ function createMusicSourcesService (ctx) {
       error: entry.error || null,
       // 'module' = 本项目接口；'lx' = LX 音乐自定义源（只解析，不搜索）
       kind: mod.search || mod.resolveUrl ? 'module' : 'lx',
+      // 它订阅的事件名（LX 脚本一般只有 request / inited / updateAlert）
+      lxEvents,
       lxSources: lxSources.map((item) => ({
         key: item.key,
         name: item.name,
@@ -390,11 +396,24 @@ function createMusicSourcesService (ctx) {
         const result = evaluate(code, file)
         const isModuleStyle = result.exported &&
           (typeof result.exported.search === 'function' || typeof result.exported.resolveUrl === 'function')
-        // LX 风格：脚本通过 send(inited, …) 声明自己支持的源
+        /*
+         * LX 风格脚本的 inited 可能是**异步**发出来的：有的脚本会先请求自己的接口
+         * 拿配置，再 send(EVENT_NAMES.inited, …)。同步判断会把它们误判成「不符合协议」，
+         * 所以这里等一会儿，最多 LX_INIT_WAIT。
+         */
+        if (!isModuleStyle && !result.lx.inited) {
+          const deadline = Date.now() + LX_INIT_WAIT
+          while (!result.lx.inited && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 60))
+          }
+        }
         const isLxStyle = Boolean(result.lx?.inited)
         if (!isModuleStyle && !isLxStyle) {
-          if (result.lx?.inited === null && (result.lx?.handlers?.get('request')?.length || 0) > 0) {
-            throw new Error('脚本注册了 request 处理器，但没有发送 inited 事件（LX 音源需要在初始化后 send(EVENT_NAMES.inited, …)）')
+          if ((result.lx?.handlers?.get('request')?.length || 0) > 0) {
+            throw new Error(
+              `脚本注册了 request 处理器，但 ${LX_INIT_WAIT}ms 内没有发送 inited 事件` +
+              '（LX 音源需要在初始化完成后 send(EVENT_NAMES.inited, …)；也有可能是它的远端配置接口没连上）'
+            )
           }
           throw new Error('无法识别的音源脚本：既没有导出 { search, resolveUrl }，也不是 LX 音乐的自定义源')
         }
@@ -447,23 +466,34 @@ function createMusicSourcesService (ctx) {
       .slice(0, 60) || `source-${Date.now()}`
     await ensureDir()
     const file = path.join(dir, `${base}.js`)
-    // 先验证能装载再落盘，避免把坏脚本留在目录里
+    /*
+     * 先做一次同步装载校验（抓语法错误、明显不是音源的脚本），
+     * 再落盘并走完整的 load()：LX 脚本的 inited 可能是异步来的，
+     * 这里必须用和正常运行同一套判断，否则会把能用的脚本拒之门外。
+     */
     const result = evaluate(code, file)
-    const isModuleStyle = result.exported &&
+    const looksModule = result.exported &&
       (typeof result.exported.search === 'function' || typeof result.exported.resolveUrl === 'function')
-    const isLxStyle = Boolean(result.lx?.inited)
-    if (!isModuleStyle && !isLxStyle) {
+    const looksLx = Boolean(result.lx?.inited) || (result.lx?.handlers?.get('request')?.length || 0) > 0
+    if (!looksModule && !looksLx) {
       throw new Error(
-        '无法识别的音源脚本：既没有导出 { search, resolveUrl }，也没有按 LX 音乐的规范 ' +
-        '发送 inited 事件（LX 音源需要在初始化后 send(EVENT_NAMES.inited, …)）'
+        '无法识别的音源脚本：既没有导出 { search, resolveUrl }，也没有按 LX 音乐的规范注册 request 处理器'
       )
     }
     await fsp.writeFile(file, code, 'utf8')
+    const id = toId(`${base}.js`)
     await load()
+    const entry = loaded.get(id)
+    if (!entry || entry.error) {
+      // 完整装载失败就把文件撤掉，别在目录里留一个坏脚本
+      await fsp.rm(file, { force: true }).catch(() => {})
+      loaded.delete(id)
+      throw new Error(entry?.error || '装载失败')
+    }
     return {
-      id: toId(`${base}.js`),
-      kind: isLxStyle && !isModuleStyle ? 'lx' : 'module',
-      name: String(result.exported?.name || result.lx?.inited?.name || base)
+      id,
+      kind: entry.module ? 'module' : 'lx',
+      name: describe(entry).name
     }
   }
 

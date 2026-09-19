@@ -694,7 +694,7 @@ async function main () {
   store.select((state) => `${state.playback.trackId}|${state.playback.status}|${state.playback.duration}`,
     () => {
       if (pendingLyricSeek) flushPendingLyricSeek()
-    })
+    }, { immediate: false })
 
   /* ------------------------------------------------------------------ */
   /* 资料库                                                              */
