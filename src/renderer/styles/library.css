@@ -82,6 +82,11 @@
   padding: 0 20px;
   border-radius: 0;
   contain: layout style;
+  transition:
+    transform var(--dur-fast) var(--ease-ios),
+    box-shadow var(--dur-fast) var(--ease-ios),
+    border-radius var(--dur-fast) var(--ease-ios),
+    background var(--dur-fast) var(--ease-ios);
 }
 
 .track-row::after {
@@ -94,8 +99,25 @@
   background: var(--separator);
 }
 
+/* 悬停：整行轻轻浮起并抬起阴影，像 iOS 里被按住的列表行 */
 .track-row:hover {
   background: var(--bg-hover);
+  transform: translateY(var(--lift));
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elev-1);
+  z-index: 2;
+}
+
+/* 浮起来的那一行不要自己的分隔线，否则线会跟着飘 */
+.track-row:hover::after {
+  opacity: 0;
+}
+
+/* 减少动画：保留原有的底色反馈，但不要位移和阴影 */
+html[data-reduce-motion='true'] .track-row:hover {
+  transform: none;
+  box-shadow: none;
+  border-radius: 0;
 }
 
 .track-row.is-current {
@@ -112,8 +134,7 @@
   color: color-mix(in srgb, var(--accent) 72%, transparent);
 }
 
-.track-row.is-current::after,
-.track-row:hover::after {
+.track-row.is-current:not(:hover)::after {
   opacity: 0.4;
 }
 
@@ -168,7 +189,7 @@
   display: grid;
   place-items: center;
   color: var(--label-4);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--elev-1);
 }
 
 .track-row__art img {
@@ -213,7 +234,7 @@
   gap: 3px;
   height: 15px;
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-2xs);
   background: var(--fill-quaternary);
   color: var(--label-3);
   font-size: 10px;
@@ -270,7 +291,7 @@
 
 /* 命中关键词的高亮：不悬停时完全不留痕，悬停才亮起来 */
 .hl {
-  border-radius: 3px;
+  border-radius: var(--radius-2xs);
   transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
 }
 
@@ -434,14 +455,24 @@
   gap: 10px;
   padding: 7px 12px;
   border-top: 0.5px solid var(--separator);
+  border-radius: var(--radius-sm);
+  transition: transform var(--dur-fast) var(--ease-ios), box-shadow var(--dur-fast) var(--ease-ios);
 }
 
 .online-result:first-child {
   border-top: none;
 }
 
+/* 与歌曲行同一种悬停语言：整条浮起 */
 .online-result:hover {
   background: var(--bg-hover);
+  transform: translateY(var(--lift));
+  box-shadow: var(--elev-1);
+}
+
+html[data-reduce-motion='true'] .online-result:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .online-result__main {
@@ -566,7 +597,7 @@
   backdrop-filter: blur(var(--blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   border-left: 0.5px solid var(--separator);
-  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--elev-3);
   animation: queue-in var(--dur) var(--ease-ios);
 }
 

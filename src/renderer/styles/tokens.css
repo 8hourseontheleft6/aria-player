@@ -12,6 +12,7 @@
     "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display",
     "PingFang SC", "Microsoft YaHei UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", "Menlo", monospace;
 
   /* iOS 字号阶梯 */
   --text-large-title: 34px;
@@ -26,6 +27,7 @@
   --text-caption: 11px;
 
   /* ---- 圆角（连续圆角的近似） ---- */
+  --radius-2xs: 4px;
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;
@@ -48,6 +50,33 @@
   --playerbar-h: 78px;
   --row-h: 54px;
   --blur: 34px;
+  /* 封面网格的最小列宽；媒体墙的 --wall-size / --wall-columns 由 JS 按设置写入 */
+  --cover-min: 152px;
+
+  /* ------------------------------------------------------------------
+   * 间距与高度层级 —— 全项目统一的第二把尺子。
+   *
+   * 规则（详见 docs/DESIGN.md）：
+   *   · 间距只用 --space-*，圆角只用 --radius-*，不要再写裸 px；
+   *   · 组件阴影一律用 --elev-*，不要再写裸 box-shadow ——
+   *     亮/暗两套主题各维护一份（见下面两个主题块），写裸值等于只把
+   *     当前主题调好；
+   *   · 数值越大越「浮」：1 = 贴住内容（行悬停、缩略图），2 = 浮在内容
+   *     之上（悬浮控件），3 = 浮在整个界面之上（弹层、队列）。
+   *
+   * 和主题无关的令牌放 :root，只有真正随主题变的值才放进主题块 ——
+   * 放错地方的下场是「亮色下这个属性静默失效」，check:styles 会拦。
+   * ------------------------------------------------------------------ */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  /* 悬停时整行浮起的距离；「减少动画」打开时会被 CSS 显式置零 */
+  --lift: -1.5px;
+  /* 键盘焦点环；内部引用主题色，所以放在 :root 也能跟着主题走 */
+  --focus-ring: 0 0 0 3px var(--accent-soft);
 
   /* ---- 动态色调（由封面取色写入） ---- */
   --tint: #0a84ff;
@@ -89,9 +118,14 @@ html[data-theme="dark"] {
   --success: #30d158;
   --warning: #ff9f0a;
 
-  --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  /* 旧名字保留成别名，语义不变：拇指阴影 = 贴住内容，浮层阴影 = 最高一级 */
+  --shadow-popover: var(--elev-3);
   --shadow-artwork: 0 34px 64px -16px rgba(0, 0, 0, 0.8), 0 10px 28px rgba(0, 0, 0, 0.5);
-  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, 0.4);
+  --shadow-thumb: var(--elev-1);
+
+  --elev-1: 0 1px 3px rgba(0, 0, 0, 0.22), 0 1px 1px rgba(0, 0, 0, 0.12);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.36), 0 2px 8px rgba(0, 0, 0, 0.22);
 
   --scrollbar-thumb: rgba(255, 255, 255, 0.20);
 }
@@ -130,9 +164,14 @@ html[data-theme="light"] {
   --success: #34c759;
   --warning: #ff9500;
 
-  --shadow-popover: 0 16px 40px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-popover: var(--elev-3);
   --shadow-artwork: 0 30px 56px -18px rgba(0, 0, 0, 0.45), 0 8px 22px rgba(0, 0, 0, 0.16);
-  --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.22);
+  --shadow-thumb: var(--elev-1);
+
+  /* 亮色下的高度层级（暗色的那份在上面，两套必须成对维护） */
+  --elev-1: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 1px rgba(0, 0, 0, 0.06);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --elev-3: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.1);
 
   --scrollbar-thumb: rgba(0, 0, 0, 0.2);
 }

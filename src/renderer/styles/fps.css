@@ -12,7 +12,7 @@
   align-items: baseline;
   gap: 8px;
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 0.5px solid var(--separator);
   background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
   backdrop-filter: blur(12px) saturate(140%);

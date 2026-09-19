@@ -44,12 +44,15 @@ function hueLetter (h) {
   return 'M'
 }
 
-function preview (file, cols = 100) {
-  const image = nativeImage.createFromPath(file)
-  if (image.isEmpty()) {
+function preview (file, cols = 100, crop = null) {
+  const source = nativeImage.createFromPath(file)
+  if (source.isEmpty()) {
     console.error(`无法读取图片: ${file}`)
     return
   }
+  // 局部放大用：整图缩到几十列时，标题栏里一颗 170px 的胶囊只剩 8 个字符，
+  // 什么都看不出来。给一个裁切参数就能盯着局部看。
+  const image = crop ? source.crop(crop) : source
   const { width, height } = image.getSize()
   const bitmap = image.toBitmap()
   const step = 4
@@ -132,11 +135,22 @@ function preview (file, cols = 100) {
 app.whenReady().then(() => {
   const file = process.argv[2]
   const cols = Number(process.argv[3] || 100)
+  const cropArg = process.argv[4]
   if (!file) {
-    console.error('用法: npx electron scripts/preview.js <png> [列数]')
+    console.error('用法: npx electron scripts/preview.js <png> [列数] [x,y,w,h]')
     app.exit(1)
     return
   }
-  preview(path.resolve(file), cols)
+  let crop = null
+  if (cropArg) {
+    const parts = cropArg.split(',').map((value) => Number(value.trim()))
+    if (parts.length !== 4 || parts.some((value) => !Number.isFinite(value))) {
+      console.error('裁切参数格式应为 x,y,w,h（单位：图片像素，可用脚本输出的图片尺寸换算）')
+      app.exit(1)
+      return
+    }
+    crop = { x: parts[0], y: parts[1], width: parts[2], height: parts[3] }
+  }
+  preview(path.resolve(file), cols, crop)
   app.exit(0)
 })

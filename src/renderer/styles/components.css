@@ -165,7 +165,7 @@
   position: relative;
   display: inline-flex;
   padding: 2px;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--fill-quaternary);
   gap: 2px;
 }
@@ -174,9 +174,9 @@
   position: absolute;
   top: 2px;
   bottom: 2px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--bg-elevated);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--elev-1);
   transition: transform var(--dur) var(--ease-ios), width var(--dur) var(--ease-ios);
   pointer-events: none;
   z-index: 0;
@@ -191,7 +191,7 @@
   gap: 5px;
   height: 26px;
   padding: 0 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   font-size: var(--text-subhead);
   font-weight: 500;
   color: var(--label-2);
@@ -371,7 +371,7 @@
 
 .search:focus-within {
   background: var(--bg-elevated);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
   color: var(--label-2);
 }
 
@@ -861,7 +861,7 @@ button.popover__row:hover {
 .bars span {
   flex: 1;
   background: var(--accent);
-  border-radius: 1px;
+  border-radius: var(--radius-2xs);
   animation: bars 900ms var(--ease-ios) infinite alternate;
 }
 

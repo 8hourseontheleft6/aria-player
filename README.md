@@ -80,19 +80,25 @@ npm run dev      # 启动并打开开发者工具
 这几个脚本都是无人值守的，退出码可直接用于 CI：
 
 ```bash
-npm run smoke            # 完整链路自检（117 项：资料库→播放→seek→变速→队列→模式→歌词→搜索→音源→协议→界面→浏览→系统集成→监听→在线补全）
+npm run smoke            # 完整链路自检（资料库→播放→seek→变速→队列→模式→歌词→搜索→音源→协议→界面→浏览→系统集成→监听→在线补全）
 npm run perf             # 帧率诊断：逐视图量 rAF 间隔 + 拖动路径 A/B 对照（见「性能」一节）
 npm run audit            # 视觉审计：计算样式 / 几何 / 截图位图统计，输出 docs/screenshots/audit.json
 npm run shots            # 生成 docs/screenshots/ 下的界面截图
 npm run probe -- "D:\Music" 20   # 命令行探针：直接验证元数据与歌词解析（不启动 Electron）
 node scripts/probe-lyrics.js "D:\Music" 3
                          # 歌词探针：打印双语歌词的解析结果（主歌词 / 翻译 / 迷你歌词各显示什么）
+npm run check            # 一次跑完下面三条静态检查
 node scripts/check-imports.js    # 找出未使用的 import
 node scripts/check-injected.js   # 校验 smoke 里注入到渲染层的代码片段能否解析
                                  # （注入代码写在模板字符串里，多一个括号很难肉眼发现）
+node scripts/check-styles.js     # 设计语言守卫：圆角/阴影是否走令牌、var() 是否有定义、
+                                 # 亮暗两套主题的令牌是否成对（见 docs/DESIGN.md）
 npx electron scripts/preview.js docs/screenshots/01-library.png 104
                          # 把截图转成文本预览（结构图 + 色相图），无图形界面时也能审版面
 ```
+
+界面改动请先读 **[docs/DESIGN.md](docs/DESIGN.md)** —— 间距/圆角/阴影/动效的规则
+与例外都在那里，能自动检查的部分由 `check-styles` 兜住。
 
 ## 性能
 

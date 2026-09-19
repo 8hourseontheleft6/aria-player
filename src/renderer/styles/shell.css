@@ -69,6 +69,109 @@ html[data-platform="darwin"] .titlebar {
   letter-spacing: 0.01em;
 }
 
+/* ---------------------------- 灵动岛 ---------------------------- */
+/* 悬浮在标题栏正中的视图切换器：收起时只显示当前页签的文字，鼠标移上去
+   展开全部文字。绝对定位，所以不参与标题栏的 flex 排布（左右两侧多宽都
+   不会把它挤歪）。 */
+
+.island {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-quaternary);
+  box-shadow: var(--elev-2);
+  -webkit-backdrop-filter: blur(var(--blur));
+  backdrop-filter: blur(var(--blur));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease-ios);
+}
+
+/* 当前视图不属于这四个之一（如设置页）时整条隐藏 */
+.island.has-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.island__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  height: calc(100% - 6px);
+  border-radius: var(--radius-pill);
+  background: var(--fill-tertiary);
+  box-shadow: var(--elev-1);
+  transition:
+    transform var(--dur) var(--ease-ios),
+    width var(--dur) var(--ease-ios);
+  pointer-events: none;
+}
+
+.island__item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--label-2);
+  font: inherit;
+  font-size: var(--text-footnote);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-ios);
+}
+
+.island__item:hover {
+  color: var(--label);
+}
+
+.island__item.is-active {
+  color: var(--label);
+  font-weight: 600;
+}
+
+.island__item .icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* 收起态：只剩当前项的文字，宽度靠 max-width 过渡（写 max-width 而不是
+   display，才能有连贯的展开动画） */
+.island__label {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    max-width var(--dur) var(--ease-ios),
+    opacity var(--dur-fast) var(--ease-ios),
+    margin-left var(--dur) var(--ease-ios);
+  margin-left: -5px;
+}
+
+.island__item.is-active .island__label,
+.island:hover .island__label,
+.island:focus-within .island__label {
+  max-width: 64px;
+  opacity: 1;
+  margin-left: 0;
+}
+
+.island__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .titlebar__scan {
   display: flex;
   align-items: center;
@@ -142,12 +245,18 @@ html[data-platform="darwin"] .titlebar {
   backdrop-filter: blur(var(--blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   border-right: 0.5px solid var(--separator);
-  transition: opacity var(--dur) var(--ease-ios);
+  transition:
+    opacity var(--dur) var(--ease-ios),
+    transform var(--dur) var(--ease-ios);
 }
 
+/* 收起：整列宽度归零（.app 的 grid 动画）+ 内容向左淡出，像 iOS 侧栏滑出 */
 .app.is-sidebar-hidden .sidebar {
   opacity: 0;
   pointer-events: none;
+  transform: translateX(-16px);
+  /* 边框会占住 1px，收起了就不能再留一条竖线 */
+  border-right-color: transparent;
 }
 
 .sidebar__scroll {
@@ -234,7 +343,7 @@ html[data-platform="darwin"] .titlebar {
   opacity: 0;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius-2xs);
   display: grid;
   place-items: center;
   color: var(--label-3);

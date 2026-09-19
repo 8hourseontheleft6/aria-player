@@ -12,6 +12,10 @@ Aria 刻意把「能力」和「界面」分开，并在两处留了扩展缝：
 
 ## 一、渲染层插件
 
+> 插件如果要画界面：颜色、间距、圆角、阴影、动效一律用 `tokens.css` 里的
+> 令牌，别写裸值 —— 规则和例外见 **[DESIGN.md](DESIGN.md)**，`npm run check:styles`
+> 会检查令牌是否用对、亮暗两套是否成对。
+
 ### 1. 写一个插件
 
 新建 `src/renderer/js/plugins/my-plugin.js`：

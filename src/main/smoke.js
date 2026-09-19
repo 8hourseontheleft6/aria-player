@@ -21,6 +21,18 @@ const POLL_INTERVAL = 250
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * 从 computed transform 里取出 translateY（像素）。
+ * 行在列表里是靠 top 定位的，滚动或自动定位都会让 rect.top 漂移，
+ * 所以断言要用矩阵里的位移，而不是两次 rect.top 之差。
+ */
+function rowLift (transform) {
+  const match = /matrix\(([^)]+)\)/.exec(String(transform))
+  if (!match) return NaN
+  const parts = match[1].split(',').map((value) => Number(value.trim()))
+  return parts.length >= 6 ? parts[5] : NaN
+}
+
 async function evaluate (win, expression) {
   const result = win.webContents.executeJavaScript(`(async () => { ${expression} })()`, true)
   // executeJavaScript 在页面卡死时可能永不 settle，加一层超时保护。
@@ -1532,6 +1544,274 @@ async function runSmoke ({ win, ctx }) {
       uiPrefsCheck.cardShownAfterClick === true,
       `分组存在=${uiPrefsCheck.hasSourcesGroup}，默认收起=${uiPrefsCheck.collapsedInitially}（卡片隐藏=${uiPrefsCheck.cardHiddenInitially}）；` +
       `点标题后展开=${uiPrefsCheck.expandedAfterClick}（卡片可见=${uiPrefsCheck.cardShownAfterClick}）`)
+
+    /* ---------- 灵动岛 / 侧边栏收起 / 行悬停浮起 ---------- */
+    // 悬停相关的样式（:hover）不能靠 dispatchEvent 触发 —— 合成事件不会更新
+    // Blink 的 hover 状态。这里用 sendInputEvent 走真实输入管线。
+    const islandBase = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('songs')
+      await new Promise((r) => setTimeout(r, 800))
+      const island = document.querySelector('.island')
+      if (!island) return { missing: true }
+      const rect = island.getBoundingClientRect()
+      const items = [...island.querySelectorAll('.island__item')]
+      const labels = [...island.querySelectorAll('.island__label')]
+      const activeItem = items.find((node) => node.classList.contains('is-active'))
+      const titlebar = document.querySelector('.titlebar').getBoundingClientRect()
+      return {
+        missing: false,
+        itemCount: items.length,
+        activeKey: activeItem ? activeItem.dataset.view : null,
+        collapsedWidth: Math.round(rect.width),
+        visibleLabels: labels.filter((node) => node.getBoundingClientRect().width > 4).length,
+        // 居中：岛中心与标题栏中心的偏差
+        centerOffset: Math.round((rect.left + rect.width / 2) - (titlebar.left + titlebar.width / 2)),
+        center: { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) },
+        thumbLeft: Math.round(island.querySelector('.island__thumb').getBoundingClientRect().left)
+      }
+    `)
+
+    win.webContents.sendInputEvent({
+      type: 'mouseMove',
+      x: islandBase.center ? islandBase.center.x : 400,
+      y: islandBase.center ? islandBase.center.y : 20
+    })
+    await sleep(900)
+    const islandHover = await evaluate(win, `
+      const island = document.querySelector('.island')
+      const rect = island.getBoundingClientRect()
+      const labels = [...island.querySelectorAll('.island__label')]
+      return {
+        hoveredWidth: Math.round(rect.width),
+        visibleLabels: labels.filter((node) => node.getBoundingClientRect().width > 4).length,
+        hovered: island.matches(':hover')
+      }
+    `)
+    // 移开指针，别把悬停状态带进后面的检查
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 420 })
+    await sleep(700)
+    const islandClick = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 320) => { await new Promise((r) => setTimeout(r, ms)) }
+      const island = document.querySelector('.island')
+      const thumb = island.querySelector('.island__thumb')
+      const items = [...island.querySelectorAll('.island__item')]
+      const beforeLeft = Math.round(thumb.getBoundingClientRect().left)
+      const albumItem = items.find((node) => node.dataset.view === 'albums')
+      const rect = albumItem.getBoundingClientRect()
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        albumItem.dispatchEvent(new MouseEvent(type, {
+          bubbles: true, cancelable: true,
+          clientX: Math.round(rect.left + rect.width / 2),
+          clientY: Math.round(rect.top + rect.height / 2),
+          button: 0, buttons: type.includes('down') ? 1 : 0
+        }))
+      }
+      await settle(700)
+      const viewAfter = store.get().ui.view
+      const activeAfter = (items.find((node) => node.classList.contains('is-active')) || {}).dataset
+      const afterLeft = Math.round(thumb.getBoundingClientRect().left)
+      // 设置页不属于这四段，整条应该淡出
+      actions.setView('settings')
+      await settle(600)
+      const hiddenOnSettings = !island.classList.contains('has-active') &&
+        getComputedStyle(island).opacity === '0'
+      actions.setView('songs')
+      await settle(500)
+      return { beforeLeft, afterLeft, viewAfter, activeAfter: activeAfter ? activeAfter.view : null, hiddenOnSettings }
+    `)
+    record('顶栏灵动岛：切换视图 + 悬停展开',
+      !islandBase.missing &&
+      islandBase.itemCount === 4 &&
+      islandBase.activeKey === 'songs' &&
+      islandBase.visibleLabels === 1 &&
+      Math.abs(islandBase.centerOffset) <= 2 &&
+      islandHover.hovered === true &&
+      islandHover.visibleLabels === 4 &&
+      islandHover.hoveredWidth > islandBase.collapsedWidth + 40 &&
+      islandClick.viewAfter === 'albums' &&
+      islandClick.activeAfter === 'albums' &&
+      islandClick.afterLeft > islandClick.beforeLeft &&
+      islandClick.hiddenOnSettings === true,
+      `收起时宽 ${islandBase.collapsedWidth}px、只显示当前项文字（可见标签 ${islandBase.visibleLabels}/4），与标题栏中心偏差 ${islandBase.centerOffset}px；` +
+      `悬停后 ${islandHover.hoveredWidth}px、标签 ${islandHover.visibleLabels}/4（:hover=${islandHover.hovered}）；` +
+      `点「专辑」→ 视图 ${islandClick.viewAfter}，高亮 ${islandClick.activeAfter}，滑块 ${islandClick.beforeLeft}→${islandClick.afterLeft}px；` +
+      `设置页整条淡出=${islandClick.hiddenOnSettings}`)
+
+    const sidebarInfo = await evaluate(win, `
+      const { store } = window.__aria
+      const settle = async (ms = 320) => { await new Promise((r) => setTimeout(r, ms)) }
+      const app = document.getElementById('app')
+      const sidebar = document.querySelector('.sidebar')
+      const toggle = document.querySelector('.titlebar__left .btn--icon')
+      const wideRect = sidebar.getBoundingClientRect()
+      const toggleRect = toggle.getBoundingClientRect()
+      const before = {
+        hidden: app.classList.contains('is-sidebar-hidden'),
+        width: Math.round(wideRect.width)
+      }
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        toggle.dispatchEvent(new MouseEvent(type, {
+          bubbles: true, cancelable: true,
+          clientX: Math.round(toggleRect.left + toggleRect.width / 2),
+          clientY: Math.round(toggleRect.top + toggleRect.height / 2),
+          button: 0, buttons: type.includes('down') ? 1 : 0
+        }))
+      }
+      await settle(800)
+      const hiddenRect = sidebar.getBoundingClientRect()
+      const hit = document.elementFromPoint(
+        Math.round(wideRect.left + wideRect.width / 2),
+        Math.round(wideRect.top + wideRect.height / 2)
+      )
+      const hidden = {
+        flag: app.classList.contains('is-sidebar-hidden'),
+        width: Math.round(hiddenRect.width),
+        opacity: getComputedStyle(sidebar).opacity,
+        borderRight: getComputedStyle(sidebar).borderRightColor,
+        columns: getComputedStyle(app).gridTemplateColumns,
+        hitInsideSidebar: Boolean(hit && hit.closest('.sidebar'))
+      }
+      // 再切回来
+      toggle.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      await settle(800)
+      const restored = {
+        flag: app.classList.contains('is-sidebar-hidden'),
+        width: Math.round(sidebar.getBoundingClientRect().width)
+      }
+      return { before, hidden, restored, visibleInStore: store.get().ui.sidebarVisible }
+    `)
+    record('侧边栏：Ctrl+B / 按钮收起后真的消失，可再切回',
+      sidebarInfo.before.hidden === false &&
+      sidebarInfo.before.width > 200 &&
+      sidebarInfo.hidden.flag === true &&
+      sidebarInfo.hidden.width <= 1 &&
+      sidebarInfo.hidden.opacity === '0' &&
+      sidebarInfo.hidden.borderRight === 'rgba(0, 0, 0, 0)' &&
+      sidebarInfo.hidden.hitInsideSidebar === false &&
+      sidebarInfo.restored.flag === false &&
+      sidebarInfo.restored.width > 200,
+      `收起前宽 ${sidebarInfo.before.width}px；收起后 ${sidebarInfo.hidden.width}px、opacity ${sidebarInfo.hidden.opacity}、` +
+      `边框 ${sidebarInfo.hidden.borderRight}、列宽「${sidebarInfo.hidden.columns}」、该处命中侧栏=${sidebarInfo.hidden.hitInsideSidebar}；` +
+      `再点一次恢复 ${sidebarInfo.restored.width}px`)
+
+    const rowHoverTarget = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('songs')
+      actions.setQuery('')
+      await new Promise((r) => setTimeout(r, 700))
+      const row = document.querySelectorAll('.track-row')[2]
+      if (!row) return { missing: true }
+      const rect = row.getBoundingClientRect()
+      return {
+        missing: false,
+        center: { x: Math.round(rect.left + rect.width * 0.4), y: Math.round(rect.top + rect.height / 2) },
+        top: Math.round(rect.top * 100) / 100
+      }
+    `)
+    win.webContents.sendInputEvent({
+      type: 'mouseMove',
+      x: rowHoverTarget.center ? rowHoverTarget.center.x : 400,
+      y: rowHoverTarget.center ? rowHoverTarget.center.y : 300
+    })
+    await sleep(700)
+    const rowHovered = await evaluate(win, `
+      const row = document.querySelector('.track-row:hover')
+      if (!row) return { missing: true }
+      const style = getComputedStyle(row)
+      return {
+        missing: false,
+        top: Math.round(row.getBoundingClientRect().top * 100) / 100,
+        transform: style.transform,
+        boxShadow: style.boxShadow,
+        separatorHidden: getComputedStyle(row, '::after').opacity === '0'
+      }
+    `)
+    // 打开「减少动画」：位移与阴影必须消失（时长归零挡不住静态差异）
+    const rowReduced = await evaluate(win, `
+      const { actions } = window.__aria
+      await actions.setSetting({ reduceMotion: true })
+      await new Promise((r) => setTimeout(r, 600))
+      const row = document.querySelector('.track-row:hover')
+      const reduceFlag = document.documentElement.dataset.reduceMotion
+      const result = row
+        ? {
+            missing: false,
+            top: Math.round(row.getBoundingClientRect().top * 100) / 100,
+            transform: getComputedStyle(row).transform,
+            boxShadow: getComputedStyle(row).boxShadow,
+            background: getComputedStyle(row).backgroundColor
+          }
+        : { missing: true }
+      result.reduceFlag = reduceFlag
+      return result
+    `)
+    await evaluate(win, `
+      const { actions } = window.__aria
+      await actions.setSetting({ reduceMotion: false })
+      return true
+    `)
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 600 })
+    await sleep(300)
+    record('歌曲行：悬停整行浮起（减少动画时不动）',
+      rowHoverTarget.missing === false &&
+      rowHovered.missing === false &&
+      rowHovered.transform !== 'none' &&
+      rowHovered.boxShadow !== 'none' &&
+      rowHovered.separatorHidden === true &&
+      Math.abs(rowLift(rowHovered.transform) + 1.5) < 0.6 &&
+      rowReduced.missing === false &&
+      rowReduced.reduceFlag === 'true' &&
+      rowReduced.transform === 'none' &&
+      rowReduced.boxShadow === 'none' &&
+      rowReduced.background !== 'rgba(0, 0, 0, 0)',
+      `悬停前 top=${rowHoverTarget.top}px → 悬停后 ${rowHovered.top}px（位移 ${(rowHovered.top - rowHoverTarget.top).toFixed(2)}px，` +
+      `transform 里的 translateY=${rowLift(rowHovered.transform)}px），阴影非空=${rowHovered.boxShadow !== 'none'}，分隔线隐藏=${rowHovered.separatorHidden}；` +
+      `打开「减少动画」后 top=${rowReduced.top}px、transform=${rowReduced.transform}、阴影=${rowReduced.boxShadow}（底色仍在=${rowReduced.background !== 'rgba(0, 0, 0, 0)'}）`)
+
+    // 令牌放错主题块时，另一个主题下 var() 会静默失效（同一段 CSS 变成 no-op），
+    // 所以亮暗两套各验一次 —— 这正是 --lift 出过的错。
+    const themeLifts = []
+    const hoverPoint = rowHoverTarget.center || { x: 400, y: 300 }
+    for (const theme of ['dark', 'light']) {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        await actions.setSetting({ theme: '${theme}' })
+        await new Promise((r) => setTimeout(r, 500))
+        return document.documentElement.dataset.theme
+      `)
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 620 })
+      await sleep(400)
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: hoverPoint.x, y: hoverPoint.y })
+      await sleep(600)
+      const shot = await evaluate(win, `
+        const row = document.querySelector('.track-row:hover')
+        const island = document.querySelector('.island')
+        if (!row) return { missing: true }
+        return {
+          missing: false,
+          transform: getComputedStyle(row).transform,
+          boxShadow: getComputedStyle(row).boxShadow,
+          theme: document.documentElement.dataset.theme,
+          islandWidth: island ? Math.round(island.getBoundingClientRect().width) : 0,
+          islandActive: island ? island.classList.contains('has-active') : false
+        }
+      `)
+      themeLifts.push({ theme, ...shot })
+    }
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 620 })
+    await evaluate(win, `
+      const { actions } = window.__aria
+      await actions.setSetting({ theme: 'system' })
+      return true
+    `)
+    await sleep(300)
+    record('歌曲行：亮暗两套主题下悬停都浮起（灵动岛也都在）',
+      themeLifts.length === 2 &&
+      themeLifts.every((item) => item.missing === false && Math.abs(rowLift(item.transform) + 1.5) < 0.6 && item.boxShadow !== 'none') &&
+      themeLifts.every((item) => item.islandActive === true && item.islandWidth > 100),
+      themeLifts.map((item) => `${item.theme}：data-theme=${item.theme}，translateY=${rowLift(item.transform)}px，阴影=${item.boxShadow !== 'none' ? '有' : '无'}，灵动岛 ${item.islandWidth}px`).join('；'))
 
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria

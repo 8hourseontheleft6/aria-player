@@ -19,7 +19,7 @@
 
 .cover-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--cover-min, 152px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--cover-min), 1fr));
   gap: 22px 18px;
   padding: 4px 24px 32px;
 }
@@ -42,7 +42,7 @@
   display: grid;
   place-items: center;
   color: var(--label-4);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--elev-1);
   transition: transform var(--dur) var(--ease-ios), box-shadow var(--dur) var(--ease-ios);
 }
 
@@ -60,7 +60,7 @@
 
 .cover-card:hover .cover-card__art {
   transform: translateY(-3px) scale(1.015);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--elev-3);
 }
 
 .cover-card:active .cover-card__art {
@@ -97,7 +97,7 @@
   place-items: center;
   background: var(--accent);
   color: var(--accent-label);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.36);
+  box-shadow: var(--elev-2);
   opacity: 0;
   transform: translateY(6px) scale(0.9);
   transition: opacity var(--dur-fast) var(--ease-ios), transform var(--dur) var(--ease-ios);
@@ -183,7 +183,7 @@
   display: grid;
   place-items: center;
   color: var(--label-4);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--elev-1);
 }
 
 .artist-row__avatar img {
@@ -424,10 +424,10 @@
   right: 14px;
   bottom: 14px;
   z-index: 5;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   /* 不用 backdrop-filter：它会在每帧都重新模糊移动中的背景，是平移掉帧的主因之一 */
   background: color-mix(in srgb, var(--bg-popover) 88%, transparent);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28), 0 0 0 0.5px var(--separator);
+  box-shadow: var(--elev-2), 0 0 0 0.5px var(--separator);
   overflow: hidden;
   cursor: grab;
   contain: strict;
@@ -445,7 +445,7 @@
   position: absolute;
   left: 0;
   top: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-2xs);
   background: color-mix(in srgb, var(--accent) 42%, transparent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 75%, transparent);
   transition: transform 90ms linear;
@@ -455,7 +455,7 @@
   position: relative;
   aspect-ratio: 1 / 1;
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: var(--fill-quaternary);
   cursor: default;
   transition: box-shadow var(--dur) var(--ease-ios);
@@ -610,7 +610,7 @@
   container-type: size;
   /* 不能用 contain:paint，否则会把自身的投影裁掉 */
   contain: layout;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34), 0 0 0 0.5px var(--separator);
+  box-shadow: var(--elev-3), 0 0 0 0.5px var(--separator);
 }
 
 .wall-tile.is-featured .wall-tile__info,
