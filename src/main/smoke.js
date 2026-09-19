@@ -65,6 +65,52 @@ async function waitFor (win, condition, { timeout = 30000, label = '条件' } = 
   throw new Error(`等待超时：${label}`)
 }
 
+/**
+ * 确保窗口真的在渲染。
+ *
+ * 被最小化 / 隐藏 / 被其它窗口盖住时，Chromium 会停掉 rAF 与合成器动画 ——
+ * 这时脚本改的 class、store 都对，但 CSS 过渡不推进、getBoundingClientRect 拿到的是
+ * 旧几何（实测：灵动岛悬停后宽度不变、侧栏收起后宽度还是 248px、整页淡出也没发生）。
+ * 这些检查量的就是过渡结果，所以量之前必须先把窗口弄回来。
+ */
+async function ensureVisible (win) {
+  if (win.isDestroyed()) return false
+  if (win.isMinimized()) win.restore()
+  if (!win.isVisible()) win.show()
+  for (let i = 0; i < 24; i++) {
+    try {
+      const visible = await evaluate(win, 'return document.visibilityState === "visible"')
+      if (visible) return true
+    } catch {
+      // 页面正在重建，接着等
+    }
+    await sleep(250)
+  }
+  return false
+}
+
+/** 当前窗口/页面的可见性，失败时用来解释「为什么几何没变」 */
+async function visibilitySnapshot (win) {
+  let page = null
+  try {
+    page = await evaluate(win, `
+      return {
+        state: document.visibilityState,
+        hidden: document.hidden,
+        focused: document.hasFocus()
+      }
+    `)
+  } catch {
+    page = { state: 'unavailable' }
+  }
+  return {
+    ...page,
+    minimized: win.isMinimized(),
+    visible: win.isVisible(),
+    focused: win.isFocused()
+  }
+}
+
 async function runSmoke ({ win, ctx }) {
   const checks = []
   const record = (name, ok, detail = '') => {
@@ -1561,6 +1607,9 @@ async function runSmoke ({ win, ctx }) {
     /* ---------- 侧边栏与灵动岛（互斥出现）/ 行悬停浮起 ---------- */
     // 悬停相关的样式（:hover）不能靠 dispatchEvent 触发 —— 合成事件不会更新
     // Blink 的 hover 状态。这里用 sendInputEvent 走真实输入管线。
+    // 量之前先确保窗口在渲染（被遮挡/最小化时过渡不会推进，见 ensureVisible）
+    const shellVisible = await ensureVisible(win)
+    const shellVisibility = await visibilitySnapshot(win)
     const shellInfo = await evaluate(win, `
       const { actions, store } = window.__aria
       const settle = async (ms = 320) => { await new Promise((r) => setTimeout(r, ms)) }
@@ -1695,6 +1744,7 @@ async function runSmoke ({ win, ctx }) {
       return { beforeLeft, afterLeft, viewAfter, activeAfter: activeAfter ? activeAfter.view : null, hiddenOnSettings }
     `)
     record('侧栏与灵动岛：不同时出现，侧栏自己的按钮能收起',
+      shellVisible === true &&
       shellInfo.openState.sidebarVisible === true &&
       shellInfo.openState.sidebarWidth > 200 &&
       shellInfo.openState.islandShown === false &&
@@ -1703,7 +1753,8 @@ async function runSmoke ({ win, ctx }) {
       shellInfo.collapsed.sidebarWidth <= 1 &&
       shellInfo.collapsed.islandShown === true,
       `侧栏开着时：宽 ${shellInfo.openState.sidebarWidth}px、灵动岛出现=${shellInfo.openState.islandShown}；` +
-      `点侧栏头部收起按钮后：宽 ${shellInfo.collapsed.sidebarWidth}px、灵动岛出现=${shellInfo.collapsed.islandShown}`)
+      `点侧栏头部收起按钮后：宽 ${shellInfo.collapsed.sidebarWidth}px、灵动岛出现=${shellInfo.collapsed.islandShown}；` +
+      `窗口在渲染=${shellVisible}（页面 ${shellVisibility.state}、最小化=${shellVisibility.minimized}、可见=${shellVisibility.visible}）`)
     record('顶栏灵动岛：切换视图 + 悬停展开',
       shellInfo.islandBase.itemCount === 4 &&
       shellInfo.islandBase.activeKey === 'songs' &&
@@ -1729,10 +1780,18 @@ async function runSmoke ({ win, ctx }) {
 
     // 先把媒体墙建起来（它不是当前视图就没东西可释放），并开始播放：
     // 最小化之后音乐必须还在放 —— 释放的是「能重建的」，不是「正在用的」
+    await ensureVisible(win)
+    // 如果前面被动经历过一次「长时间不在前台」，这里是释放状态，先恢复
+    if (background.state.released) background.resume()
+    await sleep(600)
     const releaseBefore = await evaluate(win, `
       const { actions, player, views, prewarmer, store } = window.__aria
       actions.setView('wall')
       await new Promise((r) => setTimeout(r, 1500))
+      // 等到墙真的建出来为止（正常情况下重建只要 ~100ms）
+      for (let i = 0; i < 40 && views.mediaWall.tileCount < 100; i++) {
+        await new Promise((r) => setTimeout(r, 200))
+      }
       await player.play()
       await new Promise((r) => setTimeout(r, 1200))
       return {
@@ -2405,7 +2464,10 @@ async function runSmoke ({ win, ctx }) {
           checkHasSvg: Boolean(check.querySelector('svg')),
           checkText: (check.textContent || '').trim(),
           checkHasNumber: Boolean(check.querySelector('.track-row__num')),
-          checkHasPlay: Boolean(check.querySelector('.track-row__play'))
+          checkHasPlay: Boolean(check.querySelector('.track-row__play')),
+          // 不在多选模式时，勾选框不但看不见，还不能是点击目标（否则点行左边缘会误进多选）
+          checkHidden: getComputedStyle(check).opacity === '0' &&
+            getComputedStyle(check).pointerEvents === 'none'
         }
       }
 
@@ -2417,14 +2479,42 @@ async function runSmoke ({ win, ctx }) {
       const idle = state()
       const idleLayout = layout()
 
-      // 普通点击只选中一首：**不该**进入多选模式（勾选框不该全露出来）
+      // 普通点击只选中一首：**不该**进入多选模式（勾选框不该出现）
       const plainRow = rows()[1]
       plainRow.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
       await settle(400)
-      const afterPlainClick = { ...state(), layout: layout() }
+      const afterPlainClick = {
+        ...state(),
+        layout: layout(),
+        trackId: store.get().playback.trackId
+      }
 
-      // 显式进入多选（右键菜单「开始多选」走的就是这条）
-      actions.startSelection(plainRow.dataset.id)
+      // 行上的勾选框此时是隐藏 + 不可点的，点它不应该有任何效果
+      const hiddenClickTarget = rows()[3].querySelector('.track-row__check')
+      hiddenClickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      await settle(300)
+      const afterHiddenClick = { ...state(), trackId: store.get().playback.trackId }
+
+      // 从列表右上角的「⋯」进入多选：这才是正规入口
+      const menuButton = [...document.querySelectorAll('.view-toolbar .btn--icon')]
+        .find((node) => node.title === '更多操作')
+      const menuHit = (() => {
+        if (!menuButton) return false
+        const rect = menuButton.getBoundingClientRect()
+        const hit = document.elementFromPoint(Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2))
+        return Boolean(hit && (hit === menuButton || menuButton.contains(hit)))
+      })()
+      menuButton?.click()
+      await settle(500)
+      const menu = document.querySelector('.popover')
+      const menuText = menu ? menu.textContent : ''
+      const menuRow = menu ? [...menu.querySelectorAll('.popover__row')].find((node) => node.textContent.includes('选择多个歌曲')) : null
+      menuRow?.click()
+      await settle(500)
+      const afterMenuStart = { ...state(), menuText, menuHit, hasRow: Boolean(menuRow) }
+
+      // 已经是多选模式了，这时再点某一行的勾选框才算数
+      actions.setSelection([plainRow.dataset.id], plainRow.dataset.id)
       await settle(500)
       const selecting = state()
       const selectingLayout = layout()
@@ -2450,11 +2540,11 @@ async function runSmoke ({ win, ctx }) {
       const total = store.get().library.tracks.length
 
       return {
-        idle, idleLayout, afterPlainClick, selecting, selectingLayout,
+        idle, idleLayout, afterPlainClick, afterHiddenClick, afterMenuStart, selecting, selectingLayout,
         afterToggle, all, selectionSize, cleared, total
       }
     `)
-    record('多选：勾选框（选中的打勾、没选的空着）',
+    const checkboxOk =
       // ① 序号和勾选框各就各位（曾经把序号画进勾选框里过）
       checkboxCheck.idleLayout.indexMatches === true &&
       checkboxCheck.idleLayout.indexHasNumber === true &&
@@ -2463,21 +2553,34 @@ async function runSmoke ({ win, ctx }) {
       checkboxCheck.idleLayout.checkHasSvg === true &&
       checkboxCheck.idleLayout.checkHasNumber === false &&
       checkboxCheck.idleLayout.checkHasPlay === false &&
+      // ② 不在多选模式时勾选框既不可见也不可点
+      checkboxCheck.idleLayout.checkHidden === true &&
       checkboxCheck.idle.rows > 5 &&
       checkboxCheck.idle.checked === 0 &&
-      checkboxCheck.idle.visibleUnhovered === 0 &&
+      checkboxCheck.idle.visible === 0 &&
       checkboxCheck.idle.selecting === false &&
-      // ② 普通点击只选中一首，不进入多选模式
+      // ③ 普通点击只选中一首，不进入多选模式
       checkboxCheck.afterPlainClick.selecting === false &&
-      checkboxCheck.afterPlainClick.visibleUnhovered === 0 &&
+      checkboxCheck.afterPlainClick.visible === 0 &&
       checkboxCheck.afterPlainClick.checked === 1 &&
-      // ③ 显式开始多选后，所有勾选框露出来
+      // ④ 隐藏的勾选框点不出任何效果（它连点击目标都不是）
+      checkboxCheck.afterHiddenClick.selecting === false &&
+      checkboxCheck.afterHiddenClick.checked === 1 &&
+      checkboxCheck.afterHiddenClick.trackId === checkboxCheck.afterPlainClick.trackId &&
+      // ⑤ 从「⋯」菜单进多选
+      checkboxCheck.afterMenuStart.menuHit === true &&
+      checkboxCheck.afterMenuStart.hasRow === true &&
+      checkboxCheck.afterMenuStart.menuText.includes('选择多个歌曲') &&
+      checkboxCheck.afterMenuStart.selecting === true &&
+      checkboxCheck.afterMenuStart.visible === checkboxCheck.afterMenuStart.rows &&
+      // ⑥ 进入之后勾选框才可见、才可点
       checkboxCheck.selecting.checked === 1 &&
       checkboxCheck.selecting.ariaChecked === 1 &&
       checkboxCheck.selecting.visible === checkboxCheck.selecting.rows &&
       checkboxCheck.selecting.selecting === true &&
       checkboxCheck.selecting.headPartial === true &&
       checkboxCheck.selectingLayout.indexMatches === true &&
+      checkboxCheck.selectingLayout.checkHidden === false &&
       checkboxCheck.afterToggle.checked === 2 &&
       checkboxCheck.afterToggle.trackId === checkboxCheck.afterToggle.before &&
       checkboxCheck.all.checked === checkboxCheck.all.rows &&
@@ -2485,16 +2588,28 @@ async function runSmoke ({ win, ctx }) {
       checkboxCheck.all.headPartial === false &&
       checkboxCheck.selectionSize === checkboxCheck.total &&
       checkboxCheck.cleared.checked === 0 &&
-      checkboxCheck.cleared.visibleUnhovered === 0 &&
-      checkboxCheck.cleared.selecting === false,
+      checkboxCheck.cleared.visible === 0 &&
+      checkboxCheck.cleared.selecting === false
+    record('多选：勾选框只在多选模式里出现（入口在列表右上角「⋯」）',
+      checkboxOk,
       `第 1 行：序号格「${checkboxCheck.idleLayout.indexText}」（与行号对应=${checkboxCheck.idleLayout.indexMatches}，有数字=${checkboxCheck.idleLayout.indexHasNumber}、真的可见=${checkboxCheck.idleLayout.numVisible}、有勾选框=${checkboxCheck.idleLayout.indexHasCheck}）、` +
       `勾选框里有图标=${checkboxCheck.idleLayout.checkHasSvg}（有数字=${checkboxCheck.idleLayout.checkHasNumber}、有播放键=${checkboxCheck.idleLayout.checkHasPlay}）；` +
-      `未选中时：${checkboxCheck.idle.rows} 行里可见勾选框 ${checkboxCheck.idle.visible} 个（除悬停那一行外 ${checkboxCheck.idle.visibleUnhovered} 个 —— 平时藏着，悬停才出现）；` +
-      `普通点击一首后：打勾 ${checkboxCheck.afterPlainClick.checked} 个、仍是多选模式=${checkboxCheck.afterPlainClick.selecting}；` +
-      `显式「开始多选」后：可见 ${checkboxCheck.selecting.visible}/${checkboxCheck.selecting.rows} 个、打勾 ${checkboxCheck.selecting.checked} 个（aria-checked=${checkboxCheck.selecting.ariaChecked}）、表头半选=${checkboxCheck.selecting.headPartial}；` +
+      `未进入多选时：勾选框可见 ${checkboxCheck.idle.visible} 个、不可点=${checkboxCheck.idleLayout.checkHidden}；` +
+      `普通点击一首后：打勾 ${checkboxCheck.afterPlainClick.checked} 个、可见 ${checkboxCheck.afterPlainClick.visible} 个、仍是多选模式=${checkboxCheck.afterPlainClick.selecting}；` +
+      `点那个隐藏的框：模式=${checkboxCheck.afterHiddenClick.selecting}（无副作用=${checkboxCheck.afterHiddenClick.checked === 1}）；` +
+      `「⋯」菜单命中=${checkboxCheck.afterMenuStart.menuHit}，点「选择多个歌曲」→ 多选模式=${checkboxCheck.afterMenuStart.selecting}、勾选框露出 ${checkboxCheck.afterMenuStart.visible}/${checkboxCheck.afterMenuStart.rows} 个；` +
+      `进入后打勾 ${checkboxCheck.selecting.checked} 个、可见 ${checkboxCheck.selecting.visible}/${checkboxCheck.selecting.rows}（aria-checked=${checkboxCheck.selecting.ariaChecked}）、表头半选=${checkboxCheck.selecting.headPartial}；` +
       `点第 5 行的框 → 打勾变成 ${checkboxCheck.afterToggle.checked} 个，且没有起播（曲目未变=${checkboxCheck.afterToggle.trackId === checkboxCheck.afterToggle.before}）；` +
       `点表头 → 全部 ${checkboxCheck.all.checked}/${checkboxCheck.all.rows} 行打勾（共选中 ${checkboxCheck.selectionSize}/${checkboxCheck.total} 首）；` +
-      `再点表头 → 打勾 ${checkboxCheck.cleared.checked} 个、可见 ${checkboxCheck.cleared.visible} 个（收起）`)
+      `再点表头 → 打勾 ${checkboxCheck.cleared.checked} 个、可见 ${checkboxCheck.cleared.visible} 个（退出多选）` +
+      (checkboxOk ? '' : `\n    调试：${JSON.stringify({
+        idle: checkboxCheck.idle,
+        afterPlainClick: checkboxCheck.afterPlainClick,
+        afterHiddenClick: checkboxCheck.afterHiddenClick,
+        afterMenuStart: checkboxCheck.afterMenuStart,
+        selecting: checkboxCheck.selecting,
+        menuText: checkboxCheck.afterMenuStart.menuText
+      })}`))
 
     /* ---------- 多艺人的拆分 ---------- */
 

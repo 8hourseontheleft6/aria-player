@@ -155,18 +155,21 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       style: { top: `${index * ROW_HEIGHT}px` }
     })
 
-    // 勾选框：选中的打勾、没选的空着。平时藏起来，行悬停或处在多选模式下出现
+    /*
+     * 勾选框：只在多选模式里出现（见 library.css 的说明）。
+     * 它不是入口 —— 入口在列表右上角的「⋯」和歌曲右键菜单里。
+     */
     const check = h('button', {
       class: 'track-row__check',
       type: 'button',
       role: 'checkbox',
-      title: '选择这一首（点它就开始多选）',
+      title: '选中这一首',
       'aria-checked': 'false',
+      tabindex: '-1',
       onClick: (event) => {
         event.stopPropagation()
-        // 第一次点 = 进入多选模式并勾上这一首；已经在多选里 = 正常的勾选 / 取消勾选
-        if (store.get().ui.selecting) actions.toggleSelection(track.id)
-        else actions.startSelection(track.id)
+        if (!store.get().ui.selecting) return
+        actions.toggleSelection(track.id)
       }
     }, checkIcon())
     row.__check = check

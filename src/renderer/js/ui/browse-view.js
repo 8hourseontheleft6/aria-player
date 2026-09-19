@@ -9,6 +9,7 @@ import { EVENTS } from '../core/bus.js'
 import { formatDurationLong } from '../core/format.js'
 import { createCoverGrid, createArtistRows } from './cover-grid.js'
 import { createTrackList } from './track-list.js'
+import { createListMenuButton } from './list-menu.js'
 import { createLazyArtwork } from './artwork-node.js'
 
 export function createBrowseView ({ store, bus, player, artwork, actions, lazy: injectedLazy = null }) {
@@ -98,7 +99,9 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   const albumDetailPage = h('div', { class: 'browse-page' },
     h('div', { class: 'view-toolbar' },
       h('div', { class: 'view-toolbar__title', text: '专辑' }),
-      h('div', { class: 'view-toolbar__spacer' })
+      h('div', { class: 'view-toolbar__spacer' }),
+      // 批量选择的入口（另一个是歌曲右键菜单里的「开始多选」）
+      createListMenuButton({ actions, getTracks: () => albumTrackList.tracks })
     ),
     albumDetailHeader,
     albumTrackList.element
@@ -156,7 +159,8 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   const artistDetailPage = h('div', { class: 'browse-page' },
     h('div', { class: 'view-toolbar' },
       h('div', { class: 'view-toolbar__title', text: '艺人' }),
-      h('div', { class: 'view-toolbar__spacer' })
+      h('div', { class: 'view-toolbar__spacer' }),
+      createListMenuButton({ actions, getTracks: () => artistTrackList.tracks })
     ),
     artistDetailHeader,
     artistTrackList.element

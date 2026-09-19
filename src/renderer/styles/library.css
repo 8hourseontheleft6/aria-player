@@ -29,10 +29,15 @@
 
 /* ------------------------------ 复选框 ------------------------------ */
 /*
- * 勾选框平时藏起来（列表上铺满空框太吵），两种情况出现：
- *   · 鼠标悬停到那一行 —— 这样能「点着框」开始多选；
- *   · 列表进入多选状态（.is-selecting）—— 从此每一行都显示勾选框，
- *     选中的打勾、没选的空着，一眼能看出选了哪几首。
+ * 勾选框**只在多选模式里出现**（.tracklist.is-selecting）。
+ *
+ * 只在行悬停时露出来是不行的：列表平时是「点一下选中、双击播放」，
+ * 到处都能勾选会让手势互相打架，还会让人莫名其妙进入一个自己没想进的状态
+ * （用户反馈：「不要默认就是可以勾选的状态」）。
+ * 隐藏时同时关掉 pointer-events，否则它还是一个看不见的点击目标 ——
+ * 点在行左边缘就会误进多选。
+ *
+ * 入口：列表右上角「⋯」→ 选择多个歌曲，或右键歌曲 →「开始多选」。
  */
 .track-row__check,
 .tracklist__check {
@@ -59,11 +64,23 @@
 
 .track-row__check {
   opacity: 0;
+  pointer-events: none;
 }
 
-.track-row:hover .track-row__check,
 .tracklist.is-selecting .track-row__check {
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* 表头那颗不在多选模式里也点得到，但它只在多选模式里才显示出来 */
+.tracklist__check {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tracklist.is-selecting .tracklist__check {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .track-row__check:hover,

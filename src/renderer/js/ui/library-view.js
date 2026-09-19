@@ -7,6 +7,7 @@ import { remote } from '../core/remote.js'
 import { selectVisibleTracks, selectTitle, describeMatch } from '../core/selectors.js'
 import { EVENTS } from '../core/bus.js'
 import { createTrackList } from './track-list.js'
+import { createListMenuButton } from './list-menu.js'
 import { openPopover, popoverRows } from './overlay.js'
 
 const SORT_OPTIONS = [
@@ -289,7 +290,9 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     searchSlot,
     locateButton,
     sortButton,
-    scanButton
+    scanButton,
+    // 批量选择的入口（另一个入口是歌曲右键菜单里的「开始多选」）
+    createListMenuButton({ actions, getTracks: () => trackList.tracks })
   )
 
   /* ---------------- 大标题 ---------------- */
