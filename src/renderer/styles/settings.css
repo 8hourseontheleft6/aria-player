@@ -72,6 +72,46 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------------------- 可收起分组 ---------------------- */
+
+.settings__group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0 4px 6px;
+  text-align: left;
+}
+
+.settings__group-head .settings__group-title {
+  padding: 0;
+}
+
+.settings__group-sub {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+
+.settings__group-spacer {
+  flex: 1;
+}
+
+.settings__group-head .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--label-3);
+  transition: transform var(--dur) var(--ease-ios);
+}
+
+.settings__group.is-collapsed .settings__group-head .icon {
+  transform: rotate(-90deg);
+}
+
+/* 收起时把卡片收掉，但保留标题行 */
+.settings__group.is-collapsed > *:last-child {
+  display: none;
+}
+
 /* ---------------------- 在线音源列表 ---------------------- */
 
 .settings__sources {

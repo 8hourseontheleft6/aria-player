@@ -100,9 +100,14 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     ), right)
     paintRow(row, track, index)
 
-    on(row, 'click', () => {
+    on(row, 'click', (event) => {
       selectedId = track.id
       refreshSelection()
+      // 设置里的「单击歌曲直接播放」打开时，单击也起播；默认仍然只选中
+      if (store.get().settings.playOnSingleClick !== true) return
+      // 行内已有自己的行为的小按钮不要连带触发（它们多数已经 stopPropagation，这里再兜一层）
+      if (event.target?.closest?.('.track-row__more, .track-row__play')) return
+      actions.playTrack(track, tracks)
     })
     on(row, 'dblclick', () => actions.playTrack(track, tracks))
     on(row, 'contextmenu', (event) => {

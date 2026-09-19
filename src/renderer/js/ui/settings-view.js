@@ -49,11 +49,34 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     return h('div', { class: 'settings__card' }, ...rows)
   }
 
-  function group (title, rows) {
-    return h('div', { class: 'settings__group' },
-      title ? h('div', { class: 'settings__group-title', text: title }) : null,
-      card(rows)
+  function group (title, rows, { collapsible = false, collapsed = false, sub = '' } = {}) {
+    if (!collapsible) {
+      return h('div', { class: 'settings__group' },
+        title ? h('div', { class: 'settings__group-title', text: title }) : null,
+        card(rows)
+      )
+    }
+    // 可收起分组：默认状态由调用方给，点标题整行切换；箭头跟着转
+    let isCollapsed = collapsed
+    const body = card(rows)
+    const chevron = icon('chevronDown', { className: 'icon icon--stroke' })
+    const head = h('button', {
+      class: 'settings__group-head',
+      type: 'button',
+      onClick: () => {
+        isCollapsed = !isCollapsed
+        wrapper.classList.toggle('is-collapsed', isCollapsed)
+        head.setAttribute('aria-expanded', String(!isCollapsed))
+      }
+    },
+    h('span', { class: 'settings__group-title', text: title }),
+    sub ? h('span', { class: 'settings__group-sub', text: sub }) : null,
+    h('span', { class: 'settings__group-spacer' }),
+    chevron
     )
+    const wrapper = h('div', { class: `settings__group is-collapsible${collapsed ? ' is-collapsed' : ''}` }, head, body)
+    head.setAttribute('aria-expanded', String(!collapsed))
+    return wrapper
   }
 
   function row ({ title, sub, control, onClick, className = '' }) {
@@ -207,6 +230,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
     /* ---------- 播放 ---------- */
     scroll.appendChild(group('播放', [
+      row({
+        title: '单击歌曲直接播放',
+        sub: '打开后，单击列表里的歌曲就直接播放（默认需要双击，单击只选中）。这个设置对歌曲列表、专辑详情、艺人详情都生效',
+        control: switchControl(settings.playOnSingleClick === true,
+          (value) => actions.setSetting({ playOnSingleClick: value }))
+      }),
       row({
         title: '默认播放速度',
         sub: `当前 ${formatRate(settings.playbackRate)}，播放中也可以随时调整`,
@@ -565,7 +594,11 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         }, '用默认'))
       }),
       sourcesHost
-    ]))
+    ], {
+      collapsible: true,
+      collapsed: settings.onlineSources !== true,
+      sub: settings.onlineSources === true ? '已开启' : '默认关闭'
+    }))
     refreshSources()
 
     /* ---------- 插件 ---------- */

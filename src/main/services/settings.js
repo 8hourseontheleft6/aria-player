@@ -27,6 +27,8 @@ const DEFAULTS = {
   searchHistory: [],
   // 从歌词搜索结果里点开歌曲时，是否自动跳到命中的那一句
   jumpToMatchedLyric: true,
+  // 列表里单击歌曲就直接播放（默认关闭：单击只选中，双击才播放）
+  playOnSingleClick: false,
   // 在线音源（用户自己放进来的音源脚本）：总开关默认关闭，与在线补全保持一致
   onlineSources: false,
   // 音源开关状态（id -> { enabled }）；脚本本身放在 <userData>/music-sources

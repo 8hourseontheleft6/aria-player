@@ -99,6 +99,7 @@ export function initialState () {
       searchScope: 'basic',
       searchHistory: [],
       jumpToMatchedLyric: true,
+      playOnSingleClick: false,
       onlineSources: false,
       musicSources: {},
       downloadDir: '',

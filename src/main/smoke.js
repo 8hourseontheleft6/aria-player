@@ -1432,6 +1432,107 @@ async function runSmoke ({ win, ctx }) {
         ? `提交「${historyMarker}」后，${path.basename(settingsFile)} 里的 searchHistory=${JSON.stringify(persistedHistory)}`
         : `读取设置文件失败或没有该字段：${JSON.stringify(persistedHistory)}（文件 ${settingsFile}，${persistedRaw.length} 字节）`)
 
+    /* ---------- 单击播放开关 + 设置分组默认收起 ---------- */
+    const uiPrefsCheck = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 420) => { await new Promise((r) => setTimeout(r, ms)) }
+      const realClick = (node) => {
+        const rect = node.getBoundingClientRect()
+        const x = Math.round(rect.left + rect.width / 2)
+        const y = Math.round(rect.top + rect.height / 2)
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          node.dispatchEvent(new MouseEvent(type, {
+            bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type.includes('down') ? 1 : 0
+          }))
+        }
+      }
+
+      actions.setView('songs')
+      actions.setQuery('')
+      await settle(600)
+      const rows = [...document.querySelectorAll('.track-row')]
+      const rowFor = (index) => rows[index] || null
+
+      // ① 默认（关闭）：单击只选中，不起播
+      await actions.setSetting({ playOnSingleClick: false })
+      await settle(300)
+      const before = store.get().playback.trackId
+      const firstRow = rowFor(3)
+      if (firstRow) realClick(firstRow)
+      await settle(700)
+      const afterSingleWithOff = store.get().playback.trackId
+      const selectedWithOff = document.querySelectorAll('.track-row.is-selected').length
+
+      // ② 打开：单击直接播放
+      await actions.setSetting({ playOnSingleClick: true })
+      await settle(300)
+      const targetRow = rowFor(5)
+      const targetId = targetRow ? targetRow.dataset.id : null
+      if (targetRow) realClick(targetRow)
+      await settle(900)
+      const afterSingleWithOn = store.get().playback.trackId
+      window.__aria.player.pause()
+
+      // ③ 行内的「更多操作」按钮不应该连带触发播放
+      const rowWithMore = rowFor(7)
+      const moreButton = rowWithMore ? rowWithMore.querySelector('.track-row__more') : null
+      const beforeMore = store.get().playback.trackId
+      if (moreButton) moreButton.click()
+      await settle(500)
+      const afterMore = store.get().playback.trackId
+      document.querySelectorAll('.popover').forEach((node) => node.remove())
+
+      await actions.setSetting({ playOnSingleClick: false })
+
+      // ④ 设置页：在线音源那一组默认收起，点标题能展开
+      actions.setView('settings')
+      await settle(700)
+      const groups = [...document.querySelectorAll('.settings__group')]
+      const sourcesGroup = groups.find((node) => (node.textContent || '').includes('在线音源'))
+      const head = sourcesGroup ? sourcesGroup.querySelector('.settings__group-head') : null
+      const cardBody = sourcesGroup ? sourcesGroup.lastElementChild : null
+      const collapsedInitially = sourcesGroup ? sourcesGroup.classList.contains('is-collapsed') : null
+      const cardHiddenInitially = cardBody ? getComputedStyle(cardBody).display === 'none' : null
+      if (head) head.click()
+      await settle(400)
+      const expandedAfterClick = sourcesGroup ? !sourcesGroup.classList.contains('is-collapsed') : null
+      const cardShownAfterClick = cardBody ? getComputedStyle(cardBody).display !== 'none' : null
+
+      actions.setView('songs')
+      await settle(300)
+      return {
+        before,
+        afterSingleWithOff,
+        afterSingleWithOn,
+        targetId,
+        selectedWithOff,
+        beforeMore,
+        afterMore,
+        hasSourcesGroup: Boolean(sourcesGroup),
+        collapsedInitially,
+        cardHiddenInitially,
+        expandedAfterClick,
+        cardShownAfterClick
+      }
+    `)
+    record('设置项：单击歌曲直接播放',
+      uiPrefsCheck.afterSingleWithOff === uiPrefsCheck.before &&
+      uiPrefsCheck.selectedWithOff > 0 &&
+      Boolean(uiPrefsCheck.targetId) &&
+      uiPrefsCheck.afterSingleWithOn === uiPrefsCheck.targetId &&
+      uiPrefsCheck.afterMore === uiPrefsCheck.beforeMore,
+      `关闭时单击只选中（播放曲目未变：${uiPrefsCheck.before} → ${uiPrefsCheck.afterSingleWithOff}，选中 ${uiPrefsCheck.selectedWithOff} 行）；` +
+      `打开后单击第 6 行直接播放（目标 ${uiPrefsCheck.targetId} → 实际 ${uiPrefsCheck.afterSingleWithOn}）；` +
+      `行内「更多操作」按钮不会连带起播（${uiPrefsCheck.beforeMore} → ${uiPrefsCheck.afterMore}）`)
+    record('设置页：在线音源分组默认收起、可展开',
+      uiPrefsCheck.hasSourcesGroup &&
+      uiPrefsCheck.collapsedInitially === true &&
+      uiPrefsCheck.cardHiddenInitially === true &&
+      uiPrefsCheck.expandedAfterClick === true &&
+      uiPrefsCheck.cardShownAfterClick === true,
+      `分组存在=${uiPrefsCheck.hasSourcesGroup}，默认收起=${uiPrefsCheck.collapsedInitially}（卡片隐藏=${uiPrefsCheck.cardHiddenInitially}）；` +
+      `点标题后展开=${uiPrefsCheck.expandedAfterClick}（卡片可见=${uiPrefsCheck.cardShownAfterClick}）`)
+
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria
       actions.openNowPlaying({ lyrics: true })
