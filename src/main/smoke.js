@@ -1221,6 +1221,52 @@ async function runSmoke ({ win, ctx }) {
       `派发 request({action:'lyric'}) 得到「${report.lxLyrics?.text}」；` +
       `没有 musicInfo 时会明确报错而不是静默失败`)
 
+    /* ---------- 用用户真实放进来的第三方 LX 音源文件验证装载（存在才测） ---------- */
+    const repoRoot = path.join(__dirname, '..', '..')
+    const userSourceIds = []
+    try {
+      const candidates = (await fsp.readdir(repoRoot))
+        .filter((name) => name.toLowerCase().endsWith('.js'))
+        .slice(0, 12)
+      for (const name of candidates) {
+        const full = path.join(repoRoot, name)
+        const text = await fsp.readFile(full, 'utf8').catch(() => '')
+        // 只挑看起来像 LX 自定义源的（脚本里引用宿主全局 lx 或声明事件名）
+        if (!text || (!text.includes('globalThis') || !/EVENT_NAMES|globalThis\['lx'\]/.test(text))) continue
+        try {
+          const installed = await sourcesService.install(text, `user-file-${path.basename(name, '.js')}`)
+          const described = sourcesService.list().find((item) => item.id === installed.id) || null
+          userSourceIds.push({
+            file: name,
+            id: installed.id,
+            kind: installed.kind,
+            error: null,
+            lxSources: described?.lxSources || [],
+            capabilities: described?.capabilities || null
+          })
+        } catch (err) {
+          userSourceIds.push({ file: name, error: String(err?.message || err) })
+        }
+      }
+    } catch {
+      // 目录读不了就跳过
+    }
+    for (const entry of userSourceIds) {
+      if (entry.id) {
+        try { await sourcesService.remove(entry.id) } catch { /* 忽略 */ }
+      }
+    }
+    const loadedUserSources = userSourceIds.filter((item) => !item.error)
+    record('第三方 LX 音源文件能装载（用仓库根目录里的真实文件验证）',
+      userSourceIds.length === 0 || loadedUserSources.length === userSourceIds.length,
+      userSourceIds.length === 0
+        ? '仓库根目录里没有 LX 音源文件，跳过（放进 music-sources 目录或从设置里导入即可）'
+        : userSourceIds.map((item) => item.error
+          ? `${item.file} → 失败：${item.error}`
+          : `${item.file} → ${item.kind}（声明 ${item.lxSources.map((sub) => sub.name).join('/') || '—'}；` +
+            `搜索=${item.capabilities?.search}、解析=${item.capabilities?.resolveUrl}）`).join('；'))
+
+
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria
       actions.openNowPlaying({ lyrics: true })
