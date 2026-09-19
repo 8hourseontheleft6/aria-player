@@ -1405,6 +1405,33 @@ async function runSmoke ({ win, ctx }) {
           `搜索返回 ${externalReport.count} 条「${externalReport.first?.title}」（来源 ${externalReport.first?.source}）；` +
           `解析出直链并转成代理地址=${externalReport.resolve?.proxied}；歌词「${externalReport.lyrics}」`)
 
+    /* ---------- 搜索历史真的写进磁盘了吗（用户反馈重启后丢失） ---------- */
+    const { app: electronApp } = require('electron')
+    const settingsFile = path.join(electronApp.getPath('userData'), 'settings.json')
+    const historyMarker = `烟测历史-${Date.now().toString().slice(-6)}`
+    await evaluate(win, `
+      await window.__aria.actions.clearSearchHistory()
+      await window.__aria.actions.commitSearch(${JSON.stringify(historyMarker)})
+      return true`)
+    await sleep(900)
+    let persistedHistory = null
+    let persistedRaw = ''
+    try {
+      persistedRaw = await fsp.readFile(settingsFile, 'utf8')
+      persistedHistory = JSON.parse(persistedRaw).searchHistory || null
+    } catch (err) {
+      persistedHistory = { error: String(err?.message || err) }
+    }
+    // 恢复干净状态
+    await evaluate(win, `
+      await window.__aria.actions.clearSearchHistory()
+      return true`)
+    record('搜索历史会写进设置文件（重启应当仍在）',
+      Array.isArray(persistedHistory) && persistedHistory.includes(historyMarker),
+      Array.isArray(persistedHistory)
+        ? `提交「${historyMarker}」后，${path.basename(settingsFile)} 里的 searchHistory=${JSON.stringify(persistedHistory)}`
+        : `读取设置文件失败或没有该字段：${JSON.stringify(persistedHistory)}（文件 ${settingsFile}，${persistedRaw.length} 字节）`)
+
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria
       actions.openNowPlaying({ lyrics: true })
