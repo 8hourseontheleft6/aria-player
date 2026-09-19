@@ -100,6 +100,8 @@ export function initialState () {
       searchHistory: [],
       jumpToMatchedLyric: true,
       playOnSingleClick: false,
+      // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
+      sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
       onlineSources: false,
       musicSources: {},
       downloadDir: '',

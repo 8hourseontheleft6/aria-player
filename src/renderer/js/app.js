@@ -20,7 +20,8 @@ import { createPluginHost } from './core/plugin-host.js'
 import { registerBuiltinModes } from './core/playback-modes.js'
 import { createArtworkService } from './core/artwork.js'
 import { createPlayerController } from './core/player-controller.js'
-import { createLibraryIndex } from './core/grouping.js'
+import { createLibraryIndex, splitArtists } from './core/grouping.js'
+import { createBackgroundRelease } from './core/background-release.js'
 import { selectVisibleTracks } from './core/selectors.js'
 import { createArtworkPrewarmer } from './core/artwork-prewarm.js'
 
@@ -91,6 +92,13 @@ async function main () {
 
   /** 封面后台预热：空闲时把封面灌进主进程的磁盘缓存，让媒体墙秒出图 */
   let lazyArtwork = null
+
+  /**
+   * 「最小化已释放」标志。
+   * 媒体墙要据此拒绝重建 —— 释放之后任何一次 store / 资料库变化都会走到
+   * refresh()，不拦的话刚拆掉的 474 个格子立刻又建回来了（自检抓到过）。
+   */
+  const backgroundState = { released: false }
   const prewarmer = createArtworkPrewarmer({
     bus,
     remote,
@@ -484,7 +492,14 @@ async function main () {
   // 封面懒加载器由 app 统一持有：专辑网格、艺人列表、媒体墙共用同一个 IntersectionObserver
   lazyArtwork = createLazyArtwork(artwork)
   const browseView = createBrowseView({ store, bus, player, artwork, actions, lazy: lazyArtwork })
-  const mediaWall = createMediaWall({ store, bus, player, actions, lazy: lazyArtwork })
+  const mediaWall = createMediaWall({
+    store,
+    bus,
+    player,
+    actions,
+    lazy: lazyArtwork,
+    isBackgroundReleased: () => backgroundState.released
+  })
   const settingsView = createSettingsView({ store, bus, player, actions, host })
   const playerBar = createPlayerBar({ store, bus, player, artwork, actions })
   const nowPlayingPanel = createNowPlayingPanel({ store, bus, player, artwork, host, actions })
@@ -1108,6 +1123,27 @@ async function main () {
   }
 
   /* ------------------------------------------------------------------ */
+  /* 最小化后释放后台占用                                                */
+  /* ------------------------------------------------------------------ */
+  const backgroundRelease = createBackgroundRelease({
+    store,
+    prewarmer,
+    artwork,
+    mediaWall,
+    nowPlaying: nowPlayingPanel
+  })
+
+  remote.app.onBackgroundChange(({ phase }) => {
+    backgroundState.released = phase === 'release'
+    if (phase === 'release') {
+      const result = backgroundRelease.release()
+      console.log('[app] 最小化释放：', JSON.stringify(result))
+    } else if (phase === 'resume') {
+      backgroundRelease.resume()
+    }
+  })
+
+  /* ------------------------------------------------------------------ */
   /* 启动                                                               */
   /* ------------------------------------------------------------------ */
   async function boot () {
@@ -1166,6 +1202,10 @@ async function main () {
   /* 调试与二次开发入口：开发者工具控制台里可以直接用 window.__aria */
   window.__aria = {
     bus, store, player, engine, playlist, host, artwork, actions, EVENTS, prewarmer,
+    // 艺人名拆分（合作写法的规则都在这里，控制台里可以直接试）
+    splitArtists,
+    // 最小化后的释放 / 恢复（自检会用它读释放账目）
+    background: backgroundRelease,
     // 视图组件：自检与调试会用到（例如媒体墙的 debugState / 平移）
     views: { libraryView, browseView, mediaWall, settingsView, playerBar, nowPlayingPanel, queuePanel }
   }

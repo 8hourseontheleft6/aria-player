@@ -234,6 +234,10 @@ ctx.define('lastfm', (ctx) => {
 服务工厂返回的对象就是服务实例（单个进程内单例，惰性创建）。用 `ctx.onCleanup(fn)`
 注册退出时清理；`ctx.on(event, handler)` / `ctx.emit(event, payload)` 是进程内总线。
 
+内置的服务：`settings` / `library` / `lyrics` / `online` / `musicSources` / `tray` /
+`watcher` / `background`（后者负责最小化时的内存释放，需要窗口，所以要在
+`createMainWindow()` 之后调一次 `ctx.get('background').attach(win)`）。
+
 要让渲染层能用，在 `src/main/ipc.js` 的 `handlers` 里加一行：
 
 ```js
@@ -253,6 +257,8 @@ ctx.define('lastfm', (ctx) => {
 | 新的歌词来源 | `lyricsProvider` 扩展点 |
 | 新的封面来源 | `artworkProvider` 扩展点 |
 | 音频可视化 / 音效 | `audioTap` 扩展点 |
+| 侧边栏多一个视图项 | `src/renderer/js/ui/sidebar.js` 的 `VIEW_ITEMS`（顺序由 `settings.sidebarOrder` 决定，灵动岛共用同一份定义） |
+| 最小化时要一起释放的东西 | `src/renderer/js/core/background-release.js`（记得让它在释放期间拒绝重建，见文件里的注释） |
 
 ---
 

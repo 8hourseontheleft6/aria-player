@@ -47,7 +47,7 @@ const INERTIA_MIN = 0.06
 const INERTIA_MAX_VELOCITY = 58
 const ELASTIC = 0.35
 
-export function createMediaWall ({ store, bus, player, actions, lazy }) {
+export function createMediaWall ({ store, bus, player, actions, lazy, isBackgroundReleased }) {
   let density = 'm'
   let layout = 'canvas'  /** @type {Array<object>} */
   let albumList = []
@@ -1053,6 +1053,14 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   /* ================================================================ */
 
   function refresh ({ focus = false, focusAnimate = true } = {}) {
+    /*
+     * 最小化释放期间不要建墙。
+     * 释放之后墙是空的，而任何一次 store / 资料库变化都会走到这里 —— 资料库
+     * 监听触发的那次 refresh() 会把 474 个格子重新建回来，等于白释放。
+     * 窗口还原时由 background-release 显式调一次 refresh()。
+     */
+    if (typeof isBackgroundReleased === 'function' && isBackgroundReleased()) return
+
     const state = store.get()
     const list = actions.albums()
     const rebuilt = list !== albumList
@@ -1081,7 +1089,58 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
     requestAnimationFrame(() => miniLyrics.align())
   }
 
-  /* ---------------- 事件 ---------------- */
+  /* ================================================================ */
+  /* 释放                                                              */
+  /* ================================================================ */
+
+  /**
+   * 丢掉媒体墙占的内存（最小化时调用）。
+   *
+   * 一面墙是 474 个格子 / 约 4000 个 DOM 节点，是渲染层里最大的一块。
+   * 这里把格子、槽位缓存、各种待跑的定时器和惯性动画全部清掉，并把
+   * albumList 清空 —— 这样下次 refresh() 会认为「列表变了」而重建
+   * （重建本来就很快，实测 474 个格子约 100ms）。
+   */
+  function release () {
+    if (cullTimer) {
+      clearTimeout(cullTimer)
+      cullTimer = null
+    }
+    if (visibleScanTimer) {
+      clearTimeout(visibleScanTimer)
+      visibleScanTimer = null
+    }
+    if (enteringTimer) {
+      clearTimeout(enteringTimer)
+      enteringTimer = null
+    }
+    if (resumeTimer) {
+      clearTimeout(resumeTimer)
+      resumeTimer = null
+    }
+    cancelAnimation()
+    stopInertia()
+    if (panFrame) {
+      cancelAnimationFrame(panFrame)
+      panFrame = null
+    }
+
+    const released = tiles.size
+    const nodes = grid.childElementCount
+    clear(grid)
+    tiles.clear()
+    slots.length = 0
+    slotRows = 0
+    slotColumns = 0
+    lastScan = null
+    featuredKey = null
+    albumList = []
+    return { tiles: released, nodes }
+  }
+
+  /* ================================================================ */
+  /* 事件                                                              */
+  /* ================================================================ */
 
   bus.on(EVENTS.LIBRARY_UPDATED, () => {
     if (store.get().ui.view === 'wall') refresh()
@@ -1147,6 +1206,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy }) {
   return {
     element,
     refresh,
+    release,
     focusFeatured,
     get density () { return density },
     get layout () { return layout },

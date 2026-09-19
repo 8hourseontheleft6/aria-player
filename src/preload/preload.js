@@ -17,7 +17,9 @@ const EVENT_CHANNELS = new Set([
   'media:command',
   'theme:changed',
   // 在线音源下载进度（主进程按 uid 推送）
-  'sources:download-progress'
+  'sources:download-progress',
+  // 最小化 / 收进托盘时通知渲染层释放后台占用，回来时通知恢复
+  'app:background'
 ])
 
 function on (channel, handler) {
@@ -36,7 +38,9 @@ contextBridge.exposeInMainWorld('aria', {
   isMac: process.platform === 'darwin',
 
   app: {
-    info: () => ipcRenderer.invoke('app:info')
+    info: () => ipcRenderer.invoke('app:info'),
+    /** 最小化 / 收进托盘的释放与恢复通知（payload: { phase: 'release' | 'resume' }） */
+    onBackgroundChange: (handler) => on('app:background', handler)
   },
 
   settings: {

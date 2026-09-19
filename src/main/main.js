@@ -12,11 +12,21 @@ const { createOnlineService } = require('./services/online')
 const { createMusicSourcesService } = require('./services/music-sources')
 const { createTrayService } = require('./services/tray')
 const { createWatcherService } = require('./services/watcher')
+const { createBackgroundService } = require('./services/background')
 const { registerIpc } = require('./ipc')
 const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = require('./window')
 
 // 播放器需要程序化播放（自动下一曲），不要求用户手势
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+
+/*
+ * 暴露 V8 的 gc()，给「最小化后释放后台占用」用。
+ *
+ * 释放掉媒体墙 DOM、封面 blob 缓存之后，内存并不会立刻还回去 —— 得让 V8
+ * 真的回收一轮。没有这个开关时 global.gc / window.gc 都是 undefined，代码里
+ * 做了存在性判断，所以去掉这一行不会报错，只是显存回收变被动。
+ */
+app.commandLine.appendSwitch('js-flags', '--expose-gc')
 
 /*
  * 自动化模式（自检 / 截图 / 帧率诊断 / 视觉审计）使用独立的用户数据目录。
@@ -70,6 +80,7 @@ async function bootstrap () {
   ctx.define('musicSources', createMusicSourcesService)
   ctx.define('tray', createTrayService)
   ctx.define('watcher', createWatcherService)
+  ctx.define('background', createBackgroundService)
 
   const settings = ctx.get('settings')
   await settings.init()
@@ -89,6 +100,9 @@ async function bootstrap () {
   const win = createMainWindow(ctx)
   const tray = ctx.get('tray')
   tray.sync()
+
+  // 最小化 / 收进托盘后释放后台占用，回来时恢复（媒体墙、封面缓存、目录监听）
+  ctx.get('background').attach(win)
 
   /* ---------------- 系统集成：托盘 / 任务栏 / 主进程指令 ---------------- */
 

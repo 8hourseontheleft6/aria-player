@@ -222,5 +222,29 @@ export function createArtworkService ({ bus, host = null }) {
     root.style.setProperty('--tint-soft', color.tintSoft || color.tint)
   }
 
-  return { resolveUrl, resolveColor, applyTint, fallbackColor }
+  /**
+   * 释放封面缓存（最小化时调用）。
+   *
+   * 缓存的 blob 最多 120 个，每个都是解码过的位图（480px 见方约 1MB），
+   * 这是渲染层里最容易悄悄涨起来的一块。这里 revoke 掉 URL 并清空表，
+   * 之后有人要同一张封面会重新走一次 IPC（按下限缓存，值）。
+   *
+   * 注意：已经显示在 <img> 上的图片不会因此消失 —— revoke 只让「这个 URL
+   * 不能再被加载」，已经解码好的位图还在元素里。
+   */
+  function releaseMemory () {
+    let revoked = 0
+    for (const entry of urlCache.values()) {
+      if (entry.blob) {
+        URL.revokeObjectURL(entry.url)
+        revoked++
+      }
+    }
+    const urls = urlCache.size
+    urlCache.clear()
+    colorCache.clear()
+    return { urls, revoked }
+  }
+
+  return { resolveUrl, resolveColor, applyTint, fallbackColor, releaseMemory }
 }

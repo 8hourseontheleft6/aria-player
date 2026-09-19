@@ -93,8 +93,8 @@ html[data-platform="darwin"] .titlebar {
   transition: opacity var(--dur) var(--ease-ios);
 }
 
-/* 当前视图不属于这四个之一（如设置页）时整条隐藏 */
-.island.has-active {
+/* 当前视图不属于这四段（如设置页）或侧边栏正开着时，整条淡出 */
+.island.is-visible {
   opacity: 1;
   pointer-events: auto;
 }
@@ -263,6 +263,72 @@ html[data-platform="darwin"] .titlebar {
   flex: 1;
   min-height: 0;
   padding: 6px 10px 10px;
+}
+
+/* 侧栏自己的头部：标题 + 收起按钮（收起后由标题栏的按钮负责展开） */
+.sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: var(--titlebar-h);
+  padding: 0 8px 0 18px;
+  flex: none;
+}
+
+.sidebar__title {
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  color: var(--label-3);
+  letter-spacing: 0.01em;
+}
+
+.sidebar__collapse {
+  width: 24px;
+  height: 24px;
+  color: var(--label-3);
+}
+
+.sidebar__collapse:hover {
+  color: var(--label);
+  background: var(--bg-hover);
+}
+
+.sidebar__collapse .icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* 视图项容器：拖动排序只发生在这一组里 */
+.sidebar__nav .sidebar__row {
+  cursor: grab;
+  transition:
+    background var(--dur-fast) var(--ease-ios),
+    color var(--dur-fast) var(--ease-ios),
+    transform var(--dur) var(--ease-ios),
+    box-shadow var(--dur) var(--ease-ios);
+}
+
+/* 排序进行中：其它行跟着滑动（FLIP 的 Play 段靠这条过渡），文字不要被选中 */
+.sidebar__nav.is-reordering {
+  user-select: none;
+}
+
+.sidebar__nav.is-reordering .sidebar__row {
+  cursor: grabbing;
+}
+
+/* 被拖动的那一行由指针直接驱动，不能再叠加过渡，否则会拖泥带水 */
+.sidebar__nav.is-reordering .sidebar__row.is-dragging {
+  transition: none;
+}
+
+.sidebar__row.is-dragging {
+  z-index: 3;
+  background: var(--bg-elevated);
+  color: var(--label);
+  box-shadow: var(--elev-2);
+  cursor: grabbing;
 }
 
 .sidebar__section {

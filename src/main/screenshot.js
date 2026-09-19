@@ -199,6 +199,16 @@ async function runScreenshots ({ win }) {
         ${WAIT_COVERS}
         return true`)
       await sleep(600)
+    }],
+    // 侧栏收起后的样子：标题栏正中的灵动岛接管导航（两者不同时出现）
+    ['16-sidebar-hidden.png', '收起侧栏（灵动岛接管导航）', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        actions.setView('songs')
+        if (store.get().ui.sidebarVisible) actions.toggleSidebar()
+        await new Promise((r) => setTimeout(r, 900))
+        return true`)
+      await sleep(900)
     }]
   ]
 

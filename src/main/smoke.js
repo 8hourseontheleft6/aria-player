@@ -447,6 +447,16 @@ async function runSmoke ({ win, ctx }) {
       await actions.commitSearch('Blues')
       actions.setSearchScope('basic')
       await settle(280)
+      /*
+       * 等历史真的到齐再读面板。
+       * 历史是「写设置 → 主进程落盘 → 推 settings:changed → 回填 store」，
+       * 提交完立刻读会读到上一轮的空历史；这时后面那句
+       * panel.querySelector('.search-panel__term').click() 会取到 null ——
+       * 整个自检就在第 27 项以异常中止（表现为「26/27 通过」这种偶发）。
+       */
+      for (let i = 0; i < 60 && store.get().settings.searchHistory.length < 2; i++) {
+        await settle(50)
+      }
 
       const slot = document.querySelector('.search-slot')
       const toggle = slot.querySelector('.btn')
@@ -483,7 +493,10 @@ async function runSmoke ({ win, ctx }) {
         placeholder: input.placeholder
       }
 
-      panel.querySelector('.search-panel__term').click()
+      // 取不到就让它变成一条「没通过」，而不是抛异常把整个自检打断
+      const firstTerm = panel.querySelector('.search-panel__term')
+      const pickedTerm = firstTerm ? firstTerm.textContent : null
+      if (firstTerm) firstTerm.click()
       await settle()
       const afterPick = { query: store.get().ui.query, value: input.value }
 
@@ -507,7 +520,7 @@ async function runSmoke ({ win, ctx }) {
       actions.setQuery('')
       await actions.clearSearchHistory()
       await settle(150)
-      return { collapsed, opened, afterScope, afterPick, afterEscape, queryBeforeClose, afterCollapse }
+      return { collapsed, opened, afterScope, afterPick, afterEscape, queryBeforeClose, afterCollapse, pickedTerm }
     `)
     record('搜索框：默认收起成图标，点开才展开',
       searchPanelCheck.collapsed.open === false &&
@@ -529,7 +542,7 @@ async function runSmoke ({ win, ctx }) {
       searchPanelCheck.afterEscape.hidden === true,
       `展开后面板可见（范围 ${JSON.stringify(searchPanelCheck.opened.scopes)}，历史 ${JSON.stringify(searchPanelCheck.opened.history)}）；` +
       `切到深度档后按钮显示「${searchPanelCheck.afterScope.label}」、提示「${searchPanelCheck.afterScope.hint}」、占位「${searchPanelCheck.afterScope.placeholder}」；` +
-      `点历史回填「${searchPanelCheck.afterPick.query}」；Esc 收起=${searchPanelCheck.afterEscape.hidden}`)
+      `点历史「${searchPanelCheck.pickedTerm || '（没有历史项可点）'}」回填「${searchPanelCheck.afterPick.query}」；Esc 收起=${searchPanelCheck.afterEscape.hidden}`)
 
     /* ---------- 「看得见、点得到」：程序化 click 抓不到的那类问题 ----------
      *
@@ -1545,49 +1558,109 @@ async function runSmoke ({ win, ctx }) {
       `分组存在=${uiPrefsCheck.hasSourcesGroup}，默认收起=${uiPrefsCheck.collapsedInitially}（卡片隐藏=${uiPrefsCheck.cardHiddenInitially}）；` +
       `点标题后展开=${uiPrefsCheck.expandedAfterClick}（卡片可见=${uiPrefsCheck.cardShownAfterClick}）`)
 
-    /* ---------- 灵动岛 / 侧边栏收起 / 行悬停浮起 ---------- */
+    /* ---------- 侧边栏与灵动岛（互斥出现）/ 行悬停浮起 ---------- */
     // 悬停相关的样式（:hover）不能靠 dispatchEvent 触发 —— 合成事件不会更新
     // Blink 的 hover 状态。这里用 sendInputEvent 走真实输入管线。
-    const islandBase = await evaluate(win, `
-      const { actions } = window.__aria
+    const shellInfo = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 320) => { await new Promise((r) => setTimeout(r, ms)) }
+      const realClick = (node) => {
+        const rect = node.getBoundingClientRect()
+        const x = Math.round(rect.left + rect.width / 2)
+        const y = Math.round(rect.top + rect.height / 2)
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          node.dispatchEvent(new MouseEvent(type, {
+            bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type.includes('down') ? 1 : 0
+          }))
+        }
+      }
+      const box = (node) => {
+        const r = node.getBoundingClientRect()
+        return {
+          left: Math.round(r.left),
+          right: Math.round(r.right),
+          top: Math.round(r.top),
+          bottom: Math.round(r.bottom),
+          width: Math.round(r.width),
+          height: Math.round(r.height)
+        }
+      }
+      const islandShown = () => {
+        const island = document.querySelector('.island')
+        return island.classList.contains('is-visible') && getComputedStyle(island).opacity === '1'
+      }
+      const labelShown = (node) => node.getBoundingClientRect().width > 4
+
       actions.setView('songs')
-      await new Promise((r) => setTimeout(r, 800))
+      actions.setQuery('')
+      await settle(700)
+
+      const app = document.getElementById('app')
+      const sidebar = document.querySelector('.sidebar')
+      const collapseButton = document.querySelector('.sidebar__collapse')
+      const titlebarToggle = document.querySelector('.titlebar__left .btn--icon')
+
+      // ① 侧栏开着：灵动岛整条隐身（两者不同时出现）
+      if (!store.get().ui.sidebarVisible) { actions.toggleSidebar(); await settle(700) }
+      const openState = {
+        sidebarVisible: store.get().ui.sidebarVisible,
+        sidebarWidth: box(sidebar).width,
+        islandShown: islandShown()
+      }
+
+      // ② 点侧栏自己的收起按钮
+      realClick(collapseButton)
+      await settle(900)
+      const collapsed = {
+        sidebarVisible: store.get().ui.sidebarVisible,
+        hiddenFlag: app.classList.contains('is-sidebar-hidden'),
+        sidebarWidth: box(sidebar).width,
+        islandShown: islandShown()
+      }
       const island = document.querySelector('.island')
-      if (!island) return { missing: true }
-      const rect = island.getBoundingClientRect()
+      const rect = box(island)
       const items = [...island.querySelectorAll('.island__item')]
       const labels = [...island.querySelectorAll('.island__label')]
       const activeItem = items.find((node) => node.classList.contains('is-active'))
-      const titlebar = document.querySelector('.titlebar').getBoundingClientRect()
-      return {
-        missing: false,
+      const titlebar = box(document.querySelector('.titlebar'))
+      const islandBase = {
         itemCount: items.length,
         activeKey: activeItem ? activeItem.dataset.view : null,
-        collapsedWidth: Math.round(rect.width),
-        visibleLabels: labels.filter((node) => node.getBoundingClientRect().width > 4).length,
-        // 居中：岛中心与标题栏中心的偏差
+        order: items.map((node) => node.dataset.view),
+        collapsedWidth: rect.width,
+        visibleLabels: labels.filter(labelShown).length,
         centerOffset: Math.round((rect.left + rect.width / 2) - (titlebar.left + titlebar.width / 2)),
-        center: { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) },
-        thumbLeft: Math.round(island.querySelector('.island__thumb').getBoundingClientRect().left)
+        center: { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
       }
+      return { openState, collapsed, islandBase }
     `)
 
-    win.webContents.sendInputEvent({
-      type: 'mouseMove',
-      x: islandBase.center ? islandBase.center.x : 400,
-      y: islandBase.center ? islandBase.center.y : 20
-    })
-    await sleep(900)
-    const islandHover = await evaluate(win, `
-      const island = document.querySelector('.island')
-      const rect = island.getBoundingClientRect()
-      const labels = [...island.querySelectorAll('.island__label')]
-      return {
-        hoveredWidth: Math.round(rect.width),
-        visibleLabels: labels.filter((node) => node.getBoundingClientRect().width > 4).length,
-        hovered: island.matches(':hover')
-      }
-    `)
+    // 悬停要把真实指针送到岛上。第一次 move 有时不生效（Chromium 对「坐标没变」
+    // 的移动事件可能不更新 hover 状态），所以先挪到旁边再挪进来，并最多重试三次；
+    // 顺便记下命中测试的结果，失败时能一眼看出是被谁挡住了。
+    const islandCenter = shellInfo.islandBase.center || { x: 400, y: 20 }
+    let islandHover = { hovered: false, visibleLabels: 0, hoveredWidth: 0, attempts: 0 }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: islandCenter.x - 40, y: islandCenter.y })
+      await sleep(180)
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: islandCenter.x, y: islandCenter.y })
+      await sleep(700)
+      islandHover = await evaluate(win, `
+        const island = document.querySelector('.island')
+        const rect = island.getBoundingClientRect()
+        const labels = [...island.querySelectorAll('.island__label')]
+        const hit = document.elementFromPoint(${islandCenter.x}, ${islandCenter.y})
+        return {
+          hovered: island.matches(':hover'),
+          hoveredWidth: Math.round(rect.width),
+          visibleLabels: labels.filter((node) => node.getBoundingClientRect().width > 4).length,
+          rect: { left: Math.round(rect.left), right: Math.round(rect.right), top: Math.round(rect.top), bottom: Math.round(rect.bottom) },
+          hit: hit ? (hit.className || hit.tagName) : null,
+          attempts: ${attempt}
+        }
+      `)
+      if (islandHover.hovered) break
+    }
     // 移开指针，别把悬停状态带进后面的检查
     win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 420 })
     await sleep(700)
@@ -1615,50 +1688,260 @@ async function runSmoke ({ win, ctx }) {
       // 设置页不属于这四段，整条应该淡出
       actions.setView('settings')
       await settle(600)
-      const hiddenOnSettings = !island.classList.contains('has-active') &&
+      const hiddenOnSettings = !island.classList.contains('is-visible') &&
         getComputedStyle(island).opacity === '0'
       actions.setView('songs')
       await settle(500)
       return { beforeLeft, afterLeft, viewAfter, activeAfter: activeAfter ? activeAfter.view : null, hiddenOnSettings }
     `)
+    record('侧栏与灵动岛：不同时出现，侧栏自己的按钮能收起',
+      shellInfo.openState.sidebarVisible === true &&
+      shellInfo.openState.sidebarWidth > 200 &&
+      shellInfo.openState.islandShown === false &&
+      shellInfo.collapsed.sidebarVisible === false &&
+      shellInfo.collapsed.hiddenFlag === true &&
+      shellInfo.collapsed.sidebarWidth <= 1 &&
+      shellInfo.collapsed.islandShown === true,
+      `侧栏开着时：宽 ${shellInfo.openState.sidebarWidth}px、灵动岛出现=${shellInfo.openState.islandShown}；` +
+      `点侧栏头部收起按钮后：宽 ${shellInfo.collapsed.sidebarWidth}px、灵动岛出现=${shellInfo.collapsed.islandShown}`)
     record('顶栏灵动岛：切换视图 + 悬停展开',
-      !islandBase.missing &&
-      islandBase.itemCount === 4 &&
-      islandBase.activeKey === 'songs' &&
-      islandBase.visibleLabels === 1 &&
-      Math.abs(islandBase.centerOffset) <= 2 &&
+      shellInfo.islandBase.itemCount === 4 &&
+      shellInfo.islandBase.activeKey === 'songs' &&
+      shellInfo.islandBase.visibleLabels === 1 &&
+      Math.abs(shellInfo.islandBase.centerOffset) <= 2 &&
       islandHover.hovered === true &&
       islandHover.visibleLabels === 4 &&
-      islandHover.hoveredWidth > islandBase.collapsedWidth + 40 &&
+      islandHover.hoveredWidth > shellInfo.islandBase.collapsedWidth + 40 &&
       islandClick.viewAfter === 'albums' &&
       islandClick.activeAfter === 'albums' &&
       islandClick.afterLeft > islandClick.beforeLeft &&
       islandClick.hiddenOnSettings === true,
-      `收起时宽 ${islandBase.collapsedWidth}px、只显示当前项文字（可见标签 ${islandBase.visibleLabels}/4），与标题栏中心偏差 ${islandBase.centerOffset}px；` +
-      `悬停后 ${islandHover.hoveredWidth}px、标签 ${islandHover.visibleLabels}/4（:hover=${islandHover.hovered}）；` +
+      `收起时宽 ${shellInfo.islandBase.collapsedWidth}px、只显示当前项文字（可见标签 ${shellInfo.islandBase.visibleLabels}/4），与标题栏中心偏差 ${shellInfo.islandBase.centerOffset}px；` +
+      `悬停后 ${islandHover.hoveredWidth}px、标签 ${islandHover.visibleLabels}/4（:hover=${islandHover.hovered}，第 ${islandHover.attempts} 次尝试成功；` +
+      `岛盒子 ${islandHover.rect ? `${islandHover.rect.left}~${islandHover.rect.right} × ${islandHover.rect.top}~${islandHover.rect.bottom}` : '—'}，命中 ${islandHover.hit}）；` +
       `点「专辑」→ 视图 ${islandClick.viewAfter}，高亮 ${islandClick.activeAfter}，滑块 ${islandClick.beforeLeft}→${islandClick.afterLeft}px；` +
       `设置页整条淡出=${islandClick.hiddenOnSettings}`)
 
+    /* ---------- 最小化：释放后台占用，回来时恢复 ---------- */
+    // 主进程侧的账本在这里拿：app.getAppMetrics() 是所有进程的内存口径
+    const background = ctx.get('background')
+    const pickMemory = () => background.state.memory
+
+    // 先把媒体墙建起来（它不是当前视图就没东西可释放），并开始播放：
+    // 最小化之后音乐必须还在放 —— 释放的是「能重建的」，不是「正在用的」
+    const releaseBefore = await evaluate(win, `
+      const { actions, player, views, prewarmer, store } = window.__aria
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 1500))
+      await player.play()
+      await new Promise((r) => setTimeout(r, 1200))
+      return {
+        wallTiles: views.mediaWall.tileCount,
+        wallNodes: document.querySelectorAll('.wall-tile').length,
+        nodes: document.getElementsByTagName('*').length,
+        covers: document.querySelectorAll('img[src^="blob:"]').length,
+        prewarmSuspended: prewarmer.state.suspended,
+        status: store.get().playback.status,
+        trackId: store.get().playback.trackId,
+        time: Math.round(player.getTime() * 10) / 10
+      }
+    `)
+    const memoryBefore = pickMemory()
+
+    win.minimize()
+    // 主进程的释放延迟是 4s，之后还要等它量完内存
+    await sleep(6500)
+    const releasedState = await evaluate(win, `
+      const { background, views, prewarmer, store, player } = window.__aria
+      return {
+        released: background.state.released,
+        lastRelease: background.state.lastRelease,
+        wallTiles: views.mediaWall.tileCount,
+        wallNodes: document.querySelectorAll('.wall-tile').length,
+        nodes: document.getElementsByTagName('*').length,
+        prewarmSuspended: prewarmer.state.suspended,
+        status: store.get().playback.status,
+        time: Math.round(player.getTime() * 10) / 10,
+        minimizedPlayback: store.get().playback.trackId
+      }
+    `)
+    const memoryAfter = pickMemory()
+    const mainRelease = background.state.lastRelease
+
+    win.restore()
+    await sleep(2000)
+    const resumedState = await evaluate(win, `
+      const { background, views, prewarmer, store, actions } = window.__aria
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 1500))
+      return {
+        released: background.state.released,
+        resumes: background.state.resumes,
+        prewarmSuspended: prewarmer.state.suspended,
+        wallTiles: views.mediaWall.tileCount,
+        wallNodes: document.querySelectorAll('.wall-tile').length,
+        status: store.get().playback.status
+      }
+    `)
+
+    // 目录监听：长时间不在前台才停（45s），这里用 force 直接把这条路径跑一遍
+    const watcherBefore = ctx.get('watcher').getStats().watching
+    background.pauseWatcher({ force: true })
+    const watcherPaused = ctx.get('watcher').getStats().watching
+    background.resume()
+    await sleep(1200)
+    const watcherResumed = ctx.get('watcher').getStats().watching
+
+    record('最小化：释放媒体墙与封面缓存（回来能恢复）',
+      releaseBefore.wallTiles > 100 &&
+      releaseBefore.wallNodes > 100 &&
+      releasedState.released === true &&
+      releasedState.lastRelease &&
+      releasedState.lastRelease.wallTiles >= 100 &&
+      releasedState.lastRelease.covers > 0 &&
+      releasedState.lastRelease.gc === true &&
+      releasedState.wallNodes === 0 &&
+      // 整页节点数要明显掉下来（只掉几十个说明墙又被重建回去了）
+      releaseBefore.nodes - releasedState.nodes > 1000 &&
+      releasedState.prewarmSuspended === true &&
+      mainRelease &&
+      mainRelease.savedKB > 0 &&
+      memoryAfter.workingSetKB < memoryBefore.workingSetKB &&
+      // 最小化之后音乐不能停
+      releasedState.status === 'playing' &&
+      releasedState.time >= releaseBefore.time &&
+      releasedState.minimizedPlayback === releaseBefore.trackId,
+      `释放前：媒体墙 ${releaseBefore.wallTiles} 个格子 / ${releaseBefore.wallNodes} 个节点 / 整页 ${releaseBefore.nodes} 个节点；` +
+      `释放后：墙上剩 ${releasedState.wallNodes} 个节点、整页 ${releasedState.nodes} 个，渲染层回收了 ${releasedState.lastRelease ? releasedState.lastRelease.wallTiles : 0} 个格子与 ` +
+      `${releasedState.lastRelease ? releasedState.lastRelease.covers : 0} 个封面 URL（GC=${releasedState.lastRelease ? releasedState.lastRelease.gc : '—'}，预热已挂起=${releasedState.prewarmSuspended}）；` +
+      `内存 ${Math.round(memoryBefore.workingSetKB / 1024)}MB → ${Math.round(memoryAfter.workingSetKB / 1024)}MB` +
+      `${mainRelease ? `（主进程记的账：省下 ${Math.round(mainRelease.savedKB / 1024)}MB）` : ''}；` +
+      `播放未被打断：${releaseBefore.status} ${releaseBefore.time}s → ${releasedState.status} ${releasedState.time}s`)
+    record('恢复：预热回来、媒体墙重建、目录监听能停能起',
+      resumedState.released === false &&
+      resumedState.resumes >= 1 &&
+      resumedState.prewarmSuspended === false &&
+      resumedState.wallTiles > 100 &&
+      resumedState.wallNodes > 100 &&
+      resumedState.status === 'playing' &&
+      watcherBefore > 0 &&
+      watcherPaused === 0 &&
+      watcherResumed === watcherBefore,
+      `恢复后：预热挂起=${resumedState.prewarmSuspended}，媒体墙重建 ${resumedState.wallTiles} 个格子 / ${resumedState.wallNodes} 个节点；` +
+      `目录监听 ${watcherBefore} → 停止后 ${watcherPaused} → 恢复后 ${watcherResumed}；播放仍是 ${resumedState.status}`)
+
+    /* ---------- 多艺人的拆分 ---------- */
+    // 真实资料库里两种合作写法：顿号（Taylor Swift、Kendrick Lamar）和
+    // 不带空格的 &（Taylor Swift&Brendon Urie）。拆分规则要同时做到：
+    // 合作拆开、乐队名不能拆（Tungevaag & Raaban / W&W / Tones And I）。
+    const artistSplit = await evaluate(win, `
+      const { actions, splitArtists } = window.__aria
+      const artists = actions.artists()
+      const names = artists.map((a) => a.name)
+      const byName = new Map(artists.map((a) => [a.name, a]))
+
+      // 资料库里真实存在的合作曲目
+      const tracks = window.__aria.store.get().library.tracks
+      const tightAmp = tracks.find((t) => /\\S&\\S/.test(t.artist || ''))
+      const dunhao = tracks.find((t) => (t.artist || '').includes('、'))
+      // 带空格的 & 是乐队名：要挑一个「只有它、没有顿号」的样本，
+      // 否则像 PØRPEL、Marcus & Martinus 这种会因为顿号被拆开，验不出这条规则
+      const bandWithSpaces = tracks.find((t) => /\\s&\\s/.test(t.artist || '') && !(t.artist || '').includes('、'))
+      const andBand = tracks.find((t) => /\\band\\b/i.test(t.artist || '') && !(t.artist || '').includes('、'))
+
+      const namesOf = (track) => (track ? splitArtists(track.albumArtist || track.artist) : null)
+      const artistEntry = (track, index) => {
+        const split = namesOf(track)
+        const name = split ? split[index] : null
+        const entry = name ? byName.get(name) : null
+        return entry ? { name: entry.name, tracks: entry.trackCount, albums: entry.albumCount } : null
+      }
+
+      return {
+        total: names.length,
+        // 「还有残留」的判定要按拆分规则自己来：W&W 这种被规则刻意保留的名字
+        // 不该算成残留（名字里带 & 不等于没拆干净）
+        leftoverCollab: names.filter((name) => splitArtists(name).length > 1).slice(0, 8),
+        // 规则本身（用假数据把所有分支跑一遍）
+        cases: {
+          tightAmp: splitArtists('Taylor Swift&Brendon Urie'),
+          threeWay: splitArtists('Taylor Swift&Ed Sheeran&Future'),
+          dunhao: splitArtists('Taylor Swift、Kendrick Lamar'),
+          semicolon: splitArtists('A;B；C'),
+          feat: splitArtists('Calvin Harris feat. Rihanna'),
+          bandSpaces: splitArtists('Tungevaag & Raaban'),
+          bandW: splitArtists('W&W、BlasterJaxx'),
+          caseAnd: splitArtists('Tones And I'),
+          single: splitArtists('Adele'),
+          empty: splitArtists(''),
+          dupes: splitArtists('Adele、Adele')
+        },
+        sample: {
+          tightAmp: tightAmp ? { raw: tightAmp.artist, split: namesOf(tightAmp), first: artistEntry(tightAmp, 0), second: artistEntry(tightAmp, 1) } : null,
+          dunhao: dunhao ? { raw: dunhao.artist, split: namesOf(dunhao), first: artistEntry(dunhao, 0), second: artistEntry(dunhao, 1) } : null,
+          bandWithSpaces: bandWithSpaces ? { raw: bandWithSpaces.artist, split: namesOf(bandWithSpaces) } : null,
+          andBand: andBand ? { raw: andBand.artist, split: namesOf(andBand) } : null
+        }
+      }
+    `)
+    record('艺人：合作曲目按写法拆分，乐队名不误伤',
+      artistSplit.sample.tightAmp &&
+      artistSplit.sample.tightAmp.split.length === 2 &&
+      artistSplit.sample.tightAmp.first &&
+      artistSplit.sample.tightAmp.second &&
+      artistSplit.sample.tightAmp.first.tracks >= 1 &&
+      artistSplit.sample.tightAmp.second.tracks >= 1 &&
+      artistSplit.sample.bandWithSpaces &&
+      artistSplit.sample.bandWithSpaces.split.length === 1 &&
+      artistSplit.sample.andBand &&
+      artistSplit.sample.andBand.split.length === 1 &&
+      artistSplit.leftoverCollab.length === 0 &&
+      artistSplit.cases.tightAmp.join('|') === 'Taylor Swift|Brendon Urie' &&
+      artistSplit.cases.threeWay.join('|') === 'Taylor Swift|Ed Sheeran|Future' &&
+      artistSplit.cases.dunhao.join('|') === 'Taylor Swift|Kendrick Lamar' &&
+      artistSplit.cases.semicolon.join('|') === 'A|B|C' &&
+      artistSplit.cases.feat.join('|') === 'Calvin Harris|Rihanna' &&
+      artistSplit.cases.bandSpaces.join('|') === 'Tungevaag & Raaban' &&
+      artistSplit.cases.bandW.join('|') === 'W&W|BlasterJaxx' &&
+      artistSplit.cases.caseAnd.join('|') === 'Tones And I' &&
+      artistSplit.cases.single.join('|') === 'Adele' &&
+      artistSplit.cases.empty.length === 0 &&
+      artistSplit.cases.dupes.join('|') === 'Adele',
+      `艺人总数 ${artistSplit.total}，仍然拆分不干净的艺人条目 ${artistSplit.leftoverCollab.length} 个` +
+      `${artistSplit.leftoverCollab.length ? `（${artistSplit.leftoverCollab.join('、')}）` : ''}；` +
+      `真实样例：「${artistSplit.sample.tightAmp.raw}」→ ${artistSplit.sample.tightAmp.split.join(' + ')}` +
+      `（${artistSplit.sample.tightAmp.first.name} ${artistSplit.sample.tightAmp.first.tracks} 首 / ${artistSplit.sample.tightAmp.second.name} ${artistSplit.sample.tightAmp.second.tracks} 首）；` +
+      `「${artistSplit.sample.dunhao.raw}」→ ${artistSplit.sample.dunhao.split.join(' + ')}；` +
+      `乐队名不动：「${artistSplit.sample.bandWithSpaces.raw}」→ ${artistSplit.sample.bandWithSpaces.split.join(' + ')}，` +
+      `「${artistSplit.sample.andBand.raw}」→ ${artistSplit.sample.andBand.split.join(' + ')}`)
+
+    /* ---------- 侧栏：标题栏按钮切回 + 拖动排序 ---------- */
     const sidebarInfo = await evaluate(win, `
-      const { store } = window.__aria
+      const { actions, store } = window.__aria
       const settle = async (ms = 320) => { await new Promise((r) => setTimeout(r, ms)) }
       const app = document.getElementById('app')
       const sidebar = document.querySelector('.sidebar')
       const toggle = document.querySelector('.titlebar__left .btn--icon')
+      const click = (node) => {
+        const r = node.getBoundingClientRect()
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          node.dispatchEvent(new MouseEvent(type, {
+            bubbles: true, cancelable: true,
+            clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + r.height / 2),
+            button: 0, buttons: type.includes('down') ? 1 : 0
+          }))
+        }
+      }
+
+      // 上一步把侧栏收起来了：这里用标题栏的按钮切回来
+      const collapsedWidth = Math.round(sidebar.getBoundingClientRect().width)
+      click(toggle)
+      await settle(900)
+      const restoredWidth = Math.round(sidebar.getBoundingClientRect().width)
       const wideRect = sidebar.getBoundingClientRect()
-      const toggleRect = toggle.getBoundingClientRect()
-      const before = {
-        hidden: app.classList.contains('is-sidebar-hidden'),
-        width: Math.round(wideRect.width)
-      }
-      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-        toggle.dispatchEvent(new MouseEvent(type, {
-          bubbles: true, cancelable: true,
-          clientX: Math.round(toggleRect.left + toggleRect.width / 2),
-          clientY: Math.round(toggleRect.top + toggleRect.height / 2),
-          button: 0, buttons: type.includes('down') ? 1 : 0
-        }))
-      }
+
+      // 再用一次 Ctrl+B（走的是同一条 actions.toggleSidebar）
+      actions.toggleSidebar()
       await settle(800)
       const hiddenRect = sidebar.getBoundingClientRect()
       const hit = document.elementFromPoint(
@@ -1673,28 +1956,102 @@ async function runSmoke ({ win, ctx }) {
         columns: getComputedStyle(app).gridTemplateColumns,
         hitInsideSidebar: Boolean(hit && hit.closest('.sidebar'))
       }
-      // 再切回来
-      toggle.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      actions.toggleSidebar()
       await settle(800)
-      const restored = {
-        flag: app.classList.contains('is-sidebar-hidden'),
-        width: Math.round(sidebar.getBoundingClientRect().width)
+      const backWidth = Math.round(sidebar.getBoundingClientRect().width)
+
+      /* ---------------- 拖动排序 ---------------- */
+      // 前面的检查可能把视图留在别处（最小化那一段会切到媒体墙），先归位
+      actions.setView('songs')
+      await settle(700)
+      const before = store.get().settings.sidebarOrder.slice()
+      const nav = document.querySelector('.sidebar__nav')
+      const rows = [...nav.children]
+      const order0 = rows.map((node) => node.dataset.viewKey)
+      const dragRow = rows[0]
+      const targetRow = rows[2]
+      const dragRect = dragRow.getBoundingClientRect()
+      const targetRect = targetRow.getBoundingClientRect()
+      const rowHeight = dragRect.height
+      const pointerId = 7
+      const pointerEvent = (type, x, y) => new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId, isPrimary: true,
+        pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1,
+        clientX: Math.round(x), clientY: Math.round(y)
+      })
+      const startX = Math.round(dragRect.left + dragRect.width / 2)
+      const startY = Math.round(dragRect.top + dragRect.height / 2)
+
+      dragRow.dispatchEvent(pointerEvent('pointerdown', startX, startY))
+      // 超过阈值才算「在排序」
+      dragRow.dispatchEvent(pointerEvent('pointermove', startX, startY + 8))
+      const draggingClass = dragRow.classList.contains('is-dragging')
+      const navClass = nav.classList.contains('is-reordering')
+      // 往下拖两格：指针落到第 3 行的中心，那一行应该正好排到第 3 位
+      dragRow.dispatchEvent(pointerEvent('pointermove', startX, Math.round(targetRect.top + targetRect.height / 2)))
+      const liftedTransform = dragRow.style.transform
+      const neighboursAnimating = [...nav.children]
+        .filter((node) => node !== dragRow)
+        .map((node) => getComputedStyle(node).transform)
+        .filter((value) => value && value !== 'none' && value !== 'matrix(1, 0, 0, 1, 0, 0)').length
+      dragRow.dispatchEvent(pointerEvent('pointerup', startX, Math.round(targetRect.top + targetRect.height / 2)))
+      await settle(700)
+
+      const orderAfterDrag = [...nav.children].map((node) => node.dataset.viewKey)
+      const savedOrder = store.get().settings.sidebarOrder.slice()
+      const islandOrder = [...document.querySelectorAll('.island__item')].map((node) => node.dataset.view)
+      // 拖动不该顺带切换视图
+      const viewAfterDrag = store.get().ui.view
+
+      // 还原成拖动前的顺序，别把这份设置留在临时档里
+      await actions.setSetting({ sidebarOrder: before })
+      await settle(600)
+      const orderRestored = [...nav.children].map((node) => node.dataset.viewKey)
+
+      return {
+        collapsedWidth,
+        restoredWidth,
+        hidden,
+        backWidth,
+        order0,
+        before,
+        orderAfterDrag,
+        savedOrder,
+        islandOrder,
+        viewAfterDrag,
+        orderRestored,
+        draggingClass,
+        navClass,
+        liftedTransform,
+        neighboursAnimating
       }
-      return { before, hidden, restored, visibleInStore: store.get().ui.sidebarVisible }
     `)
-    record('侧边栏：Ctrl+B / 按钮收起后真的消失，可再切回',
-      sidebarInfo.before.hidden === false &&
-      sidebarInfo.before.width > 200 &&
+    record('侧边栏：标题栏按钮与 Ctrl+B 都能切换',
+      sidebarInfo.restoredWidth > 200 &&
       sidebarInfo.hidden.flag === true &&
       sidebarInfo.hidden.width <= 1 &&
       sidebarInfo.hidden.opacity === '0' &&
       sidebarInfo.hidden.borderRight === 'rgba(0, 0, 0, 0)' &&
       sidebarInfo.hidden.hitInsideSidebar === false &&
-      sidebarInfo.restored.flag === false &&
-      sidebarInfo.restored.width > 200,
-      `收起前宽 ${sidebarInfo.before.width}px；收起后 ${sidebarInfo.hidden.width}px、opacity ${sidebarInfo.hidden.opacity}、` +
-      `边框 ${sidebarInfo.hidden.borderRight}、列宽「${sidebarInfo.hidden.columns}」、该处命中侧栏=${sidebarInfo.hidden.hitInsideSidebar}；` +
-      `再点一次恢复 ${sidebarInfo.restored.width}px`)
+      sidebarInfo.backWidth > 200,
+      `收起时宽 ${sidebarInfo.collapsedWidth}px → 标题栏按钮切回 ${sidebarInfo.restoredWidth}px；` +
+      `再收起：宽 ${sidebarInfo.hidden.width}px、opacity ${sidebarInfo.hidden.opacity}、边框 ${sidebarInfo.hidden.borderRight}、` +
+      `列宽「${sidebarInfo.hidden.columns}」、该处命中侧栏=${sidebarInfo.hidden.hitInsideSidebar}；再切回 ${sidebarInfo.backWidth}px`)
+    record('侧边栏：拖动排序，其它标签跟着滑动，顺序会保存（灵动岛同步）',
+      sidebarInfo.order0.join() === 'songs,albums,artists,wall' &&
+      sidebarInfo.orderAfterDrag.join() === 'albums,artists,songs,wall' &&
+      sidebarInfo.savedOrder.join() === sidebarInfo.orderAfterDrag.join() &&
+      sidebarInfo.islandOrder.join() === sidebarInfo.orderAfterDrag.join() &&
+      sidebarInfo.orderRestored.join() === sidebarInfo.before.join() &&
+      sidebarInfo.draggingClass === true &&
+      sidebarInfo.navClass === true &&
+      sidebarInfo.liftedTransform.startsWith('translateY(') &&
+      sidebarInfo.neighboursAnimating > 0 &&
+      sidebarInfo.viewAfterDrag === 'songs',
+      `起始顺序 ${sidebarInfo.order0.join(' → ')}；把「${sidebarInfo.order0[0]}」拖到第 3 位后 → ${sidebarInfo.orderAfterDrag.join(' → ')}` +
+      `（保存下来的 ${sidebarInfo.savedOrder.join(' → ')}，灵动岛 ${sidebarInfo.islandOrder.join(' → ')}）；` +
+      `拖动中被抬起的行 transform=${sidebarInfo.liftedTransform}，同时有 ${sidebarInfo.neighboursAnimating} 个标签在过渡；` +
+      `拖动没有误触切换视图（仍是 ${sidebarInfo.viewAfterDrag}）；已还原为 ${sidebarInfo.orderRestored.join(' → ')}`)
 
     const rowHoverTarget = await evaluate(win, `
       const { actions } = window.__aria
@@ -1772,8 +2129,18 @@ async function runSmoke ({ win, ctx }) {
 
     // 令牌放错主题块时，另一个主题下 var() 会静默失效（同一段 CSS 变成 no-op），
     // 所以亮暗两套各验一次 —— 这正是 --lift 出过的错。
+    // 灵动岛只在侧栏收起时出现，所以这一轮先把侧栏收起来。
     const themeLifts = []
     const hoverPoint = rowHoverTarget.center || { x: 400, y: 300 }
+    const sidebarWasVisible = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const wasVisible = store.get().ui.sidebarVisible
+      if (wasVisible) {
+        actions.toggleSidebar()
+        await new Promise((r) => setTimeout(r, 600))
+      }
+      return wasVisible
+    `)
     for (const theme of ['dark', 'light']) {
       await evaluate(win, `
         const { actions } = window.__aria
@@ -1795,7 +2162,7 @@ async function runSmoke ({ win, ctx }) {
           boxShadow: getComputedStyle(row).boxShadow,
           theme: document.documentElement.dataset.theme,
           islandWidth: island ? Math.round(island.getBoundingClientRect().width) : 0,
-          islandActive: island ? island.classList.contains('has-active') : false
+          islandActive: island ? island.classList.contains('is-visible') : false
         }
       `)
       themeLifts.push({ theme, ...shot })
@@ -1811,7 +2178,8 @@ async function runSmoke ({ win, ctx }) {
       themeLifts.length === 2 &&
       themeLifts.every((item) => item.missing === false && Math.abs(rowLift(item.transform) + 1.5) < 0.6 && item.boxShadow !== 'none') &&
       themeLifts.every((item) => item.islandActive === true && item.islandWidth > 100),
-      themeLifts.map((item) => `${item.theme}：data-theme=${item.theme}，translateY=${rowLift(item.transform)}px，阴影=${item.boxShadow !== 'none' ? '有' : '无'}，灵动岛 ${item.islandWidth}px`).join('；'))
+      themeLifts.map((item) => `${item.theme}：data-theme=${item.theme}，translateY=${rowLift(item.transform)}px，阴影=${item.boxShadow !== 'none' ? '有' : '无'}，灵动岛 ${item.islandWidth}px`).join('；') +
+      `（进入本轮前侧栏可见=${sidebarWasVisible}，已收起）`)
 
     /* ---------- 最小宽度下灵动岛不挤到两侧 ---------- */
     // 窗口最小宽度是 940（main/window.js 的 minWidth）。最挤的时刻是：
@@ -1825,9 +2193,12 @@ async function runSmoke ({ win, ctx }) {
     win.setSize(minWidth, Math.min(boundsBefore.height, minHeight))
     await sleep(800)
     const narrowBase = await evaluate(win, `
-      const { actions } = window.__aria
+      const { actions, store } = window.__aria
       actions.setView('songs')
-      await new Promise((r) => setTimeout(r, 500))
+      // 灵动岛只在侧栏收起时出现，这里把它收起来（上一轮主题检查已经收过，
+      // 这里只是保证确定的状态）
+      if (store.get().ui.sidebarVisible) actions.toggleSidebar()
+      await new Promise((r) => setTimeout(r, 700))
       const island = document.querySelector('.island')
       const scan = document.querySelector('.titlebar__scan')
       const label = scan ? scan.querySelector('span') : null
@@ -1845,6 +2216,7 @@ async function runSmoke ({ win, ctx }) {
       return {
         viewport: window.innerWidth,
         island: box(island),
+        islandShown: island.classList.contains('is-visible'),
         left: box(document.querySelector('.titlebar__left')),
         right: box(document.querySelector('.titlebar__right')),
         scanShown: scan ? !scan.classList.contains('hidden') : false,
@@ -1869,10 +2241,13 @@ async function runSmoke ({ win, ctx }) {
         right: box(document.querySelector('.titlebar__right'))
       }
     `)
-    // 还原：重新藏起扫描提示 + 恢复窗口尺寸
+    // 还原：重新藏起扫描提示、把侧栏放回来、恢复窗口尺寸
     await evaluate(win, `
+      const { actions, store } = window.__aria
       const scan = document.querySelector('.titlebar__scan')
       if (scan) scan.classList.add('hidden')
+      if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
+      await new Promise((r) => setTimeout(r, 500))
       return true
     `)
     win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 620 })
@@ -1881,6 +2256,7 @@ async function runSmoke ({ win, ctx }) {
     const restoredViewport = await evaluate(win, 'return window.innerWidth')
     record('窄窗口（最小宽度）：灵动岛既不压侧栏按钮，也不压扫描与窗口按钮',
       Math.abs(narrowBase.viewport - minWidth) <= 5 &&
+      narrowBase.islandShown === true &&
       narrowBase.scanShown === true &&
       narrowHovered.hovered === true &&
       narrowHovered.island.left > narrowHovered.left.right &&

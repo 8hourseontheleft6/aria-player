@@ -29,6 +29,8 @@ const DEFAULTS = {
   jumpToMatchedLyric: true,
   // 列表里单击歌曲就直接播放（默认关闭：单击只选中，双击才播放）
   playOnSingleClick: false,
+  // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
+  sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
   // 在线音源（用户自己放进来的音源脚本）：总开关默认关闭，与在线补全保持一致
   onlineSources: false,
   // 音源开关状态（id -> { enabled }）；脚本本身放在 <userData>/music-sources
@@ -36,6 +38,8 @@ const DEFAULTS = {
   // 在线音源的下载目录；留空表示「第一个音乐文件夹」
   downloadDir: '',
   wallLayout: 'canvas',
+  // 最小化 / 收进托盘后释放后台占用（媒体墙 DOM、封面缓存、目录监听），回来再建
+  backgroundRelease: true,
   prewarmArtwork: true,
   trayEnabled: true,
   closeToTray: false,

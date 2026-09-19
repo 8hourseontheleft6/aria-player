@@ -19,6 +19,8 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
   let running = false
   let paused = false
   let stopped = false
+  /** 最小化等场景下临时让路：与 paused（界面正忙）分开记，语义不同 */
+  let suspended = false
   const stats = { warmed: 0, skipped: 0, failed: 0, startedAt: 0 }
 
   function enabled () {
@@ -26,7 +28,7 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
   }
 
   function schedule (delay) {
-    if (stopped) return
+    if (stopped || suspended) return
     if (timer) clearTimeout(timer)
     timer = setTimeout(tick, delay)
   }
@@ -81,6 +83,21 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
     schedule(IDLE_INTERVAL)
   }
 
+  /** 临时让路（最小化时用）：不结束会话，回来还能接着预热 */
+  function suspend () {
+    suspended = true
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+  }
+
+  function resume () {
+    if (!suspended) return
+    suspended = false
+    if (!stopped && enabled()) schedule(IDLE_INTERVAL)
+  }
+
   function stop () {
     stopped = true
     if (timer) {
@@ -96,11 +113,14 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
 
   return {
     start,
+    suspend,
+    resume,
     stop,
     get state () {
       return {
         running,
         paused,
+        suspended,
         stopped,
         warmed: stats.warmed,
         failed: stats.failed,

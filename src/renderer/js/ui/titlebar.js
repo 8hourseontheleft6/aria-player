@@ -1,27 +1,22 @@
 /** 自绘标题栏：拖拽区 + 侧栏开关 + 视图切换（灵动岛）+ 扫描进度 + 窗口按钮 */
 
-import { h, on } from '../core/dom.js'
+import { h, on, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
 import { remote } from '../core/remote.js'
+import { flipReorder } from '../core/reorder.js'
 import { EVENTS } from '../core/bus.js'
+import { VIEW_ITEMS, normalizeOrder } from './sidebar.js'
 
 /**
  * 顶部悬浮的视图切换器（「灵动岛」）。
  *
  * 交互设计：
+ *   · 只在侧边栏收起时出现 —— 侧栏已经有一份导航了，两个同时出现是重复；
  *   · 平时只显示当前视图的文字，其余项只留图标 —— 整条很窄，像一颗悬浮胶囊；
  *   · 鼠标移上去展开全部文字（宽度动画），移开收回；滑块始终跟着当前项；
- *   · 图标与文字都跟随 store 里的 ui.view，所以从别处切视图（快捷键、侧边栏、
- *     专辑详情）它也会同步。
+ *   · 顺序跟侧边栏共用 settings.sidebarOrder，在侧栏里拖动排序，这里跟着变。
  * 尺寸全部靠实测（offsetLeft/offsetWidth），不写死，因为各项宽度不一样。
  */
-const VIEWS = [
-  { key: 'songs', label: '歌曲', icon: 'list' },
-  { key: 'albums', label: '专辑', icon: 'disc' },
-  { key: 'artists', label: '艺人', icon: 'artist' },
-  { key: 'wall', label: '媒体墙', icon: 'wall' }
-]
-
 export function createTitlebar ({ store, bus, actions }) {
   const sidebarToggle = h('button', {
     class: 'btn btn--icon',
@@ -34,33 +29,27 @@ export function createTitlebar ({ store, bus, actions }) {
 
   /* ---------------- 灵动岛 ---------------- */
   const thumb = h('span', { class: 'island__thumb', 'aria-hidden': 'true' })
-  const islandButtons = VIEWS.map((view) => h('button', {
-    class: 'island__item',
-    type: 'button',
-    dataset: { view: view.key },
-    title: view.label,
-    onClick: () => actions.setView(view.key)
-  },
-  icon(view.icon, { className: 'icon icon--stroke' }),
-  h('span', { class: 'island__label', text: view.label })
-  ))
-  const island = h('div', { class: 'island' }, thumb, ...islandButtons)
+  const island = h('div', { class: 'island' }, thumb)
 
+  /** @type {HTMLElement[]} */
+  let islandButtons = []
   let activeKey = null
 
   /**
    * 滑块位置全部实测，不写死宽度。
    *
    * 触发时机：
-   *   · 切视图时同步画一次（此时类名已换好，量到的是正确宽度）；
+   *   · 切视图 / 换顺序时同步画一次（此时类名已换好，量到的是正确宽度）；
    *   · ResizeObserver 兜住其余情况 —— 首次挂载、窗口缩放、悬停展开时
    *     各段宽度都在变。不用 rAF：这个环境里 rAF 会被节流到 ~7fps，
    *     靠它更新滑块看起来就是「卡一下才跟上」。
    */
   function paintThumb () {
     const active = islandButtons.find((node) => node.dataset.view === activeKey)
-    island.classList.toggle('has-active', Boolean(active))
-    if (!active) return
+    // 两种情况下整条隐身：当前视图不在这四项里（如设置页），或侧边栏正开着
+    const visible = Boolean(active) && !store.get().ui.sidebarVisible
+    island.classList.toggle('is-visible', visible)
+    if (!visible) return
     thumb.style.width = `${active.offsetWidth}px`
     thumb.style.transform = `translateX(${active.offsetLeft - islandButtons[0].offsetLeft}px)`
   }
@@ -69,17 +58,73 @@ export function createTitlebar ({ store, bus, actions }) {
     new ResizeObserver(paintThumb).observe(island)
   }
 
-  store.select((state) => state.ui.view, (view) => {
-    activeKey = view
+  function createItem (key) {
+    const item = VIEW_ITEMS[key]
+    return h('button', {
+      class: 'island__item',
+      type: 'button',
+      dataset: { view: key },
+      title: item.label,
+      onClick: () => actions.setView(key)
+    },
+    icon(item.iconName, { className: 'icon icon--stroke' }),
+    h('span', { class: 'island__label', text: item.label })
+    )
+  }
+
+  /**
+   * 按设置里的顺序重建这几段。
+   * 顺序变了就搬动已有的节点，并用 FLIP 让它滑过去 —— 所以这里必须复用
+   * 现有节点（新建节点的话，FLIP 量到的是旧节点，而它们已经被移出文档，
+   * 位移全是 0，动画会变成「啪」地跳）。
+   */
+  function renderIslandItems (order) {
+    const previous = islandButtons
+    const existing = new Map(previous.map((node) => [node.dataset.view, node]))
+    const nodes = order.map((key) => existing.get(key) || createItem(key))
+    islandButtons = nodes
+
+    const unchanged = previous.length === nodes.length && previous.every((node, i) => node === nodes[i])
+    if (!unchanged) {
+      const reused = nodes.filter((node) => previous.includes(node))
+      const mutate = () => {
+        clear(island)
+        island.appendChild(thumb)
+        for (const node of nodes) island.appendChild(node)
+      }
+      if (reused.length > 1) flipReorder(reused, mutate)
+      else mutate()
+    }
+    updateActive()
+    paintThumb()
+  }
+
+  function updateActive () {
     for (const node of islandButtons) {
-      const active = node.dataset.view === view
+      const active = node.dataset.view === activeKey
       node.classList.toggle('is-active', active)
       // 屏幕阅读器靠这个知道当前在哪一页
       if (active) node.setAttribute('aria-current', 'page')
       else node.removeAttribute('aria-current')
     }
+  }
+
+  store.select((state) => state.ui.view, (view) => {
+    activeKey = view
+    updateActive()
     paintThumb()
   })
+
+  // 侧栏开关也决定灵动岛要不要出现：两者不同时在场
+  store.select((state) => state.ui.sidebarVisible, () => paintThumb())
+
+  let orderKey = ''
+  store.select((state) => normalizeOrder(state.settings.sidebarOrder), (order) => {
+    const key = order.join()
+    if (key === orderKey) return
+    orderKey = key
+    renderIslandItems(order)
+  }, { equals: (a, b) => a.join() === b.join() })
 
   const scanLabel = h('span', { text: '' })
   const scanFill = h('i')
