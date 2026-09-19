@@ -31,6 +31,8 @@ const DEFAULTS = {
   onlineSources: false,
   // 音源开关状态（id -> { enabled }）；脚本本身放在 <userData>/music-sources
   musicSources: {},
+  // 在线音源的下载目录；留空表示「第一个音乐文件夹」
+  downloadDir: '',
   wallLayout: 'canvas',
   prewarmArtwork: true,
   trayEnabled: true,

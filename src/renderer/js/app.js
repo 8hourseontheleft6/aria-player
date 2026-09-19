@@ -208,10 +208,53 @@ async function main () {
       return store.get().ui.onlineSearch
     },
 
-    /** 解析一条在线结果的播放地址（播放功能后续接入时使用，这里先暴露出来） */
+    /** 解析一条在线结果的播放地址（播放/下载都由它兜底） */
     async resolveOnlineUrl (item) {
       return remote.sources.resolve(item || {})
     },
+
+    /** 播放一条在线结果（解析直链 → 合成曲目 → 走正常播放流程 → 歌词照常加载） */
+    playOnlineItem (item) {
+      return playOnlineItem(item)
+    },
+
+    /** 下载一条在线结果到「默认目录」或指定目录 */
+    async downloadOnlineItem (item, dir = '') {
+      if (!item) return null
+      const uid = item.uid || `${item.sourceId}:${item.sourceTrackId}`
+      const patch = (next) => store.set((state) => ({
+        ...state,
+        ui: {
+          ...state.ui,
+          downloads: { ...(state.ui.downloads || {}), [uid]: { ...(state.ui.downloads?.[uid] || {}), ...next } }
+        }
+      }))
+      patch({ status: 'running', percent: null, received: 0, total: 0 })
+      try {
+        const result = await remote.sources.download({ ...item, uid, dir: dir || undefined })
+        patch({ status: 'done', percent: 100, path: result.path, dir: result.dir, bytes: result.bytes })
+        toast({
+          message: `已下载「${item.title}」到 ${result.dir}${result.inLibrary ? '（在资料库目录里，稍后会自动入库）' : ''}`,
+          type: 'success',
+          duration: 4200
+        })
+        return result
+      } catch (err) {
+        const message = String(err?.message || err)
+        patch({ status: 'error', error: message })
+        toast({ message: `下载失败：${message}`, type: 'error', duration: 4600 })
+        return null
+      }
+    },
+
+    /** 自检用：当前会话里合成出来的在线曲目 */
+    listOnlineTracks: () => listOnlineTracks().map((track) => ({
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      sourceName: track.sourceName,
+      onlineUrl: track.onlineUrl
+    })),
 
     /**
      * 切换搜索范围。
@@ -551,7 +594,98 @@ async function main () {
     if (store.get().settings.theme === 'system') applyTheme('system')
   })
 
+  /* ------------------------------------------------------------------ */
+  /* 在线音源：把网络结果变成「能播的曲目」                                */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * 在线结果不是资料库里的曲目，但播放器、播放条、正在播放页都按 trackId 去
+   * library.byId 里取对象。所以这里造一个「合成曲目」塞进那张表：
+   *   · 只有 id 带 online: 前缀、并且带 onlineUrl，播放时走直链（见 core/media-url.js）；
+   *   · 不进 library.tracks，所以不会污染歌曲列表 / 专辑 / 媒体墙；
+   *   · loadLibrary() 会整表替换，所以每次载入后要重新塞一遍。
+   */
+  const onlineTracks = new Map()
+
+  function registerOnlineTrack (item, resolved) {
+    const id = `online:${item.uid || item.sourceId + ':' + item.sourceTrackId}`
+    const track = {
+      id,
+      title: item.title || '(未知标题)',
+      artist: item.artist || item.sourceName || '在线音源',
+      album: item.album || '',
+      albumArtist: item.artist || '',
+      duration: Number(item.duration) || 0,
+      year: 0,
+      genre: '',
+      path: null,
+      file: '',
+      dir: '',
+      onlineUrl: resolved.url,
+      onlineHeaders: resolved.headers || null,
+      sourceId: item.sourceId,
+      sourceName: item.sourceName,
+      sourceTrackId: item.sourceTrackId ?? null,
+      sourcePayload: item.payload ?? null,
+      isOnline: true,
+      artworkEmbedded: false,
+      artworkFile: null
+    }
+    onlineTracks.set(id, track)
+    store.set((state) => ({
+      ...state,
+      library: { ...state.library, byId: new Map(state.library.byId).set(id, track) }
+    }))
+    return track
+  }
+
+  function registerKnownOnlineTracks () {
+    const byId = store.get().library.byId
+    for (const [id, track] of onlineTracks) byId.set(id, track)
+  }
+
+  /** 设置里显示/清理用 */
+  function listOnlineTracks () {
+    return [...onlineTracks.values()]
+  }
+
+  /** 播放一条在线结果：先解析直链，再交给普通播放流程 */
+  async function playOnlineItem (item) {
+    if (!item) return null
+    const resolved = await remote.sources.resolve(item)
+    const track = registerOnlineTrack(item, resolved)
+    player.playCollection([track.id], track.id)
+    toast({
+      message: `正在播放在线结果：${track.title}（${item.sourceName}）`,
+      type: 'success',
+      duration: 2600
+    })
+    return track
+  }
+
   remote.settings.onChanged((next) => applySettings(next))
+
+  /* 下载进度：主进程按 uid 推过来，写进 store 供结果行显示 */
+  remote.sources.onDownloadProgress((progress) => {
+    if (!progress?.uid) return
+    store.set((state) => ({
+      ...state,
+      ui: {
+        ...state.ui,
+        downloads: {
+          ...(state.ui.downloads || {}),
+          [progress.uid]: {
+            ...(state.ui.downloads?.[progress.uid] || {}),
+            status: progress.done ? 'done' : 'running',
+            percent: progress.percent ?? null,
+            received: progress.received || 0,
+            total: progress.total || 0,
+            path: progress.path || undefined
+          }
+        }
+      }
+    }))
+  })
 
   /*
    * 「从歌词搜索点开歌曲 → 跳到命中的那一句」：
@@ -602,6 +736,8 @@ async function main () {
       }
     }))
     bus.emit(EVENTS.LIBRARY_UPDATED, { count: tracks.length })
+    // 资料库整表重建后，把本次会话里已经合成过的在线曲目塞回去（它们不在 library.tracks 里）
+    registerKnownOnlineTracks()
     return tracks
   }
 

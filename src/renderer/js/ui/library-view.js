@@ -356,7 +356,11 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     const search = state.ui.onlineSearch
     const relevant = enabled && search && search.query === state.ui.query ? search : null
     const signature = relevant
-      ? `${relevant.status}|${relevant.results.length}|${relevant.perSource.map((s) => `${s.id}:${s.count}:${s.error || ''}`).join(',')}|${onlineCollapsed}`
+      ? `${relevant.status}|${relevant.results.length}|${relevant.perSource.map((s) => `${s.id}:${s.count}:${s.error || ''}`).join(',')}|${onlineCollapsed}|` +
+        `${relevant.results.map((item) => {
+          const dl = (state.ui.downloads || {})[item.uid || `${item.sourceId}:${item.sourceTrackId}`]
+          return dl ? `${dl.status}${dl.status === 'running' ? Math.round((dl.percent || 0) / 10) : ''}` : '-'
+        }).join('')}`
       : 'hidden'
     if (signature === lastOnlineSignature) return
     lastOnlineSignature = signature
@@ -403,8 +407,10 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
       return
     }
     for (const item of relevant.results) {
+      const uid = item.uid || `${item.sourceId}:${item.sourceTrackId}`
+      const download = (state.ui.downloads || {})[uid]
       const copyButton = h('button', {
-        class: 'online-results__action',
+        class: 'online-result__action',
         type: 'button',
         title: '解析出播放地址并复制到剪贴板',
         onClick: (event) => {
@@ -412,18 +418,62 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
           copyOnlineUrl(item, copyButton)
         }
       }, '复制地址')
+      const playButton = h('button', {
+        class: 'online-result__action is-primary',
+        type: 'button',
+        title: '解析直链并直接播放（歌词会跟着一起加载）',
+        onClick: async (event) => {
+          event.stopPropagation()
+          playButton.disabled = true
+          playButton.textContent = '解析中…'
+          try {
+            await actions.playOnlineItem(item)
+          } catch (err) {
+            toast({ message: `播放失败：${String(err?.message || err)}`, type: 'error', duration: 4200 })
+          } finally {
+            playButton.disabled = false
+            playButton.textContent = '播放'
+          }
+        }
+      }, '播放')
+      const downloadButton = h('button', {
+        class: 'online-result__action',
+        type: 'button',
+        title: '下载到默认目录（设置里可指定目录）',
+        onClick: (event) => {
+          event.stopPropagation()
+          actions.downloadOnlineItem(item)
+        }
+      }, '下载')
+
       onlineList.append(h('div', { class: 'online-result' },
         h('div', { class: 'online-result__main' },
           h('div', { class: 'online-result__title truncate', text: item.title, title: item.title }),
           h('div', { class: 'online-result__sub truncate' },
-            [item.artist, item.album].filter(Boolean).join(' · ') || '—')
+            [item.artist, item.album].filter(Boolean).join(' · ') || '—'),
+          download
+            ? h('div', { class: 'online-result__progress' },
+              h('div', { class: 'online-result__progress-bar' },
+                h('div', {
+                  class: 'online-result__progress-fill',
+                  style: { width: `${download.status === 'done' ? 100 : (download.percent ?? 8)}%` }
+                })),
+              h('span', {
+                class: 'online-result__progress-text',
+                text: download.status === 'done'
+                  ? '已下载'
+                  : download.status === 'error'
+                    ? `失败：${download.error}`
+                    : `下载中 ${download.percent != null ? `${download.percent}%` : ''}`
+              }))
+            : null
         ),
         h('div', { class: 'online-result__meta' },
           item.quality ? h('span', { class: 'online-result__tag', text: item.quality }) : null,
           h('span', { class: 'online-result__source', text: item.sourceName }),
           h('span', { class: 'online-result__duration tabular', text: item.duration ? formatDuration(item.duration) : '' })
         ),
-        copyButton
+        h('div', { class: 'online-result__actions' }, playButton, downloadButton, copyButton)
       ))
     }
   }

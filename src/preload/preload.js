@@ -15,7 +15,9 @@ const EVENT_CHANNELS = new Set([
   'library:watch-error',
   'window:maximized',
   'media:command',
-  'theme:changed'
+  'theme:changed',
+  // 在线音源下载进度（主进程按 uid 推送）
+  'sources:download-progress'
 ])
 
 function on (channel, handler) {
@@ -80,10 +82,17 @@ contextBridge.exposeInMainWorld('aria', {
     reload: () => ipcRenderer.invoke('sources:reload'),
     stats: () => ipcRenderer.invoke('sources:stats'),
     setEnabled: (id, enabled) => ipcRenderer.invoke('sources:set-enabled', id, enabled),
+    setAllEnabled: (enabled) => ipcRenderer.invoke('sources:set-all-enabled', enabled),
     install: (input) => ipcRenderer.invoke('sources:install', input),
+    installFromUrl: (url) => ipcRenderer.invoke('sources:install-from-url', url),
     remove: (id) => ipcRenderer.invoke('sources:remove', id),
     search: (input) => ipcRenderer.invoke('sources:search', input),
     resolve: (input) => ipcRenderer.invoke('sources:resolve', input),
+    lyrics: (input) => ipcRenderer.invoke('sources:lyrics', input),
+    defaultDownloadDir: () => ipcRenderer.invoke('sources:download-dir'),
+    pickDownloadDir: () => ipcRenderer.invoke('sources:pick-download-dir'),
+    download: (input) => ipcRenderer.invoke('sources:download', input),
+    onDownloadProgress: (handler) => on('sources:download-progress', handler),
     openDir: () => ipcRenderer.invoke('sources:open-dir'),
     pickFile: () => ipcRenderer.invoke('sources:pick-file')
   },

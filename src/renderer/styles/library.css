@@ -496,8 +496,54 @@
   color: var(--accent);
 }
 
+.online-result__action.is-primary {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.online-result__action.is-primary:hover {
+  background: var(--accent);
+  color: var(--accent-label);
+}
+
 .online-result__action:disabled {
   opacity: 0.6;
+}
+
+.online-result__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.online-result__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.online-result__progress-bar {
+  flex: 1;
+  max-width: 160px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-quaternary);
+  overflow: hidden;
+}
+
+.online-result__progress-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transition: width var(--dur-fast) linear;
+}
+
+.online-result__progress-text {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ------------------------------ 队列视图 ------------------------------ */

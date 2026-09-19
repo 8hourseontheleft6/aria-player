@@ -378,24 +378,39 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      */
     const sourcesHost = h('div', { class: 'settings__sources' })
     const sourcesCount = h('span', { class: 'settings__row-value', text: '—' })
+    const downloadDirLabel = h('span', { class: 'settings__row-value', text: '默认（第一个音乐文件夹）' })
 
     async function refreshSources () {
       let list = []
+      let stats = null
       try {
-        list = await remote.sources.list()
+        [list, stats] = await Promise.all([remote.sources.list(), remote.sources.stats()])
       } catch {
         list = []
       }
       sourcesCount.textContent = list.length
         ? `${list.filter((item) => item.enabled).length}/${list.length} 已启用`
         : '尚未添加'
+      try {
+        const dir = await remote.sources.defaultDownloadDir()
+        const configured = store.get().settings.downloadDir
+        downloadDirLabel.textContent = configured ? configured : `默认（${dir}）`
+      } catch {
+        downloadDirLabel.textContent = '默认（第一个音乐文件夹）'
+      }
       clear(sourcesHost)
       if (!list.length) {
         sourcesHost.append(h('div', { class: 'settings__sources-empty' },
-          '还没有音源。点「导入脚本」选择 .js 音源脚本，或点「打开目录」把脚本放进去（目录里的 .js 会在下次刷新时自动装载）。'))
+          '还没有音源。可以「从链接导入」（填一个 .js 脚本的直链），或点「导入脚本」选本地文件，' +
+          '也可以点「打开目录」把脚本放进 <userData>/music-sources（目录里的 .js 刷新时自动装载）。'))
         return
       }
       for (const item of list) {
+        const call = stats?.calls?.[item.id]
+        const callText = call
+          ? `搜索 ${call.search} 次 · 成功 ${call.ok} · 失败 ${call.failed}` +
+            `${call.lastMs ? ` · 最近 ${call.lastMs}ms` : ''}`
+          : '本次会话还没有调用过'
         sourcesHost.append(h('div', { class: 'settings__source' },
           h('div', { class: 'settings__source-main' },
             h('div', { class: 'settings__source-name' },
@@ -403,7 +418,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
               item.version ? h('span', { class: 'settings__source-version', text: `v${item.version}` }) : null,
               item.error ? h('span', { class: 'settings__source-error', text: '装载失败' }) : null
             ),
-            h('div', { class: 'settings__source-sub', text: item.error || item.description || item.file })
+            h('div', { class: 'settings__source-sub', text: item.error || item.description || item.file }),
+            h('div', { class: 'settings__source-sub', text: callText })
           ),
           switchControl(item.enabled, async (value) => {
             await remote.sources.setEnabled(item.id, value)
@@ -422,18 +438,72 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       }
     }
 
+    const sourceUrlInput = h('input', {
+      class: 'settings__input',
+      type: 'text',
+      spellcheck: false,
+      placeholder: 'https://…/source.js'
+    })
+
     scroll.appendChild(group('在线音源', [
       row({
         title: '启用在线音源',
-        sub: '打开后，搜索时会同时向已启用的音源查询，结果单独显示在「网络结果」里。本项目不内置音源，需要你自己导入（脚本由你自行准备，访问什么服务、是否合规也由你判断）。',
+        sub: '打开后，搜索时会同时向已启用的音源查询，结果单独显示在「网络结果」里；可以逐条播放、下载，歌词也会跟着加载。本项目不内置音源，需要你自己导入（脚本访问什么服务、是否合规由你判断）。',
         control: switchControl(settings.onlineSources === true,
           (value) => actions.setSetting({ onlineSources: value }))
       }),
       row({
-        title: '已装载音源',
-        sub: '脚本放在 <userData>/music-sources/*.js；接口说明见 docs/EXTENDING.md 的「在线音源」一节',
+        title: '从链接导入音源',
+        sub: '填一个音源脚本（.js）的直链，由主进程抓下来并校验后装入音源目录',
+        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        sourceUrlInput,
+        h('button', {
+          class: 'btn btn--sm btn--primary',
+          type: 'button',
+          onClick: async (event) => {
+            const url = sourceUrlInput.value.trim()
+            if (!url) {
+              toast({ message: '先填脚本链接', type: 'info' })
+              return
+            }
+            const button = event.currentTarget
+            button.disabled = true
+            button.textContent = '导入中…'
+            try {
+              const result = await remote.sources.installFromUrl(url)
+              toast({ message: `已导入音源「${result.name}」`, type: 'success' })
+              sourceUrlInput.value = ''
+              await refreshSources()
+            } catch (err) {
+              toast({ message: `导入失败：${String(err?.message || err)}`, type: 'error', duration: 4600 })
+            } finally {
+              button.disabled = false
+              button.textContent = '导入'
+            }
+          }
+        }, '导入'))
+      }),
+      row({
+        title: '多音源管理',
+        sub: '批量开关、重新装载、导入本地脚本或直接打开音源目录；下面每条音源都能单独启用/停用/移除，并显示本次会话的调用统计',
         control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
         sourcesCount,
+        h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async () => {
+            await remote.sources.setAllEnabled(true)
+            await refreshSources()
+          }
+        }, '全部启用'),
+        h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async () => {
+            await remote.sources.setAllEnabled(false)
+            await refreshSources()
+          }
+        }, '全部停用'),
         h('button', {
           class: 'btn btn--sm',
           type: 'button',
@@ -452,9 +522,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         h('button', {
           class: 'btn btn--sm',
           type: 'button',
-          onClick: async () => {
-            await remote.sources.openDir()
-          }
+          onClick: () => remote.sources.openDir()
         }, '打开目录'),
         h('button', {
           class: 'btn btn--sm',
@@ -466,7 +534,31 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           }
         }, '刷新'))
       }),
-      row({ title: '音源列表', control: h('div') }),
+      row({
+        title: '下载目录',
+        sub: '在线结果的下载位置。默认用第一个音乐文件夹 —— 下载进去之后目录监听会自动把它收进资料库',
+        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        downloadDirLabel,
+        h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async () => {
+            const dir = await remote.sources.pickDownloadDir()
+            if (!dir) return
+            await actions.setSetting({ downloadDir: dir })
+            await refreshSources()
+            toast({ message: `下载目录已改为 ${dir}`, type: 'success' })
+          }
+        }, '选择目录'),
+        h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async () => {
+            await actions.setSetting({ downloadDir: '' })
+            await refreshSources()
+          }
+        }, '用默认'))
+      }),
       sourcesHost
     ]))
     refreshSources()

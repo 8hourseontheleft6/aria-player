@@ -874,18 +874,64 @@ async function runSmoke ({ win, ctx }) {
 
     /* ---------- 在线音源：脚本宿主 + 「网络结果」板块 ----------
      *
-     * 本仓库不内置音源，所以这里用一段**临时**脚本验证整条链路：
-     * 导入 → 装载 → 搜索 → 结果进 store → 界面出现「网络结果」板块 → 移除。
-     * 顺便验证「没打开总开关时不出现网络结果」与「单个音源出错不影响其他音源」。
+     * 本仓库不内置音源，所以这里起一个本地 HTTP 服务，用**临时**脚本验证整条链路：
+     *   链接导入 → 装载 → 搜索 → 两块结果 → 播放（含音源歌词） → 下载 → 全部停用 → 移除。
+     * 测试用的音频/脚本都由本进程现造，跑完即删，仓库里不留任何音源。
      */
+    const http = require('node:http')
+    const os = require('node:os')
+
+    // 一个极小的合法 WAV（8000Hz 单声道、0.1 秒静音），用于播放与下载
+    const wavBuffer = (() => {
+      const samples = 800
+      const dataSize = samples * 2
+      const buffer = Buffer.alloc(44 + dataSize)
+      buffer.write('RIFF', 0)
+      buffer.writeUInt32LE(36 + dataSize, 4)
+      buffer.write('WAVE', 8)
+      buffer.write('fmt ', 12)
+      buffer.writeUInt32LE(16, 16)
+      buffer.writeUInt16LE(1, 20)
+      buffer.writeUInt16LE(1, 22)
+      buffer.writeUInt32LE(8000, 24)
+      buffer.writeUInt32LE(16000, 28)
+      buffer.writeUInt16LE(2, 32)
+      buffer.writeUInt16LE(16, 34)
+      buffer.write('data', 36)
+      buffer.writeUInt32LE(dataSize, 40)
+      return buffer
+    })()
+
     const sourcesService = ctx.get('musicSources')
-    const demoSources = ['aria-smoke-source-a', 'aria-smoke-source-b']
+    const demoSources = ['aria-smoke-source-a', 'aria-smoke-source-b', 'from-link-source']
     for (const id of demoSources) {
       try { await sourcesService.remove(id) } catch { /* 之前没装过 */ }
     }
     // 本地也命中的关键词：这样一次搜索能同时看到「本地结果」和「网络结果」两块
     const sharedKeyword = (allTracks.find((track) => track.title.length >= 4) || { title: 'Love' })
       .title.slice(0, 4)
+
+    const LINK_SOURCE_SCRIPT_NAME = 'from-link-source.js'
+    const testServer = http.createServer((req, res) => {
+      const url = new URL(req.url, 'http://127.0.0.1')
+      if (url.pathname === '/audio.wav') {
+        res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': wavBuffer.length })
+        res.end(wavBuffer)
+        return
+      }
+      if (url.pathname === `/${LINK_SOURCE_SCRIPT_NAME}`) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' })
+        res.end(linkSourceText)
+        return
+      }
+      res.writeHead(404)
+      res.end('not found')
+    })
+    await new Promise((resolve) => testServer.listen(0, '127.0.0.1', resolve))
+    const testPort = testServer.address().port
+    const audioUrl = `http://127.0.0.1:${testPort}/audio.wav`
+
+    const downloadDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aria-download-'))
 
     const sourceScript = [
       'module.exports = {',
@@ -903,7 +949,7 @@ async function runSmoke ({ win, ctx }) {
       "        title: query + ' 的网络结果 ' + (i + 1),",
       "        artist: '演示艺人',",
       "        album: '演示专辑',",
-      '        duration: 200 + i,',
+      '        duration: 1,',
       "        quality: '320k',",
       '        payload: { sandboxOk }',
       '      })',
@@ -912,8 +958,21 @@ async function runSmoke ({ win, ctx }) {
       '  },',
       '  async resolveUrl (track) {',
       "    if (!track || !track.payload || !track.payload.sandboxOk) throw new Error('沙箱能力不可用')",
-      "    return 'https://example.invalid/audio/' + encodeURIComponent(track.title) + '.mp3'",
+      '    return ' + JSON.stringify(audioUrl),
+      '  },',
+      '  async resolveLyrics () {',
+      "    return { text: '[00:00.00]音源提供的歌词第一句\\n[00:00.50]音源提供的歌词第二句' }",
       '  }',
+      '}'
+    ].join('\n')
+
+    const linkSourceText = [
+      'module.exports = {',
+      "  name: '链接导入的音源',",
+      "  async search (query, { limit }) {",
+      "    return [{ id: 'link-1', title: query + ' 来自链接音源', artist: '链接艺人', duration: 1, quality: '128k' }]",
+      '  },',
+      '  async resolveUrl () { return ' + JSON.stringify(audioUrl) + ' }',
       '}'
     ].join('\n')
 
@@ -924,27 +983,27 @@ async function runSmoke ({ win, ctx }) {
       '}'
     ].join('\n')
 
-    const sourceReport = { installed: null, beforeToggle: null, afterToggle: null, resolve: null, removed: null }
+    const report = { installed: null, link: null, linkSearch: null, resolve: null, removed: null }
     try {
-      sourceReport.installed = await sourcesService.install(sourceScript, 'aria-smoke-source-a')
+      report.installed = await sourcesService.install(sourceScript, 'aria-smoke-source-a')
       await sourcesService.install(failingScript, 'aria-smoke-source-b')
 
-      // 只装了音源、没打开总开关：不该出现网络结果
-      sourceReport.beforeToggle = await evaluate(win, `
+      // ① 链接导入：让主进程从本地服务抓一份脚本下来
+      report.link = await sourcesService.installFromUrl(`http://127.0.0.1:${testPort}/${LINK_SOURCE_SCRIPT_NAME}`)
+      report.linkSearch = await sourcesService.search('链接', { sources: ['from-link-source'] })
+
+      // ② 只装了音源、没打开总开关：不该出现网络结果
+      report.beforeToggle = await evaluate(win, `
         const { actions, store } = window.__aria
         await actions.setSetting({ onlineSources: false })
         actions.setView('songs')
         actions.setQuery('演示')
         await new Promise((r) => setTimeout(r, 900))
         const section = document.querySelector('.online-results')
-        return {
-          hidden: section ? section.hidden : null,
-          search: store.get().ui.onlineSearch || null
-        }`)
+        return { hidden: section ? section.hidden : null, search: store.get().ui.onlineSearch || null }`)
 
       await evaluate(win, `await window.__aria.actions.setSetting({ onlineSources: true }); return true`)
-      // 用一个「本地也有、音源也会回」的关键词，才能同时验到两块结果
-      sourceReport.afterToggle = await evaluate(win, `
+      report.afterToggle = await evaluate(win, `
         const { actions } = window.__aria
         const keyword = ${JSON.stringify(sharedKeyword)}
         actions.setView('songs')
@@ -955,7 +1014,8 @@ async function runSmoke ({ win, ctx }) {
         const rows = [...document.querySelectorAll('.online-result')].map((node) => ({
           title: (node.querySelector('.online-result__title') || {}).textContent || '',
           source: (node.querySelector('.online-result__source') || {}).textContent || '',
-          quality: (node.querySelector('.online-result__tag') || {}).textContent || ''
+          quality: (node.querySelector('.online-result__tag') || {}).textContent || '',
+          buttons: [...node.querySelectorAll('.online-result__action')].map((b) => b.textContent)
         }))
         const rect = section ? section.getBoundingClientRect() : null
         return {
@@ -969,51 +1029,133 @@ async function runSmoke ({ win, ctx }) {
           localRows: document.querySelectorAll('.track-row').length
         }`)
 
+      // ③ 播放：解析直链 → 合成曲目 → 走正常播放流程 → 音源歌词跟着加载
+      //    （引擎的 <audio> 是 new Audio() 创建的，不在 DOM 里，所以看播放状态而不是元素）
+      report.play = await evaluate(win, `
+        const { actions, store } = window.__aria
+        const state = store.get().ui.onlineSearch
+        const item = (state && state.results && state.results.find((r) => r.sourceId === 'aria-smoke-source-a')) || null
+        if (!item) return { skipped: true }
+        const track = await actions.playOnlineItem(item)
+        const waitFor = async (predicate, timeout = 15000) => {
+          const deadline = performance.now() + timeout
+          while (performance.now() < deadline) {
+            if (predicate()) return true
+            await new Promise((r) => setTimeout(r, 200))
+          }
+          return false
+        }
+        const played = await waitFor(() => {
+          const playback = store.get().playback
+          return playback.trackId === track.id && playback.duration > 0
+        })
+        await waitFor(() => store.get().lyrics.lines.length > 0, 8000)
+        const playback = store.get().playback
+        return {
+          skipped: false,
+          id: track.id,
+          title: track.title,
+          playbackId: playback.trackId,
+          status: playback.status,
+          duration: Math.round((playback.duration || 0) * 100) / 100,
+          played,
+          lyricsStatus: store.get().lyrics.status,
+          lyricsSource: store.get().lyrics.source,
+          lyricsLines: store.get().lyrics.lines.length,
+          lyricsText: (store.get().lyrics.lines[0] || {}).text || '',
+          onlineTracks: actions.listOnlineTracks()
+        }`)
+
+      // ④ 下载到指定目录（用临时目录，不要写进用户的音乐文件夹）
+      const downloadItem = await evaluate(win, `
+        const state = window.__aria.store.get().ui.onlineSearch
+        return (state && state.results && state.results.find((r) => r.sourceId === 'aria-smoke-source-a')) || null`)
+      if (downloadItem) {
+        report.download = await sourcesService.download({ ...downloadItem, uid: 'smoke-dl', dir: downloadDir }, () => {})
+      }
+
+      // ⑤ 多音源管理：全部停用后搜不到东西，恢复后又能搜到
+      report.batchOff = await sourcesService.setAllEnabled(false)
+      report.searchWhileOff = await sourcesService.search(sharedKeyword)
+      report.batchOn = await sourcesService.setAllEnabled(true)
+
       const firstResult = await evaluate(win, `
         const state = window.__aria.store.get().ui.onlineSearch
         return (state && state.results && state.results[0]) || null`)
-      if (firstResult) sourceReport.resolve = await sourcesService.resolveUrl(firstResult)
+      if (firstResult) report.resolve = await sourcesService.resolveUrl(firstResult)
+      report.stats = sourcesService.getStats()
     } finally {
       for (const id of demoSources) {
         try { await sourcesService.remove(id) } catch { /* 忽略 */ }
       }
-      sourceReport.removed = sourcesService.list().map((item) => item.id)
+      report.removed = sourcesService.list().map((item) => item.id)
+      await new Promise((resolve) => testServer.close(resolve))
+      await fsp.rm(downloadDir, { recursive: true, force: true }).catch(() => {})
       await evaluate(win, `
+        // 收尾：把播放切回一首本地曲目，别让合成出来的在线曲目影响后面的检查
+        const tracks = window.__aria.store.get().library.tracks
+        if (tracks.length) window.__aria.actions.playTrack(tracks[0], tracks)
+        window.__aria.player.pause()
         await window.__aria.actions.setSetting({ onlineSources: false })
         window.__aria.actions.setQuery('')
         window.__aria.actions.setOnlineSearch(null)
+        await new Promise((r) => setTimeout(r, 400))
         return true`)
     }
 
-    record('音源脚本：导入 / 沙箱能力 / 解析地址',
-      sourceReport.installed && sourceReport.installed.id === 'aria-smoke-source-a' &&
-      sourceReport.resolve && /^https:\/\/example\.invalid\/audio\//.test(sourceReport.resolve.url),
-      `导入得到 id=${sourceReport.installed?.id}、名称=${sourceReport.installed?.name}；` +
-      `解析地址返回 ${String(sourceReport.resolve?.url || '').slice(0, 56)}…` +
-      `（能拿到这个结果说明沙箱里有 request/Buffer，且没有 require/process）`)
+    record('在线音源：从链接导入脚本',
+      report.link && report.link.id === 'from-link-source' &&
+      report.linkSearch?.results?.length === 1 &&
+      report.linkSearch.results[0].title.includes('来自链接音源'),
+      `从 http 链接抓到脚本 → id=${report.link?.id}、名称=${report.link?.name}；` +
+      `用它单独搜索返回 ${report.linkSearch?.results?.length} 条：` +
+      `「${report.linkSearch?.results?.[0]?.title}」`)
     record('在线音源：网络结果与本地结果各就各位',
-      sourceReport.afterToggle?.status === 'done' &&
-      sourceReport.afterToggle.resultCount === 3 &&
-      sourceReport.afterToggle.rows.length === 3 &&
-      sourceReport.afterToggle.rows.every((row) => row.source === '自检用音源 A') &&
-      sourceReport.afterToggle.sectionHidden === false &&
-      sourceReport.afterToggle.sectionHeight > 20 &&
-      sourceReport.afterToggle.localRows > 0,
-      `打开总开关后搜索：网络结果 ${sourceReport.afterToggle?.resultCount} 首` +
-      `（板块可见=${!sourceReport.afterToggle?.sectionHidden}、高度 ${sourceReport.afterToggle?.sectionHeight}px），` +
-      `本地结果同时还有 ${sourceReport.afterToggle?.localRows} 行；` +
-      `示例「${sourceReport.afterToggle?.rows?.[0]?.title}」（${sourceReport.afterToggle?.rows?.[0]?.source} / ${sourceReport.afterToggle?.rows?.[0]?.quality}）`)
+      report.afterToggle?.status === 'done' &&
+      report.afterToggle.resultCount >= 3 &&
+      report.afterToggle.rows.filter((row) => row.source === '自检用音源 A').length === 3 &&
+      report.afterToggle.rows.every((row) => row.buttons.join('/') === '播放/下载/复制地址') &&
+      report.afterToggle.sectionHidden === false &&
+      report.afterToggle.sectionHeight > 20 &&
+      report.afterToggle.localRows > 0,
+      `打开总开关后搜索：网络结果 ${report.afterToggle?.resultCount} 首（板块可见=${!report.afterToggle?.sectionHidden}、` +
+      `高度 ${report.afterToggle?.sectionHeight}px、每行按钮 ${report.afterToggle?.rows?.[0]?.buttons?.join('/')}），` +
+      `本地结果同时还有 ${report.afterToggle?.localRows} 行；示例「${report.afterToggle?.rows?.[0]?.title}」`)
     record('在线音源：单个音源出错不影响其他音源',
-      sourceReport.afterToggle?.errorCount >= 1 && sourceReport.afterToggle?.resultCount === 3,
-      `${sourceReport.afterToggle?.perSource?.length} 个音源参与，其中 ${sourceReport.afterToggle?.errorCount} 个报错；` +
-      `正常音源仍返回了 ${sourceReport.afterToggle?.resultCount} 首，错误信息：` +
-      `${JSON.stringify(sourceReport.afterToggle?.perSource?.filter((item) => item.error).map((item) => `${item.name}: ${item.error}`))}`)
+      report.afterToggle?.errorCount >= 1 && report.afterToggle?.resultCount >= 3,
+      `${report.afterToggle?.perSource?.length} 个音源参与，其中 ${report.afterToggle?.errorCount} 个报错；` +
+      `正常音源仍返回 ${report.afterToggle?.resultCount} 首；错误：` +
+      `${JSON.stringify(report.afterToggle?.perSource?.filter((item) => item.error).map((item) => `${item.name}: ${item.error}`))}`)
+    record('在线音源：可以直接播放并加载音源歌词',
+      report.play && !report.play.skipped && report.play.played &&
+      report.play.playbackId === report.play.id &&
+      report.play.lyricsLines >= 2,
+      report.play?.skipped
+        ? '没有可播放的在线结果'
+        : `点播放后播放状态切到 online 曲目 ${report.play.id}（时长 ${report.play.duration}s、状态 ${report.play.status}，` +
+          `说明直链真的能播）` +
+          `；歌词来自「${report.play.lyricsSource}」共 ${report.play.lyricsLines} 行，首句「${report.play.lyricsText}」` +
+          `；本次会话合成 ${report.play.onlineTracks?.length} 个在线曲目（不进本地列表）`)
+    record('在线音源：下载到指定目录',
+      report.download && report.download.bytes === wavBuffer.length,
+      report.download
+        ? `下载 ${report.download.bytes} 字节（源文件 ${wavBuffer.length} 字节）到 ${report.download.dir}`
+        : '没有可下载的结果')
+    record('在线音源：批量停用后不再查询、恢复后可用',
+      report.batchOff?.every((item) => item.enabled === false) &&
+      report.searchWhileOff?.results?.length === 0 &&
+      report.batchOn?.every((item) => item.enabled === true) &&
+      (report.stats?.calls?.['aria-smoke-source-a']?.ok || 0) > 0,
+      `全部停用后 enabled=${JSON.stringify(report.batchOff?.map((item) => item.enabled))}、搜索返回 ${report.searchWhileOff?.results?.length} 条；` +
+      `恢复后 enabled=${JSON.stringify(report.batchOn?.map((item) => item.enabled))}；` +
+      `调用统计：${JSON.stringify(report.stats?.calls?.['aria-smoke-source-a'] || {})}`)
     record('在线音源：没打开总开关时不出现网络结果',
-      sourceReport.beforeToggle?.hidden === true && !sourceReport.beforeToggle?.search,
-      `总开关关闭时「网络结果」板块 hidden=${sourceReport.beforeToggle?.hidden}，store 里也没有在线结果`)
+      report.beforeToggle?.hidden === true && !report.beforeToggle?.search,
+      `总开关关闭时「网络结果」板块 hidden=${report.beforeToggle?.hidden}，store 里也没有在线结果`)
     record('在线音源：移除后彻底消失',
-      Array.isArray(sourceReport.removed) && !sourceReport.removed.includes('aria-smoke-source-a'),
-      `移除两个自检音源后，目录里剩下 ${JSON.stringify(sourceReport.removed)}`)
+      Array.isArray(report.removed) && !report.removed.includes('aria-smoke-source-a') &&
+      !report.removed.includes('from-link-source'),
+      `移除全部自检音源后，目录里剩下 ${JSON.stringify(report.removed)}`)
 
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria

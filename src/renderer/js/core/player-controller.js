@@ -385,9 +385,30 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     }))
 
     let payload = null
+    // 在线音源的曲目没有本地文件，先问音源自己有没有带歌词
+    if (track.onlineUrl && track.sourceId && remote.sources?.lyrics) {
+      try {
+        const fromSource = await remote.sources.lyrics({
+          sourceId: track.sourceId,
+          sourceTrackId: track.sourceTrackId,
+          title: track.title,
+          artist: track.artist,
+          album: track.album,
+          duration: track.duration,
+          payload: track.sourcePayload ?? null
+        })
+        if (fromSource?.text) {
+          payload = { source: `${fromSource.sourceName} · 歌词`, text: fromSource.text, file: null }
+        }
+      } catch (err) {
+        console.warn('[lyrics] 音源歌词读取失败', err)
+      }
+    }
     try {
-      const file = await remote.lyrics.load({ path: track.path, title: track.title, artist: track.artist })
-      if (file?.text) payload = { source: file.source, text: file.text, file: file.file }
+      if (!payload) {
+        const file = await remote.lyrics.load({ path: track.path, title: track.title, artist: track.artist })
+        if (file?.text) payload = { source: file.source, text: file.text, file: file.file }
+      }
     } catch (err) {
       console.warn('[lyrics] 本地歌词读取失败', err)
     }

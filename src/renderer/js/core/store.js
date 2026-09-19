@@ -101,6 +101,7 @@ export function initialState () {
       jumpToMatchedLyric: true,
       onlineSources: false,
       musicSources: {},
+      downloadDir: '',
       globalMediaKeys: true,
       showRemainingTime: false
     },
@@ -112,6 +113,8 @@ export function initialState () {
       query: '',
       // 在线音源搜索结果：{ query, status, results, perSource, error, elapsedMs }
       onlineSearch: null,
+      // 下载进度：uid -> { status, percent, received, total, path, error }
+      downloads: {},
       // 深度搜索的歌词命中结果：{ query, ids, scanning, scanned, matched, elapsedMs }
       searchLyrics: null,
       sort: { key: 'default', direction: 'asc' },

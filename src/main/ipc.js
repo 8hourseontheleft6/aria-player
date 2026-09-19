@@ -107,13 +107,36 @@ function registerIpc (ctx) {
     'sources:reload': () => sources.load(),
     'sources:stats': () => sources.getStats(),
     'sources:set-enabled': (_event, id, enabled) => sources.setEnabled(String(id || ''), enabled),
+    'sources:set-all-enabled': (_event, enabled) => sources.setAllEnabled(Boolean(enabled)),
     'sources:install': (_event, input) => sources.install(
       (input && input.text) || '',
       (input && input.name) || ''
     ),
+    'sources:install-from-url': (_event, url) => sources.installFromUrl(url),
     'sources:remove': (_event, id) => sources.remove(String(id || '')),
     'sources:search': (_event, input) => sources.search((input && input.query) || '', input || {}),
     'sources:resolve': (_event, input) => sources.resolveUrl(input || {}),
+    'sources:lyrics': (_event, input) => sources.resolveLyrics(input || {}),
+    'sources:download-dir': () => sources.defaultDownloadDir(),
+    'sources:pick-download-dir': async () => {
+      const result = await dialog.showOpenDialog({
+        title: '选择下载目录',
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (result.canceled || !result.filePaths?.length) return null
+      return result.filePaths[0]
+    },
+    'sources:download': async (event, input) => {
+      const sender = event.sender
+      const report = (progress) => {
+        if (!sender.isDestroyed()) sender.send('sources:download-progress', progress)
+      }
+      const result = await sources.download(input || {}, (progress) => {
+        report({ uid: (input && input.uid) || null, ...progress })
+      })
+      report({ uid: (input && input.uid) || null, done: true, percent: 100, path: result.path })
+      return result
+    },
     'sources:open-dir': async () => {
       const dir = sources.getDir()
       await shell.openPath(dir)

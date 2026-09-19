@@ -57,6 +57,7 @@ const vm = require('node:vm')
 const crypto = require('node:crypto')
 const zlib = require('node:zlib')
 const { Buffer } = require('node:buffer')
+const nodeStream = require('node:stream')
 
 const USER_AGENT = 'Aria/0.0.0-dev (local music player)'
 const SEARCH_TIMEOUT = 15000
@@ -139,6 +140,16 @@ function createMusicSourcesService (ctx) {
   /** @type {Map<string, { id, file, name, description, version, module, error, mtimeMs }>} */
   const loaded = new Map()
   let loadedOnce = false
+  /** 每个音源的调用统计（本次会话内；用来在设置里看哪个音源好用） */
+  const stats = { calls: {}, downloads: 0 }
+
+  function bump (id, field, extra = {}) {
+    const key = String(id || '?')
+    const entry = stats.calls[key] || { search: 0, ok: 0, failed: 0, lastMs: 0, lastError: null }
+    entry[field] = (entry[field] || 0) + 1
+    Object.assign(entry, extra)
+    stats.calls[key] = entry
+  }
 
   const enabledMap = () => {
     const value = settings.get().musicSources
@@ -274,6 +285,16 @@ function createMusicSourcesService (ctx) {
     return list()
   }
 
+  /** 一次开关所有音源（多音源管理里最常用的操作） */
+  function setAllEnabled (enabled) {
+    const next = { ...enabledMap() }
+    for (const entry of loaded.values()) {
+      next[entry.id] = { ...(next[entry.id] || {}), enabled: Boolean(enabled) }
+    }
+    settings.set({ musicSources: next })
+    return list()
+  }
+
   async function install (scriptText, suggestedName = '') {
     const code = String(scriptText || '')
     if (!code.trim()) throw new Error('脚本内容是空的')
@@ -341,6 +362,7 @@ function createMusicSourcesService (ctx) {
     const controller = new AbortController()
     const perSource = await Promise.all(targets.map(async (entry) => {
       const began = performance.now()
+      bump(entry.id, 'search')
       try {
         const raw = await withTimeout(
           Promise.resolve(entry.module.search(text, {
@@ -352,25 +374,30 @@ function createMusicSourcesService (ctx) {
           `${describe(entry).name} 搜索`
         )
         const list = Array.isArray(raw) ? raw : []
+        const elapsed = Math.round((performance.now() - began) * 100) / 100
+        bump(entry.id, 'ok', { lastMs: elapsed, lastError: null })
         return {
           id: entry.id,
           name: describe(entry).name,
           count: list.length,
-          elapsedMs: Math.round((performance.now() - began) * 100) / 100,
+          elapsedMs: elapsed,
           error: null,
           results: list.slice(0, limit)
         }
       } catch (err) {
+        const message = String(err?.message || err)
+        bump(entry.id, 'failed', { lastError: message })
         return {
           id: entry.id,
           name: describe(entry).name,
           count: 0,
           elapsedMs: Math.round((performance.now() - began) * 100) / 100,
-          error: String(err?.message || err),
+          error: message,
           results: []
         }
       }
     }))
+
 
     // 汇总：给每条结果标上来源，并生成一个全局 id（列表渲染 / 解析时用）
     const results = []
@@ -417,7 +444,7 @@ function createMusicSourcesService (ctx) {
       quality: input.quality || '',
       payload: input.payload ?? null
     }
-    const url = await withTimeout(
+    const output = await withTimeout(
       Promise.resolve(entry.module.resolveUrl(track, {
         quality: input.quality || '320k',
         request: createRequest(() => controller.signal),
@@ -426,10 +453,144 @@ function createMusicSourcesService (ctx) {
       RESOLVE_TIMEOUT,
       `${describe(entry).name} 解析地址`
     )
-    if (typeof url !== 'string' || !/^https?:/i.test(url)) {
+    // 音源既可以只返回字符串，也可以返回 { url, headers } 用来带上 Referer 之类的请求头
+    const url = typeof output === 'string' ? output : String(output?.url || '')
+    if (!/^https?:/i.test(url)) {
       throw new Error('音源没有返回可用的 http(s) 地址')
     }
-    return { url, sourceId: entry.id, sourceName: describe(entry).name, title: track.title }
+    const headers = (output && typeof output === 'object' && output.headers) || null
+    return {
+      url,
+      headers,
+      sourceId: entry.id,
+      sourceName: describe(entry).name,
+      title: track.title,
+      artist: track.artist
+    }
+  }
+
+  /** 音源提供的歌词（可选接口） */
+  async function resolveLyrics (input = {}) {
+    if (!loadedOnce) await load()
+    const entry = loaded.get(String(input.sourceId || ''))
+    if (!entry?.module || typeof entry.module.resolveLyrics !== 'function') return null
+    const controller = new AbortController()
+    const text = await withTimeout(
+      Promise.resolve(entry.module.resolveLyrics({
+        id: input.sourceTrackId ?? null,
+        title: input.title || '',
+        artist: input.artist || '',
+        album: input.album || '',
+        duration: input.duration || 0,
+        payload: input.payload ?? null
+      }, { request: createRequest(() => controller.signal), signal: controller.signal })),
+      RESOLVE_TIMEOUT,
+      `${describe(entry).name} 取歌词`
+    )
+    const raw = typeof text === 'string' ? text : String(text?.text || '')
+    if (!raw.trim()) return null
+    return { text: raw, sourceId: entry.id, sourceName: describe(entry).name }
+  }
+
+  /* ================================================================ */
+  /* 链接导入 / 下载                                                     */
+  /* ================================================================ */
+
+  /** 从链接把音源脚本抓下来并安装（脚本内容直接落盘，不经过渲染层） */
+  async function installFromUrl (url) {
+    const target = String(url || '').trim()
+    if (!/^https?:\/\//i.test(target)) throw new Error('请填写 http(s) 开头的脚本地址')
+    const response = await net.fetch(target, { headers: { 'User-Agent': USER_AGENT } })
+    if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`)
+    const text = await response.text()
+    if (!text.trim()) throw new Error('链接返回的内容是空的')
+    const guessed = decodeURIComponent(target.split('/').pop() || '').split('?')[0] || 'source'
+    return install(text, guessed.replace(/\.js$/i, ''))
+  }
+
+  function sanitizeName (value, fallback) {
+    const cleaned = String(value || '')
+      .replace(/[\\/:*?"<>|]+/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim()
+    return (cleaned || fallback).slice(0, 120)
+  }
+
+  /** 默认下载目录：设置里指定的，否则第一个音乐文件夹 */
+  function defaultDownloadDir () {
+    const configured = String(settings.get().downloadDir || '').trim()
+    if (configured) return configured
+    const folders = settings.get().folders || []
+    if (folders.length) return folders[0]
+    return path.join(app.getPath('music'), 'Aria 下载')
+  }
+
+  /**
+   * 把一条在线结果下载到目录。
+   * 下载进资料库目录的话，目录监听会自动把它收进资料库（不用再手动扫描）。
+   */
+  async function download (input = {}, onProgress) {
+    const dir = String(input.dir || '').trim() || defaultDownloadDir()
+    await fsp.mkdir(dir, { recursive: true })
+    const resolved = await resolveUrl(input)
+    const response = await net.fetch(resolved.url, {
+      headers: { 'User-Agent': USER_AGENT, ...(resolved.headers || {}) }
+    })
+    if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`)
+
+    const total = Number(response.headers.get('content-length')) || 0
+    const ext = (() => {
+      const fromUrl = (resolved.url.split('?')[0].match(/\.([a-z0-9]{2,5})$/i) || [])[1]
+      if (fromUrl && /^(mp3|m4a|aac|flac|wav|ogg|opus|webm)$/i.test(fromUrl)) return fromUrl.toLowerCase()
+      const mime = response.headers.get('content-type') || ''
+      if (/mpeg/i.test(mime)) return 'mp3'
+      if (/flac/i.test(mime)) return 'flac'
+      if (/mp4|aac/i.test(mime)) return 'm4a'
+      if (/ogg/i.test(mime)) return 'ogg'
+      return 'mp3'
+    })()
+
+    const base = sanitizeName(
+      [resolved.artist, resolved.title].filter(Boolean).join(' - '),
+      `在线音乐-${Date.now()}`
+    )
+    let file = path.join(dir, `${base}.${ext}`)
+    let index = 1
+    while (await fsp.stat(file).then(() => true).catch(() => false)) {
+      file = path.join(dir, `${base} (${index++}).${ext}`)
+    }
+
+    const { Readable } = nodeStream
+    const writeStream = (await fsp.open(file, 'w')).createWriteStream()
+    let received = 0
+    let lastReport = 0
+    try {
+      const readable = Readable.fromWeb(response.body)
+      readable.on('data', (chunk) => {
+        received += chunk.length
+        const now = Date.now()
+        if (typeof onProgress === 'function' && now - lastReport > 120) {
+          lastReport = now
+          onProgress({ received, total, percent: total ? Math.round((received / total) * 100) : null })
+        }
+      })
+      await nodeStream.promises.pipeline(readable, writeStream)
+    } catch (err) {
+      await fsp.rm(file, { force: true }).catch(() => {})
+      throw err
+    }
+    if (typeof onProgress === 'function') {
+      onProgress({ received, total, percent: 100, done: true })
+    }
+    return {
+      path: file,
+      dir,
+      bytes: received,
+      sourceName: resolved.sourceName,
+      title: resolved.title,
+      artist: resolved.artist,
+      inLibrary: (settings.get().folders || []).some((folder) => file.startsWith(folder))
+    }
   }
 
   return {
@@ -440,16 +601,23 @@ function createMusicSourcesService (ctx) {
     load,
     list,
     setEnabled,
+    setAllEnabled,
     install,
+    installFromUrl,
     remove,
     search,
     resolveUrl,
+    resolveLyrics,
+    download,
+    defaultDownloadDir,
     getDir: () => dir,
     getStats: () => ({
       dir,
       total: loaded.size,
       enabled: list().filter((item) => item.enabled).length,
-      failed: list().filter((item) => item.error).length
+      failed: list().filter((item) => item.error).length,
+      calls: { ...stats.calls },
+      downloads: stats.downloads
     })
   }
 }
