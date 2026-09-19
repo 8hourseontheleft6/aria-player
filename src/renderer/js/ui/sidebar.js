@@ -420,7 +420,7 @@ export function createSidebar ({ store, bus, actions }) {
     )
 
     if (!playlists.length) {
-      playlistSection.appendChild(h('div', { class: 'sidebar__hint', text: '还没有播放列表，点右上角 + 新建；在歌曲上右键就能加进来。' }))
+      playlistSection.appendChild(h('div', { class: 'sidebar__hint', text: '还没有播放列表。在歌曲上右键就能加进来。' }))
     } else {
       for (const playlist of playlists) {
         const count = actions.playlistTracks(playlist.id).length
@@ -444,6 +444,16 @@ export function createSidebar ({ store, bus, actions }) {
         }))
       }
     }
+
+    // 光靠组头那颗小小的 + 不好找，再放一条明确的入口
+    playlistSection.appendChild(h('button', {
+      class: 'sidebar__row sidebar__row--ghost',
+      type: 'button',
+      title: '新建播放列表',
+      onClick: (event) => openPlaylistEditor({ anchor: event.currentTarget, mode: 'create' })
+    },
+    icon('plus', { className: 'icon icon--stroke' }),
+    h('span', { class: 'truncate', text: '新建播放列表' })))
 
     scroll.appendChild(playlistSection)
 

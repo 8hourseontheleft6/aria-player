@@ -102,6 +102,8 @@ html[data-theme="dark"] {
   --fill-quaternary: rgba(120, 120, 128, 0.14);
   --fill-tertiary: rgba(120, 120, 128, 0.24);
   --fill-secondary: rgba(120, 120, 128, 0.32);
+  /* 浮在标题栏上的控件（灵动岛）：深色下要比 quaternary 亮一档才看得见 */
+  --fill-floating: rgba(120, 120, 128, 0.22);
 
   --separator: rgba(255, 255, 255, 0.085);
   --separator-strong: rgba(255, 255, 255, 0.16);
@@ -148,6 +150,8 @@ html[data-theme="light"] {
   --fill-quaternary: rgba(120, 120, 128, 0.08);
   --fill-tertiary: rgba(120, 120, 128, 0.16);
   --fill-secondary: rgba(120, 120, 128, 0.24);
+  /* 亮色下白底上的胶囊本来就看得出来，只留一点点底 */
+  --fill-floating: rgba(120, 120, 128, 0.11);
 
   --separator: rgba(60, 60, 67, 0.13);
   --separator-strong: rgba(60, 60, 67, 0.24);

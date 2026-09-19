@@ -5,8 +5,39 @@
  * 专辑封面取「第一首有封面的曲目」，因此同一张专辑的所有曲目共用一次封面读取。
  */
 
+import { normalizeForSearch } from './format.js'
+
 const UNKNOWN_ALBUM = '未知专辑'
 const UNKNOWN_ARTIST = '未知艺人'
+
+/**
+ * 搜索时的相关度排序：**名字本身命中查询的排在前面**。
+ *
+ * 为什么需要：合作曲目拆分之后，「Taylor Swift&Bon Iver」这条记录同时挂在两位
+ * 艺人名下 —— 搜 `taylor` 时 Bon Iver（以及 Ed Sheeran、HAIM、The National…）
+ * 都会因为"有一首 Taylor 的歌"而进入艺人列表。纯字母序排列的话，
+ * 用户真正要找的那个人可能被一堆合作方压在后面。
+ *
+ * 分档（越小越前）：
+ *   0 = 名字以查询开头；1 = 名字里包含查询；2 = 名字没命中（只是有首匹配的歌）；
+ *   3 = 没有名字。
+ * 同一档内保持原来的字母序。
+ */
+function rankByName (list, query, nameOf) {
+  const parts = normalizeForSearch(query).split(/\s+/).filter(Boolean)
+  if (!parts.length) return list
+  const score = (item) => {
+    const haystack = normalizeForSearch(nameOf(item))
+    if (!haystack) return 3
+    if (parts.every((part) => haystack.includes(part))) {
+      return haystack.startsWith(parts[0]) ? 0 : 1
+    }
+    return 2
+  }
+  const scored = list.map((item, index) => ({ item, index, score: score(item) }))
+  scored.sort((a, b) => a.score - b.score || a.index - b.index)
+  return scored.map((entry) => entry.item)
+}
 
 /*
  * 「一个字段里塞了多个艺人」的拆分规则。
@@ -108,7 +139,7 @@ function summarize (tracks) {
   return { duration, year, mainArtist, artistCount: artists.size }
 }
 
-export function buildIndex (tracks) {
+export function buildIndex (tracks, query = '') {
   /** @type {Map<string, object>} */
   const albums = new Map()
   /** @type {Map<string, object>} */
@@ -170,24 +201,34 @@ export function buildIndex (tracks) {
     String(a.name).localeCompare(String(b.name), 'zh-Hans-CN', { sensitivity: 'base' }))
   artistList.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hans-CN', { sensitivity: 'base' }))
 
-  return { albums, albumList, artists, artistList }
+  // 搜索时把「名字命中查询」的排到前面（字母序在后面的合作方不会压住本人）
+  const rankedAlbums = rankByName(albumList, query, (album) => album.name)
+  const rankedArtists = rankByName(artistList, query, (artist) => artist.name)
+
+  return { albums, albumList: rankedAlbums, artists, artistList: rankedArtists }
 }
 
 export function createLibraryIndex () {
   let cached = null
   let cachedTracks = null
+  let cachedQuery = null
 
   return {
-    /** @param {Array<object>} tracks 已排序的可见曲目 */
-    get (tracks) {
-      if (cached && cachedTracks === tracks) return cached
-      cached = buildIndex(tracks)
+    /**
+     * @param {Array<object>} tracks 已排序的可见曲目
+     * @param {string} [query] 当前搜索词（用来把「名字命中」的专辑/艺人排到前面）
+     */
+    get (tracks, query = '') {
+      if (cached && cachedTracks === tracks && cachedQuery === query) return cached
+      cached = buildIndex(tracks, query)
       cachedTracks = tracks
+      cachedQuery = query
       return cached
     },
     invalidate () {
       cached = null
       cachedTracks = null
+      cachedQuery = null
     }
   }
 }

@@ -1928,6 +1928,171 @@ async function runSmoke ({ win, ctx }) {
       `播放时队列 = ${playlistCheck.queueAfterPlay.length} 首且顺序一致=${playlistCheck.queueAfterPlay.join() === playlistCheck.picked.join()}；` +
       `移除一首后剩 ${playlistCheck.afterRemove.length} 首；删除后剩 ${playlistCheck.afterDelete} 个、来源回到 ${playlistCheck.sourceAfterDelete}`)
 
+    /* ---------- 搜索「taylor」时最匹配的艺人要在最前面 ---------- */
+    // 合作曲目拆分之后，「X&Y」这类记录会同时挂在两位艺人名下 —— 搜 taylor 时
+    // Bon Iver / Ed Sheeran 这些合作方也会进艺人列表，字母序会把人压在后面。
+    const artistRanking = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      actions.setView('artists')
+      actions.setQuery('taylor')
+      await settle(900)
+
+      const names = actions.artists().map((artist) => artist.name)
+      const isMatch = (name) => String(name).toLowerCase().includes('taylor')
+      const hits = names.map(isMatch)
+      const firstNonMatch = hits.indexOf(false)
+      const lastMatch = hits.lastIndexOf(true)
+      const rendered = [...document.querySelectorAll('.artist-row__name')].slice(0, 5).map((node) => node.textContent)
+
+      actions.setQuery('')
+      actions.setView('songs')
+      await settle(600)
+      return {
+        total: names.length,
+        matched: hits.filter(Boolean).length,
+        first: names[0] || null,
+        lastMatchIndex: lastMatch,
+        firstNonMatchIndex: firstNonMatch,
+        head: names.slice(0, 6),
+        rendered
+      }
+    `)
+    record('搜索：名字命中的艺人排在合作方前面',
+      artistRanking.matched > 0 &&
+      artistRanking.first === 'Taylor Swift' &&
+      artistRanking.lastMatchIndex >= 0 &&
+      // 所有命中名字的都在前面，第一个没命中的出现在最后一个命中之后
+      artistRanking.firstNonMatchIndex === artistRanking.lastMatchIndex + 1 &&
+      artistRanking.rendered[0] === 'Taylor Swift',
+      `搜「taylor」命中 ${artistRanking.matched}/${artistRanking.total} 位艺人；前 6 位：${artistRanking.head.join(' / ')}；` +
+      `命中项全部排在前面=${artistRanking.firstNonMatchIndex === artistRanking.lastMatchIndex + 1}` +
+      `（最后一个命中 #${artistRanking.lastMatchIndex + 1}，第一个未命中 #${artistRanking.firstNonMatchIndex + 1}）；界面前 5 行：${artistRanking.rendered.join(' / ')}`)
+
+    /* ---------- 侧栏「新建播放列表」入口要看得见、点得到 ---------- */
+    const newPlaylistUi = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      // 这一段量的就是侧栏里的东西，先确保侧栏是展开的
+      if (!store.get().ui.sidebarVisible) { actions.toggleSidebar(); await settle(700) }
+      actions.setView('songs')
+      actions.setSource({ type: 'all', value: null })
+      await settle(600)
+      // 组头那颗 + 曾经是 opacity: 0（只靠「行悬停」才出现，而组头不是行），
+      // 用户因此完全找不到新建入口
+      const headButton = document.querySelector('.sidebar__section-head .sidebar__row-action[title="新建播放列表"]')
+      const ghostRow = document.querySelector('.sidebar__row--ghost[title="新建播放列表"]')
+      const styleOf = (node) => {
+        if (!node) return null
+        const style = getComputedStyle(node)
+        const rect = node.getBoundingClientRect()
+        const hit = rect.width > 0
+          ? document.elementFromPoint(Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2))
+          : null
+        return {
+          opacity: style.opacity,
+          display: style.display,
+          width: Math.round(rect.width),
+          hitInside: Boolean(hit && (hit === node || node.contains(hit)))
+        }
+      }
+      const head = styleOf(headButton)
+      const ghost = styleOf(ghostRow)
+
+      // 点这条入口应该真的能建：输入名字 → 创建 → 出现在侧栏
+      const openEditor = () => ghostRow && ghostRow.click()
+      openEditor()
+      const input = await (async () => {
+        for (let i = 0; i < 20; i++) {
+          const node = document.querySelector('.playlist-editor__input')
+          if (node) return node
+          await settle(60)
+        }
+        return null
+      })()
+      let created = null
+      if (input) {
+        input.value = '点出来的列表'
+        // 按钮在 .playlist-editor__actions 里，不是 .playlist-editor 的子节点
+        document.querySelector('.playlist-editor__actions .btn--primary')?.click()
+        await settle(800)
+        created = actions.playlists().map((item) => item.name)
+      }
+      // 收尾：删掉，别留在档案里
+      for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
+      actions.setSource({ type: 'all', value: null })
+      await settle(400)
+
+      return { head, ghost, inputShown: Boolean(input), created }
+    `)
+    record('侧栏：新建播放列表的入口看得见也点得到',
+      newPlaylistUi.head &&
+      newPlaylistUi.head.opacity === '1' &&
+      newPlaylistUi.head.width > 0 &&
+      newPlaylistUi.head.hitInside === true &&
+      newPlaylistUi.ghost &&
+      newPlaylistUi.ghost.opacity === '1' &&
+      newPlaylistUi.ghost.width > 100 &&
+      newPlaylistUi.ghost.hitInside === true &&
+      newPlaylistUi.inputShown === true &&
+      Array.isArray(newPlaylistUi.created) &&
+      newPlaylistUi.created.includes('点出来的列表'),
+      `组头的 + ：opacity=${newPlaylistUi.head ? newPlaylistUi.head.opacity : '—'} 宽 ${newPlaylistUi.head ? newPlaylistUi.head.width : 0}px 命中=${newPlaylistUi.head ? newPlaylistUi.head.hitInside : '—'}；` +
+      `「新建播放列表」这一行：宽 ${newPlaylistUi.ghost ? newPlaylistUi.ghost.width : 0}px 命中=${newPlaylistUi.ghost ? newPlaylistUi.ghost.hitInside : '—'}；` +
+      `点它弹出输入框=${newPlaylistUi.inputShown}，创建出的列表=${JSON.stringify(newPlaylistUi.created)}`)
+
+    /* ---------- 灵动岛：能拖窗口 + 深色下看得见 ---------- */
+    const islandSurface = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      const island = document.querySelector('.island')
+      const item = island.querySelector('.island__item')
+      const titlebar = document.querySelector('.titlebar')
+      // -webkit-app-region 决定"这一块能不能拖窗口"：标题栏的每个子元素都被设成
+      // no-drag，灵动岛必须显式改回 drag，否则标题栏正中会留一块拖不动的死区
+      const regionOf = (node) => getComputedStyle(node).webkitAppRegion || getComputedStyle(node).getPropertyValue('-webkit-app-region')
+
+      if (!store.get().ui.sidebarVisible) { actions.toggleSidebar(); await settle(600) }
+      const hidden = { region: regionOf(island), opacity: getComputedStyle(island).opacity }
+      if (store.get().ui.sidebarVisible) { actions.toggleSidebar(); await settle(600) }
+      const shown = {
+        region: regionOf(island),
+        itemRegion: regionOf(item),
+        opacity: getComputedStyle(island).opacity,
+        background: getComputedStyle(island).backgroundColor
+      }
+
+      // 深色下也必须有可见的底（曾经只是 14% 灰，几乎看不出来）
+      await actions.setSetting({ theme: 'dark' })
+      await settle(600)
+      const dark = {
+        background: getComputedStyle(island).backgroundColor,
+        theme: document.documentElement.dataset.theme
+      }
+      await actions.setSetting({ theme: 'light' })
+      await settle(600)
+      const light = { background: getComputedStyle(island).backgroundColor }
+      await actions.setSetting({ theme: 'system' })
+      await settle(500)
+      return { hidden, shown, dark, light }
+    `)
+    const alphaOf = (color) => {
+      const match = /rgba?\(([^)]+)\)/.exec(String(color))
+      if (!match) return 1
+      const parts = match[1].split(',').map((value) => Number(value.trim()))
+      return parts.length >= 4 ? parts[3] : 1
+    }
+    record('灵动岛：这块区域能拖窗口，深色下也看得见',
+      islandSurface.hidden.region === 'drag' &&
+      islandSurface.shown.region === 'drag' &&
+      islandSurface.shown.itemRegion === 'no-drag' &&
+      islandSurface.shown.opacity === '1' &&
+      alphaOf(islandSurface.dark.background) >= 0.2 &&
+      alphaOf(islandSurface.light.background) >= 0.08 &&
+      alphaOf(islandSurface.dark.background) > alphaOf(islandSurface.light.background),
+      `app-region：隐藏时 ${islandSurface.hidden.region}（opacity ${islandSurface.hidden.opacity}）、显示时 ${islandSurface.shown.region}、分段按钮 ${islandSurface.shown.itemRegion}；` +
+      `底色 深色=${islandSurface.dark.background}（alpha ${alphaOf(islandSurface.dark.background)}）／亮色=${islandSurface.light.background}（alpha ${alphaOf(islandSurface.light.background)}）`)
+
     /* ---------- 队列要跟着「你在哪一页播放」变 ----------
      *
      * 回归现场：队列面板只在队列**长度**变化时重画。于是从媒体墙点了另一张
@@ -2344,6 +2509,10 @@ async function runSmoke ({ win, ctx }) {
     await evaluate(win, `
       const { actions } = window.__aria
       await actions.setSetting({ theme: 'system' })
+      // 把侧栏放回去：这一段为了看见灵动岛把它收起来了，不收回来后面
+      // 所有跟侧栏有关的检查都会在「宽度 0」的状态下量，量出一堆假失败
+      if (!window.__aria.store.get().ui.sidebarVisible) actions.toggleSidebar()
+      await new Promise((r) => setTimeout(r, 600))
       return true
     `)
     await sleep(300)

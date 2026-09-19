@@ -84,13 +84,27 @@ html[data-platform="darwin"] .titlebar {
   gap: 2px;
   padding: 3px;
   border-radius: var(--radius-pill);
-  background: var(--fill-quaternary);
-  box-shadow: var(--elev-2);
+  background: var(--fill-floating);
+  /* 0.5px 的描边在深色下才看得出这颗胶囊的边界（深色里投影几乎不可见） */
+  box-shadow: var(--elev-2), 0 0 0 0.5px var(--separator);
   -webkit-backdrop-filter: blur(var(--blur));
   backdrop-filter: blur(var(--blur));
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur) var(--ease-ios);
+  /*
+   * 这一块要能拖窗口。
+   * `.titlebar > *` 把标题栏的所有子元素都设成了 no-drag，于是灵动岛（哪怕隐藏着、
+   * opacity: 0）会在标题栏正中留下一块「拖不动」的死区 —— 用户反馈的
+   * 「鼠标在那一块拖动窗口没反应」就是这个。这里显式改回 drag，
+   * 只有里面的分段按钮保持 no-drag。
+   */
+  -webkit-app-region: drag;
+}
+
+.titlebar > .island__item,
+.island__item {
+  -webkit-app-region: no-drag;
 }
 
 /* 当前视图不属于这四段（如设置页）或侧边栏正开着时，整条淡出 */
@@ -387,6 +401,16 @@ html[data-platform="darwin"] .titlebar {
   font-weight: 600;
 }
 
+/* 「新建播放列表」这类入口：不是内容，颜色更淡，悬停才亮起来 */
+.sidebar__row--ghost {
+  color: var(--label-3);
+  font-weight: 400;
+}
+
+.sidebar__row--ghost:hover {
+  color: var(--label);
+}
+
 .sidebar__row.is-selected .icon {
   color: var(--accent);
 }
@@ -417,6 +441,21 @@ html[data-platform="darwin"] .titlebar {
 
 .sidebar__row:hover .sidebar__row-action {
   opacity: 1;
+}
+
+/*
+ * 组头里的按钮不能靠「行悬停」才出现 —— 它不在行里，永远不会被悬停到，
+ * 于是就变成了一个看不见的按钮（用户反馈过「找不到新建按钮在哪」，
+ * 音乐文件夹那个 + 也一直是这样）。组头按钮一律常显，只是颜色更淡。
+ */
+.sidebar__section-head .sidebar__row-action {
+  opacity: 1;
+  color: var(--label-4);
+}
+
+.sidebar__section-head .sidebar__row-action:hover {
+  opacity: 1;
+  color: var(--label);
 }
 
 .sidebar__row-action:hover {

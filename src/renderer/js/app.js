@@ -98,7 +98,8 @@ async function main () {
   }
 
   function index () {
-    return libraryIndex.get(visibleTracks())
+    // 搜索词也传进去：名字命中的专辑/艺人要排到前面（见 grouping.js 的 rankByName）
+    return libraryIndex.get(visibleTracks(), store.get().ui.query)
   }
 
   /** 封面后台预热：空闲时把封面灌进主进程的磁盘缓存，让媒体墙秒出图 */

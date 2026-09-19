@@ -224,6 +224,18 @@ async function runScreenshots ({ win }) {
         await new Promise((r) => setTimeout(r, 1200))
         return true`)
       await sleep(1200)
+    }],
+    // 深色下的灵动岛：这颗胶囊只在深色里才最容易「看不见」，留一张对照图
+    ['18-island-dark.png', '深色下的灵动岛（收起侧栏）', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        await actions.setSetting({ theme: 'dark' })
+        // 灵动岛只在侧栏收起时出现，所以要把它收起来（不是展开）
+        if (store.get().ui.sidebarVisible) actions.toggleSidebar()
+        actions.setView('songs')
+        await new Promise((r) => setTimeout(r, 1400))
+        return true`)
+      await sleep(900)
     }]
   ]
 
@@ -238,13 +250,16 @@ async function runScreenshots ({ win }) {
     console.log(`  ✓ ${file} — ${label}`)
   }
 
-  // 示例播放列表只在截图里出现，拍完就删掉，免得留在自动化档案里
+  // 示例播放列表只在截图里出现，拍完就删掉，免得留在自动化档案里；
+  // 主题也还原成跟随系统
   await evaluate(win, `
-    const { actions } = window.__aria
+    const { actions, store } = window.__aria
     for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
     actions.setSource({ type: 'all', value: null })
+    await actions.setSetting({ theme: 'system' })
+    if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
     return true`)
-  await sleep(400)
+  await sleep(600)
 
   console.log(`\n共 ${written.length} 张截图已写入 ${OUTPUT_DIR}\n`)
   return written.length
