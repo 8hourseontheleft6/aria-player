@@ -52,8 +52,10 @@
 
 const { app, net } = require('electron')
 const fsp = require('node:fs/promises')
+const fsSync = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
+const { spawn } = require('node:child_process')
 const crypto = require('node:crypto')
 const zlib = require('node:zlib')
 const { Buffer } = require('node:buffer')
@@ -64,7 +66,7 @@ const SEARCH_TIMEOUT = 15000
 const RESOLVE_TIMEOUT = 20000
 const SOURCE_LOAD_TIMEOUT = 4000
 /** LX 脚本可能在初始化时先请求自己的接口再发 inited，所以要等一会儿 */
-const LX_INIT_WAIT = 4000
+const LX_INIT_WAIT = 8000
 const MAX_RESULTS_PER_SOURCE = 40
 
 /** 文件名 → 稳定的音源 id */
@@ -355,8 +357,9 @@ function createMusicSourcesService (ctx) {
       version: String(mod.version || ''),
       enabled: isEnabled(entry.id),
       error: entry.error || null,
-      // 'module' = 本项目接口；'lx' = LX 音乐自定义源（只解析，不搜索）
-      kind: mod.search || mod.resolveUrl ? 'module' : 'lx',
+      warning: entry.warning || null,
+      // 'module' = 本项目接口；'lx' = LX 音乐自定义源（只解析，不搜索）；'external' = 外部可执行程序
+      kind: entry.external ? 'external' : (mod.search || mod.resolveUrl ? 'module' : 'lx'),
       // 它订阅的事件名（LX 脚本一般只有 request / inited / updateAlert）
       lxEvents,
       lxSources: lxSources.map((item) => ({
@@ -460,6 +463,155 @@ function createMusicSourcesService (ctx) {
     })
   }
 
+  /* ================================================================ */
+  /* 外部搜索器（语言无关的子进程接口）                                     */
+  /* ================================================================ */
+
+  /*
+   * 需求是「把搜索单独封装、留一个调用接口，实现放外面」。
+   * 这里提供的就是这个接口：一个可执行程序 + stdin/stdout 上的 JSON 协议，
+   * 用什么语言写都行。本项目只提供**机制**，不提供任何实现，也不打包任何实现 ——
+   * 具体接什么服务、是否合规，由使用者自己负责。
+   *
+   * 配置：<userData>/music-sources/providers.json
+   *   [
+   *     { "id": "my-finder", "name": "我的搜索器", "command": "node",
+   *       "args": ["C:\\path\\to\\finder.js"], "timeoutMs": 15000 }
+   *   ]
+   *
+   * 调用：每次请求启动一次进程，把一行 JSON 写进 stdin 并关闭：
+   *   {"action":"search","query":"…","limit":20}
+   *   {"action":"resolve","item":{…}}        // item 就是搜索返回的那一条
+   *   {"action":"lyrics","item":{…}}
+   * 进程在 stdout 回一行 JSON：
+   *   {"results":[{"id","title","artist","album","duration","quality","payload"}]}
+   *   {"url":"https://…","headers":{…}}
+   *   {"text":"[00:01.00]…"}
+   * 退出码非 0 或返回的不是 JSON，就按失败处理（stderr 末尾会带进错误信息）。
+   */
+  const EXTERNAL_CONFIG = 'providers.json'
+  const EXTERNAL_STDOUT_MAX = 4 * 1024 * 1024
+
+  function readExternalConfig () {
+    try {
+      const raw = fsSync.readFileSync(path.join(dir, EXTERNAL_CONFIG), 'utf8')
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
+  function runExternal (provider, payload) {
+    return new Promise((resolve, reject) => {
+      const timeoutMs = Math.max(1000, Math.min(120000, Number(provider.timeoutMs) || 15000))
+      let child
+      try {
+        child = spawn(String(provider.command), Array.isArray(provider.args) ? provider.args.map(String) : [], {
+          cwd: provider.cwd ? String(provider.cwd) : dir,
+          windowsHide: true,
+          // 允许给子进程补环境变量：例如在 Electron 里跑 node 脚本要带 ELECTRON_RUN_AS_NODE=1
+          env: { ...process.env, ...(provider.env && typeof provider.env === 'object' ? provider.env : {}) }
+        })
+      } catch (err) {
+        reject(new Error(`启动失败：${err.message}`))
+        return
+      }
+
+      let stdout = ''
+      let stderr = ''
+      let settled = false
+      const finish = (err, value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        try { child.kill() } catch { /* 已经退出了 */ }
+        if (err) reject(err)
+        else resolve(value)
+      }
+      const timer = setTimeout(() => finish(new Error(`超时（${timeoutMs}ms）`)), timeoutMs)
+
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk
+        if (stdout.length > EXTERNAL_STDOUT_MAX) finish(new Error('输出过大，已中止'))
+      })
+      child.stderr.on('data', (chunk) => { stderr += chunk })
+      child.on('error', (err) => finish(new Error(`无法执行 ${provider.command}：${err.message}`)))
+      child.on('close', (code) => {
+        const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+        const last = lines[lines.length - 1]
+        if (!last) {
+          return finish(new Error(`没有输出（退出码 ${code}）${stderr ? `：${stderr.trim().split(/\r?\n/).slice(-1)[0]}` : ''}`))
+        }
+        try {
+          const parsed = JSON.parse(last)
+          if (code !== 0 && parsed?.error) return finish(new Error(String(parsed.error)))
+          finish(null, parsed)
+        } catch {
+          finish(new Error(`输出不是合法 JSON（退出码 ${code}）：${last.slice(0, 120)}`))
+        }
+      })
+
+      try {
+        child.stdin.write(`${JSON.stringify(payload)}\n`)
+        child.stdin.end()
+      } catch (err) {
+        finish(new Error(`写入失败：${err.message}`))
+      }
+    })
+  }
+
+  /** 把 providers.json 里的每一项包装成和脚本音源一样的对象 */
+  function externalModule (provider) {
+    const id = String(provider.id || '').trim()
+    const api = (payload) => runExternal(provider, payload)
+    return {
+      name: String(provider.name || id),
+      description: String(provider.description || `外部搜索器：${provider.command} ${(provider.args || []).join(' ')}`.trim()),
+      version: String(provider.version || ''),
+      external: true,
+      async search (query, { limit = 20 } = {}) {
+        const out = await api({ action: 'search', query, limit })
+        const list = Array.isArray(out?.results) ? out.results : []
+        return list.slice(0, limit)
+      },
+      async resolveUrl (track) {
+        const out = await api({ action: 'resolve', item: track })
+        const url = typeof out?.url === 'string' ? out.url : ''
+        if (!/^https?:/i.test(url)) throw new Error('外部搜索器没有返回可用的 http(s) 地址')
+        return { url, headers: out?.headers || null }
+      },
+      async resolveLyrics (track) {
+        const out = await api({ action: 'lyrics', item: track })
+        return out?.text ? { text: String(out.text) } : null
+      }
+    }
+  }
+
+  function mountExternalProviders () {
+    let config = []
+    try {
+      config = readExternalConfig()
+    } catch (err) {
+      console.warn('[sources] providers.json 读取失败', err.message)
+      return
+    }
+    for (const provider of config) {
+      const id = `external-${String(provider.id || '').trim().toLowerCase().replace(/[^\w.-]+/g, '-')}`
+      if (id === 'external-') continue
+      if (!provider.command) continue
+      loaded.set(id, {
+        id,
+        file: EXTERNAL_CONFIG,
+        external: true,
+        module: externalModule({ ...provider, id }),
+        lx: null,
+        error: null,
+        mtimeMs: 0
+      })
+    }
+  }
+
   async function load () {
     await ensureDir()
     let files = []
@@ -511,11 +663,21 @@ function createMusicSourcesService (ctx) {
         }
         const isLxStyle = Boolean(result.lx?.inited)
         if (!isModuleStyle && !isLxStyle) {
-          if ((result.lx?.handlers?.get('request')?.length || 0) > 0) {
-            throw new Error(
-              `脚本注册了 request 处理器，但 ${LX_INIT_WAIT}ms 内没有发送 inited 事件` +
-              '（LX 音源需要在初始化完成后 send(EVENT_NAMES.inited, …)；也有可能是它的远端配置接口没连上）'
-            )
+          const hasRequestHandler = (result.lx?.handlers?.get('request')?.length || 0) > 0
+          if (hasRequestHandler) {
+            /*
+             * 注册了 request 处理器却没在等待期内发 inited：
+             * 这种情况（远端配置慢、或配置接口不通）不该直接判死 ——
+             * 它仍然可以解析别人递过来的 musicInfo，只是我们不知道它声明了哪些音源。
+             * 所以按「可用但有告警」装载，界面会把告警显示出来。
+             */
+            entry.module = null
+            entry.lx = result.lx
+            entry.warning = `初始化未在 ${Math.round(LX_INIT_WAIT / 1000)}s 内完成（没收到 inited），` +
+              '可能它的远端配置接口不通；它仍可用于解析地址，但无法列出声明的音源'
+            loaded.set(id, entry)
+            console.warn(`[sources] ${name} 装在告警态：${entry.warning}`)
+            continue
           }
           throw new Error('无法识别的音源脚本：既没有导出 { search, resolveUrl }，也不是 LX 音乐的自定义源')
         }
@@ -530,12 +692,14 @@ function createMusicSourcesService (ctx) {
       }
       loaded.set(id, entry)
     }
-    // 目录里已经没有的，清掉（内置音源不参与这个清理）
+    // 目录里已经没有的，清掉（内置音源与外部搜索器不参与这个清理）
     for (const id of [...loaded.keys()]) {
-      if (loaded.get(id)?.builtin) continue
+      const entry = loaded.get(id)
+      if (entry?.builtin || entry?.external) continue
       if (!seen.has(id)) loaded.delete(id)
     }
     mountBuiltins()
+    mountExternalProviders()
     loadedOnce = true
     return list()
   }

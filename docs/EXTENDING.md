@@ -373,7 +373,44 @@ on(EVENT_NAMES.request, ({ source, action, info }) => { /* musicUrl / lyric / pi
   宿主就会按官方协议派发 `request({ source, action: 'musicUrl', info: { type, musicInfo } })`
   去解析地址，歌词同理（`action: 'lyric'`）。
 
-### 目前的行为
+### 外部搜索器（语言无关的子进程接口）
+
+如果把「搜索」单独封装成另一个程序、只留一个调用接口，可以用这个：一个可执行文件 +
+stdin/stdout 上的 JSON 协议，**用什么语言写都行**。
+
+配置文件：`<userData>/music-sources/providers.json`
+
+```json
+[
+  {
+    "id": "my-finder",
+    "name": "我的搜索器",
+    "command": "node",
+    "args": ["C:\\path\\to\\finder.js"],
+    "env": { "ELECTRON_RUN_AS_NODE": "1" },
+    "timeoutMs": 15000
+  }
+]
+```
+
+- `command` / `args`：怎么启动它；`cwd` 可选（默认是音源目录）；
+- `env` 可选，会叠加在环境变量上。**在 Electron 里跑 node 脚本时记得带
+  `ELECTRON_RUN_AS_NODE=1`** —— 否则 `process.execPath` 指向的是 Electron 本体，
+  脚本会被当成窗口程序，既不读 stdin 也不回结果（自检就踩过这个坑）；
+- 每次请求启动一次进程：把一行 JSON 写进 stdin 然后关闭，读取 stdout 的**最后一行** JSON。
+
+协议：
+
+| 请求（stdin 一行） | 期望返回（stdout 一行） |
+| --- | --- |
+| `{"action":"search","query":"…","limit":20}` | `{"results":[{"id","title","artist","album","duration","quality","payload"}]}` |
+| `{"action":"resolve","item":{…}}` | `{"url":"https://…","headers":{…}}`（headers 可选） |
+| `{"action":"lyrics","item":{…}}` | `{"text":"[00:01.00]…"}` |
+
+出错时可以返回 `{"error":"原因"}`，非 0 退出码或非 JSON 输出都会按失败处理并把 stderr 末行带进错误信息。
+
+> **本项目只提供这个接口，不提供任何实现**，也不打包任何实现 —— 具体接什么服务、
+> 是否合规，由使用者自己负责。内置音源只有 Internet Archive 那一个（公共领域 / CC，免密钥）。
 
 - 搜索结果分两块：**网络结果**（音源返回，可收起，每行带来源与质量标签）与**本地结果**（原有列表）；
 - 每条在线结果有三个动作：**播放**（解析直链后直接在内置播放器里播，歌词会跟着加载）、

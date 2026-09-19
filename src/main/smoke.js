@@ -1319,10 +1319,91 @@ async function runSmoke ({ win, ctx }) {
         ? '仓库根目录里没有 LX 音源文件，跳过（放进 music-sources 目录或从设置里导入即可）'
         : userSourceIds.map((item) => item.error
           ? `${item.file} → 失败：${item.error}`
-          : `${item.file} → ${item.kind}｜订阅事件 ${JSON.stringify(item.lxEvents)}｜` +
+          : `${item.file} → ${item.kind}${item.warning ? '（告警态）' : ''}｜订阅事件 ${JSON.stringify(item.lxEvents)}｜` +
             `声明音源 ${item.lxSources.map((sub) => `${sub.name}:${JSON.stringify(sub.actions || [])}`).join('、') || '—'}｜` +
             `搜索=${item.capabilities?.search} 解析=${item.capabilities?.resolveUrl}`).join('；'))
 
+
+    /* ---------- 外部搜索器：语言无关的子进程接口 ----------
+     *
+     * 这里只验证「机制」：按 providers.json 起一个可执行程序，用 stdin/stdout 上的
+     * JSON 协议收发。用的实现是自检临时写的几行 node 脚本（跑完即删）。
+     */
+    const externalDir = sourcesService.getDir()
+    const finderScript = path.join(externalDir, 'smoke-finder.js')
+    const providerFile = path.join(externalDir, 'providers.json')
+    let externalReport = {}
+    try {
+      const finderSource = [
+        'let input = ""',
+        'process.stdin.on("data", (chunk) => { input += chunk })',
+        'process.stdin.on("end", () => {',
+        '  let req = {}',
+        '  try { req = JSON.parse(input.trim().split(/\\r?\\n/).pop()) } catch (err) {}',
+        '  const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n")',
+        '  const audioUrl = ' + JSON.stringify(audioUrl),
+        '  if (req.action === "search") {',
+        '    send({ results: [{ id: "ext-1", title: req.query + " 的外部结果", artist: "外部搜索器", album: "外部专辑", duration: 3, quality: "ext" }] })',
+        '  } else if (req.action === "resolve") {',
+        '    send({ url: audioUrl })',
+        '  } else if (req.action === "lyrics") {',
+        '    send({ text: "[00:00.00]外部搜索器的歌词" })',
+        '  } else {',
+        '    send({ error: "unknown action: " + req.action })',
+        '  }',
+        '})'
+      ].join('\n')
+      await fsp.writeFile(finderScript, finderSource, 'utf8')
+      await fsp.writeFile(providerFile, JSON.stringify([
+        {
+          id: 'smoke-finder',
+          name: '自检外部搜索器',
+          // Electron 里 process.execPath 是 Electron 本体，跑 node 脚本必须带这个环境变量
+          command: process.execPath,
+          args: [finderScript],
+          env: { ELECTRON_RUN_AS_NODE: '1' },
+          timeoutMs: 8000
+        }
+      ], null, 2), 'utf8')
+
+      await sourcesService.load()
+      const described = sourcesService.list().find((item) => item.id === 'external-smoke-finder') || null
+      const found = await sourcesService.search('外部', { sources: ['external-smoke-finder'] })
+      const first = found.results[0] || null
+      externalReport = {
+        described: described
+          ? { kind: described.kind, name: described.name, search: described.capabilities?.search, resolve: described.capabilities?.resolveUrl }
+          : null,
+        count: found.results.length,
+        first: first ? { title: first.title, artist: first.artist, source: first.sourceName } : null,
+        error: found.perSource.find((item) => item.id === 'external-smoke-finder')?.error || null
+      }
+      if (first) {
+        const resolved = await sourcesService.resolveUrl(first)
+        externalReport.resolve = { realUrl: resolved.realUrl, proxied: String(resolved.url).startsWith('remote://stream/') }
+        const lyrics = await sourcesService.resolveLyrics(first)
+        externalReport.lyrics = lyrics?.text || null
+      }
+    } catch (err) {
+      externalReport.error = String(err?.message || err)
+    } finally {
+      await fsp.rm(finderScript, { force: true }).catch(() => {})
+      await fsp.rm(providerFile, { force: true }).catch(() => {})
+      await sourcesService.load().catch(() => {})
+    }
+    record('外部搜索器：子进程 JSON 接口可用（语言无关）',
+      externalReport.described?.kind === 'external' &&
+      externalReport.described?.search === true &&
+      externalReport.count === 1 &&
+      externalReport.first?.title?.includes('外部结果') &&
+      externalReport.resolve?.realUrl === audioUrl &&
+      externalReport.resolve?.proxied === true &&
+      String(externalReport.lyrics || '').includes('外部搜索器的歌词'),
+      externalReport.error
+        ? `失败：${externalReport.error}`
+        : `providers.json 里的自检搜索器被识别为 kind=${externalReport.described?.kind}（搜索=${externalReport.described?.search}）；` +
+          `搜索返回 ${externalReport.count} 条「${externalReport.first?.title}」（来源 ${externalReport.first?.source}）；` +
+          `解析出直链并转成代理地址=${externalReport.resolve?.proxied}；歌词「${externalReport.lyrics}」`)
 
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria
