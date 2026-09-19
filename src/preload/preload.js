@@ -74,6 +74,20 @@ contextBridge.exposeInMainWorld('aria', {
     stats: () => ipcRenderer.invoke('online:stats')
   },
 
+  /* 在线音源：脚本由用户自己放进 <userData>/music-sources，这里只做管理 / 搜索 / 解析 */
+  sources: {
+    list: () => ipcRenderer.invoke('sources:list'),
+    reload: () => ipcRenderer.invoke('sources:reload'),
+    stats: () => ipcRenderer.invoke('sources:stats'),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('sources:set-enabled', id, enabled),
+    install: (input) => ipcRenderer.invoke('sources:install', input),
+    remove: (id) => ipcRenderer.invoke('sources:remove', id),
+    search: (input) => ipcRenderer.invoke('sources:search', input),
+    resolve: (input) => ipcRenderer.invoke('sources:resolve', input),
+    openDir: () => ipcRenderer.invoke('sources:open-dir'),
+    pickFile: () => ipcRenderer.invoke('sources:pick-file')
+  },
+
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),

@@ -1,6 +1,8 @@
 'use strict'
 
-const { ipcMain, BrowserWindow, app, globalShortcut, nativeTheme, shell } = require('electron')
+const { ipcMain, BrowserWindow, app, globalShortcut, nativeTheme, shell, dialog } = require('electron')
+const fsp = require('node:fs/promises')
+const path = require('node:path')
 
 /** 主 -> 渲染的频道白名单（preload 也依赖这份清单，保持同步） */
 const EVENT_CHANNELS = [
@@ -48,6 +50,7 @@ function registerIpc (ctx) {
   const library = ctx.get('library')
   const lyrics = ctx.get('lyrics')
   const online = ctx.get('online')
+  const sources = ctx.get('musicSources')
 
   /** @type {Map<string, Function>} */
   const handlers = {
@@ -98,6 +101,35 @@ function registerIpc (ctx) {
     'online:cover': (_event, track) => online.fetchCover(track || {}),
     'online:clear-cache': () => online.clearCache(),
     'online:stats': () => online.getStats(),
+
+    /* ---------- 在线音源（用户自己放进来的音源脚本） ---------- */
+    'sources:list': () => sources.list(),
+    'sources:reload': () => sources.load(),
+    'sources:stats': () => sources.getStats(),
+    'sources:set-enabled': (_event, id, enabled) => sources.setEnabled(String(id || ''), enabled),
+    'sources:install': (_event, input) => sources.install(
+      (input && input.text) || '',
+      (input && input.name) || ''
+    ),
+    'sources:remove': (_event, id) => sources.remove(String(id || '')),
+    'sources:search': (_event, input) => sources.search((input && input.query) || '', input || {}),
+    'sources:resolve': (_event, input) => sources.resolveUrl(input || {}),
+    'sources:open-dir': async () => {
+      const dir = sources.getDir()
+      await shell.openPath(dir)
+      return dir
+    },
+    'sources:pick-file': async () => {
+      const result = await dialog.showOpenDialog({
+        title: '选择音源脚本（.js）',
+        properties: ['openFile'],
+        filters: [{ name: '音源脚本', extensions: ['js'] }]
+      })
+      if (result.canceled || !result.filePaths?.length) return { canceled: true }
+      const filePath = result.filePaths[0]
+      const text = await fsp.readFile(filePath, 'utf8')
+      return { canceled: false, text, name: path.basename(filePath) }
+    },
 
     /* ---------- 窗口控制（自绘标题栏） ---------- */
     'window:minimize': (event) => BrowserWindow.fromWebContents(event.sender)?.minimize(),

@@ -872,6 +872,149 @@ async function runSmoke ({ win, ctx }) {
       backToSongs.map((item) => `${item.label}（切前 ${item.before.view}）→ ${item.view}/${item.source}，列表可见=${item.songsVisible}、${item.rows} 行`).join('；') +
       `；队列面板开着时 → ${backToSongsCheck.withQueue.view}，列表可见=${backToSongsCheck.withQueue.songsVisible}`)
 
+    /* ---------- 在线音源：脚本宿主 + 「网络结果」板块 ----------
+     *
+     * 本仓库不内置音源，所以这里用一段**临时**脚本验证整条链路：
+     * 导入 → 装载 → 搜索 → 结果进 store → 界面出现「网络结果」板块 → 移除。
+     * 顺便验证「没打开总开关时不出现网络结果」与「单个音源出错不影响其他音源」。
+     */
+    const sourcesService = ctx.get('musicSources')
+    const demoSources = ['aria-smoke-source-a', 'aria-smoke-source-b']
+    for (const id of demoSources) {
+      try { await sourcesService.remove(id) } catch { /* 之前没装过 */ }
+    }
+    // 本地也命中的关键词：这样一次搜索能同时看到「本地结果」和「网络结果」两块
+    const sharedKeyword = (allTracks.find((track) => track.title.length >= 4) || { title: 'Love' })
+      .title.slice(0, 4)
+
+    const sourceScript = [
+      'module.exports = {',
+      "  name: '自检用音源 A',",
+      "  version: '9.9.9',",
+      "  description: '由 npm run smoke 临时写入，用来验证音源链路',",
+      '  async search (query, { limit, request }) {',
+      '    // 顺便确认沙箱里拿到了 request/Buffer，且拿不到 require/process',
+      "    const sandboxOk = typeof request === 'function' && typeof Buffer === 'function' &&",
+      "      typeof require === 'undefined' && typeof process === 'undefined'",
+      '    const list = []',
+      '    for (let i = 0; i < Math.min(3, limit); i++) {',
+      '      list.push({',
+      "        id: 'demo-' + i,",
+      "        title: query + ' 的网络结果 ' + (i + 1),",
+      "        artist: '演示艺人',",
+      "        album: '演示专辑',",
+      '        duration: 200 + i,',
+      "        quality: '320k',",
+      '        payload: { sandboxOk }',
+      '      })',
+      '    }',
+      '    return list',
+      '  },',
+      '  async resolveUrl (track) {',
+      "    if (!track || !track.payload || !track.payload.sandboxOk) throw new Error('沙箱能力不可用')",
+      "    return 'https://example.invalid/audio/' + encodeURIComponent(track.title) + '.mp3'",
+      '  }',
+      '}'
+    ].join('\n')
+
+    const failingScript = [
+      'module.exports = {',
+      "  name: '自检用音源 B（故意坏掉）',",
+      "  async search () { throw new Error('这个音源就是用来验证失败的') }",
+      '}'
+    ].join('\n')
+
+    const sourceReport = { installed: null, beforeToggle: null, afterToggle: null, resolve: null, removed: null }
+    try {
+      sourceReport.installed = await sourcesService.install(sourceScript, 'aria-smoke-source-a')
+      await sourcesService.install(failingScript, 'aria-smoke-source-b')
+
+      // 只装了音源、没打开总开关：不该出现网络结果
+      sourceReport.beforeToggle = await evaluate(win, `
+        const { actions, store } = window.__aria
+        await actions.setSetting({ onlineSources: false })
+        actions.setView('songs')
+        actions.setQuery('演示')
+        await new Promise((r) => setTimeout(r, 900))
+        const section = document.querySelector('.online-results')
+        return {
+          hidden: section ? section.hidden : null,
+          search: store.get().ui.onlineSearch || null
+        }`)
+
+      await evaluate(win, `await window.__aria.actions.setSetting({ onlineSources: true }); return true`)
+      // 用一个「本地也有、音源也会回」的关键词，才能同时验到两块结果
+      sourceReport.afterToggle = await evaluate(win, `
+        const { actions } = window.__aria
+        const keyword = ${JSON.stringify(sharedKeyword)}
+        actions.setView('songs')
+        actions.setQuery(keyword)
+        const state = await actions.searchOnlineNow(keyword)
+        await new Promise((r) => setTimeout(r, 700))
+        const section = document.querySelector('.online-results')
+        const rows = [...document.querySelectorAll('.online-result')].map((node) => ({
+          title: (node.querySelector('.online-result__title') || {}).textContent || '',
+          source: (node.querySelector('.online-result__source') || {}).textContent || '',
+          quality: (node.querySelector('.online-result__tag') || {}).textContent || ''
+        }))
+        const rect = section ? section.getBoundingClientRect() : null
+        return {
+          status: state ? state.status : null,
+          resultCount: state ? state.results.length : -1,
+          perSource: state ? state.perSource : [],
+          errorCount: state ? state.perSource.filter((item) => item.error).length : -1,
+          sectionHidden: section ? section.hidden : null,
+          sectionHeight: rect ? Math.round(rect.height) : 0,
+          rows,
+          localRows: document.querySelectorAll('.track-row').length
+        }`)
+
+      const firstResult = await evaluate(win, `
+        const state = window.__aria.store.get().ui.onlineSearch
+        return (state && state.results && state.results[0]) || null`)
+      if (firstResult) sourceReport.resolve = await sourcesService.resolveUrl(firstResult)
+    } finally {
+      for (const id of demoSources) {
+        try { await sourcesService.remove(id) } catch { /* 忽略 */ }
+      }
+      sourceReport.removed = sourcesService.list().map((item) => item.id)
+      await evaluate(win, `
+        await window.__aria.actions.setSetting({ onlineSources: false })
+        window.__aria.actions.setQuery('')
+        window.__aria.actions.setOnlineSearch(null)
+        return true`)
+    }
+
+    record('音源脚本：导入 / 沙箱能力 / 解析地址',
+      sourceReport.installed && sourceReport.installed.id === 'aria-smoke-source-a' &&
+      sourceReport.resolve && /^https:\/\/example\.invalid\/audio\//.test(sourceReport.resolve.url),
+      `导入得到 id=${sourceReport.installed?.id}、名称=${sourceReport.installed?.name}；` +
+      `解析地址返回 ${String(sourceReport.resolve?.url || '').slice(0, 56)}…` +
+      `（能拿到这个结果说明沙箱里有 request/Buffer，且没有 require/process）`)
+    record('在线音源：网络结果与本地结果各就各位',
+      sourceReport.afterToggle?.status === 'done' &&
+      sourceReport.afterToggle.resultCount === 3 &&
+      sourceReport.afterToggle.rows.length === 3 &&
+      sourceReport.afterToggle.rows.every((row) => row.source === '自检用音源 A') &&
+      sourceReport.afterToggle.sectionHidden === false &&
+      sourceReport.afterToggle.sectionHeight > 20 &&
+      sourceReport.afterToggle.localRows > 0,
+      `打开总开关后搜索：网络结果 ${sourceReport.afterToggle?.resultCount} 首` +
+      `（板块可见=${!sourceReport.afterToggle?.sectionHidden}、高度 ${sourceReport.afterToggle?.sectionHeight}px），` +
+      `本地结果同时还有 ${sourceReport.afterToggle?.localRows} 行；` +
+      `示例「${sourceReport.afterToggle?.rows?.[0]?.title}」（${sourceReport.afterToggle?.rows?.[0]?.source} / ${sourceReport.afterToggle?.rows?.[0]?.quality}）`)
+    record('在线音源：单个音源出错不影响其他音源',
+      sourceReport.afterToggle?.errorCount >= 1 && sourceReport.afterToggle?.resultCount === 3,
+      `${sourceReport.afterToggle?.perSource?.length} 个音源参与，其中 ${sourceReport.afterToggle?.errorCount} 个报错；` +
+      `正常音源仍返回了 ${sourceReport.afterToggle?.resultCount} 首，错误信息：` +
+      `${JSON.stringify(sourceReport.afterToggle?.perSource?.filter((item) => item.error).map((item) => `${item.name}: ${item.error}`))}`)
+    record('在线音源：没打开总开关时不出现网络结果',
+      sourceReport.beforeToggle?.hidden === true && !sourceReport.beforeToggle?.search,
+      `总开关关闭时「网络结果」板块 hidden=${sourceReport.beforeToggle?.hidden}，store 里也没有在线结果`)
+    record('在线音源：移除后彻底消失',
+      Array.isArray(sourceReport.removed) && !sourceReport.removed.includes('aria-smoke-source-a'),
+      `移除两个自检音源后，目录里剩下 ${JSON.stringify(sourceReport.removed)}`)
+
     const uiResult = await evaluate(win, `
       const { actions } = window.__aria
       actions.openNowPlaying({ lyrics: true })

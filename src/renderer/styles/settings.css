@@ -72,6 +72,62 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------------------- 在线音源列表 ---------------------- */
+
+.settings__sources {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings__source {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-top: 0.5px solid var(--separator);
+}
+
+.settings__source-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings__source-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-subhead);
+  color: var(--label);
+}
+
+.settings__source-version {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+
+.settings__source-error {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 69, 58, 0.18);
+  color: #ff453a;
+  font-size: var(--text-caption);
+}
+
+.settings__source-sub {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings__sources-empty {
+  padding: 10px 14px 14px;
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  line-height: 1.75;
+}
+
 .settings__row-control {
   display: flex;
   align-items: center;

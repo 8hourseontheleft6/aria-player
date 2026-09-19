@@ -45,6 +45,19 @@ function createStub () {
       clearCache: unavailable('清理在线缓存'),
       stats: unavailable('在线缓存统计')
     },
+    /* 在线音源：脚本由用户自己放在 <userData>/music-sources，这里只是管理 / 搜索 / 解析 */
+    sources: {
+      list: unavailable('读取音源列表'),
+      reload: unavailable('重新加载音源'),
+      stats: unavailable('音源统计'),
+      setEnabled: unavailable('开关音源'),
+      install: unavailable('安装音源'),
+      remove: unavailable('移除音源'),
+      search: unavailable('在线搜索'),
+      resolve: unavailable('解析播放地址'),
+      openDir: unavailable('打开音源目录'),
+      pickFile: unavailable('选择音源脚本')
+    },
     paths: { fromFiles: () => [] },
     window: {
       minimize: noop,

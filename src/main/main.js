@@ -9,6 +9,7 @@ const { createSettingsService } = require('./services/settings')
 const { createLibraryService } = require('./services/library')
 const { createLyricsService } = require('./services/lyrics')
 const { createOnlineService } = require('./services/online')
+const { createMusicSourcesService } = require('./services/music-sources')
 const { createTrayService } = require('./services/tray')
 const { createWatcherService } = require('./services/watcher')
 const { registerIpc } = require('./ipc')
@@ -66,12 +67,21 @@ async function bootstrap () {
   ctx.define('library', createLibraryService)
   ctx.define('lyrics', createLyricsService)
   ctx.define('online', createOnlineService)
+  ctx.define('musicSources', createMusicSourcesService)
   ctx.define('tray', createTrayService)
   ctx.define('watcher', createWatcherService)
 
   const settings = ctx.get('settings')
   await settings.init()
   applyTheme(ctx, settings.get().theme)
+
+  // 音源脚本在启动时装一次（目录不存在就建好，方便用户直接往里丢脚本）
+  try {
+    await ctx.get('musicSources').init()
+  } catch (err) {
+    console.warn('[sources] 初始化失败', err)
+  }
+
 
   registerProtocols(ctx)
   registerIpc(ctx)

@@ -187,6 +187,30 @@ async function main () {
       store.set((state) => ({ ...state, ui: { ...state.ui, query } }))
       // 深度搜索时歌词要问主进程，这里跟着防抖触发
       requestSearchLyrics()
+      // 在线音源搜索同样防抖；总开关没开时它自己会清空结果
+      requestOnlineSearch()
+    },
+
+    /** 在线音源搜索结果落 store（界面按关键词核对后再显示） */
+    setOnlineSearch (result) {
+      store.set((state) => ({ ...state, ui: { ...state.ui, onlineSearch: result } }))
+    },
+
+    /** 自检用：立刻跑一次在线音源搜索（不走防抖） */
+    async searchOnlineNow (query = store.get().ui.query) {
+      requestOnlineSearch({ immediate: true })
+      const deadline = Date.now() + 30000
+      while (Date.now() < deadline) {
+        const state = store.get().ui.onlineSearch
+        if (state && state.query === query && state.status !== 'loading') return state
+        await new Promise((resolve) => setTimeout(resolve, 120))
+      }
+      return store.get().ui.onlineSearch
+    },
+
+    /** 解析一条在线结果的播放地址（播放功能后续接入时使用，这里先暴露出来） */
+    async resolveOnlineUrl (item) {
+      return remote.sources.resolve(item || {})
     },
 
     /**
@@ -664,6 +688,59 @@ async function main () {
       duration: 2600
     })
     return true
+  }
+
+  /**
+   * 在线音源搜索。
+   *
+   * 只在「总开关打开 + 有关键词」时才真的发请求；同一关键词不重复搜。
+   * 结果带上关键词存进 store，界面核对关键词一致后才显示 ——
+   * 和歌词搜索同一个道理：异步结果会晚到。
+   */
+  let onlineSearchTimer = null
+  let onlineSearchToken = 0
+
+  function requestOnlineSearch ({ immediate = false } = {}) {
+    const state = store.get()
+    const query = String(state.ui.query || '').trim()
+    if (onlineSearchTimer) {
+      clearTimeout(onlineSearchTimer)
+      onlineSearchTimer = null
+    }
+    if (state.settings.onlineSources !== true || !query) {
+      if (state.ui.onlineSearch) actions.setOnlineSearch(null)
+      return
+    }
+    const current = state.ui.onlineSearch
+    if (current && current.query === query && current.status === 'done') return
+
+    const run = async () => {
+      const token = ++onlineSearchToken
+      actions.setOnlineSearch({ query, status: 'loading', results: [], perSource: [] })
+      const started = performance.now()
+      try {
+        const result = await remote.sources.search({ query })
+        if (token !== onlineSearchToken) return
+        actions.setOnlineSearch({
+          query,
+          status: 'done',
+          results: result?.results || [],
+          perSource: result?.perSource || [],
+          elapsedMs: result?.elapsedMs ?? Math.round(performance.now() - started)
+        })
+      } catch (err) {
+        if (token !== onlineSearchToken) return
+        actions.setOnlineSearch({
+          query,
+          status: 'error',
+          results: [],
+          perSource: [],
+          error: String(err?.message || err)
+        })
+      }
+    }
+    if (immediate) run()
+    else onlineSearchTimer = setTimeout(run, 460)
   }
 
   /** 输入变化 / 切换范围时调用：只有深度档且有词才真的去搜 */

@@ -266,6 +266,90 @@ ctx.define('lastfm', (ctx) => {
 - **换界面配色**：`styles/tokens.css` 是唯一的颜色真源，改一处全局生效。
   封面动态配色由 `core/artwork.js` 写入 `--tint` / `--tint-2`。
 
+## 三·五、在线音源（音源脚本）
+
+「在线音源」提供的是**机制**：装载、管理、运行你自己放进来的音源脚本，
+搜索结果里会多出一块「网络结果」，和本地结果并列。
+
+> **本项目不内置任何音源。** 没有音源时搜索结果里不会出现「网络结果」那一块
+> ——「不添加音源就什么也搜不到」是设计使然，不是没做好。
+> 脚本访问什么服务、是否合规，由你自己判断与负责。
+
+### 放哪里
+
+```
+<userData>/music-sources/*.js      # Windows 一般是 %APPDATA%\Aria\music-sources
+```
+
+设置 → 在线音源里可以「导入脚本」（选一个 .js）、「打开目录」、「刷新」、单独启用/停用、移除。
+目录里的 `.js` 在刷新时按 mtime 重新装载；装载失败的脚本会在列表里标出来并显示原因。
+
+### 接口
+
+脚本是 CommonJS，导出下面这些成员（`search` 与 `resolveUrl` 至少要有一个）：
+
+```js
+module.exports = {
+  name: '我的音源',            // 显示名（缺省用文件名）
+  version: '1.0.0',           // 可选
+  description: '…',           // 可选
+
+  // 搜索。返回数组，字段能做多少填多少。
+  async search (query, { limit, request, signal }) {
+    const res = await request('https://example.com/api/search', {
+      params: { q: query, n: limit },
+      headers: { Referer: 'https://example.com/' },
+      responseType: 'json'       // 'json' | 'text' | 'buffer'
+    })
+    return (res.body?.list || []).slice(0, limit).map((item) => ({
+      id: String(item.id),       // 音源内的唯一 id，解析地址时会原样还给你
+      title: item.name,
+      artist: item.singer,
+      album: item.album,
+      duration: item.interval,   // 秒
+      quality: item.rate,        // 例如 '320k'
+      payload: item              // 可选：原样保存，resolveUrl 时还给你
+    }))
+  },
+
+  // 点「复制地址」时才会调用，返回可播放的 http(s) 直链
+  async resolveUrl (track, { quality, request, signal }) {
+    const res = await request('https://example.com/api/url', {
+      params: { id: track.id, rate: quality },
+      responseType: 'json'
+    })
+    return res.body.url
+  },
+
+  // 可选：歌词 / 封面（目前界面还没接，先留着口子）
+  // async resolveLyrics (track, api) { return { text: '[00:01.00]…' } },
+  // async resolveCover (track, api) { return 'https://…' }
+}
+```
+
+### 沙箱里有什么
+
+脚本跑在 Node 的 `vm` 上下文里，**只有**下面这些：
+
+| 能力 | 说明 |
+| --- | --- |
+| `request(url, options)` | 极简 HTTP 客户端：`{ method, headers, body, params, timeout, responseType }` → `{ status, ok, headers, body, raw }` |
+| `crypto` | `createHash / createHmac / randomBytes / randomUUID` |
+| `zlib` | `gzipSync / gunzipSync / inflateSync / deflateSync` |
+| `Buffer` `URL` `URLSearchParams` `TextDecoder` | 常用内置对象 |
+| `setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` | 定时器 |
+| `console` | 输出会带上 `[source:文件名]` 前缀 |
+
+**没有** `require`、`fs`、`process`、Electron API，也拿不到渲染层。
+单次搜索 15 秒、解析地址 20 秒超时；某个音源抛错或超时只影响它自己，
+界面上会把它标成出错、其他音源照常出结果。
+
+### 目前还没做的
+
+音源结果目前可以「复制解析出来的播放地址」，但**还不能直接在内置播放器里播放** ——
+那需要把播放器从「只认资料库曲目」扩展到能播放外部直链（队列、封面、歌词都要跟着支持）。
+这部分留作后续工作。
+
 ## 四、自检
 
 改完代码跑一遍：

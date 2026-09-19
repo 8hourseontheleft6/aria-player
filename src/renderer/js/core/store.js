@@ -99,6 +99,8 @@ export function initialState () {
       searchScope: 'basic',
       searchHistory: [],
       jumpToMatchedLyric: true,
+      onlineSources: false,
+      musicSources: {},
       globalMediaKeys: true,
       showRemainingTime: false
     },
@@ -108,6 +110,8 @@ export function initialState () {
       source: { type: 'all', value: null },
       detail: null,
       query: '',
+      // 在线音源搜索结果：{ query, status, results, perSource, error, elapsedMs }
+      onlineSearch: null,
       // 深度搜索的歌词命中结果：{ query, ids, scanning, scanned, matched, elapsedMs }
       searchLyrics: null,
       sort: { key: 'default', direction: 'asc' },

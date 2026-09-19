@@ -326,6 +326,180 @@
   place-items: center;
 }
 
+/* ---------------------- 网络结果（在线音源） ---------------------- */
+
+/*
+ * 搜索结果分两块：本地曲目（原来的列表）+ 这里这块网络结果。
+ * 没装音源、或总开关没开时整块不出现 —— 本仓库不内置任何音源。
+ */
+.online-results {
+  margin: 0 0 10px;
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.online-results[hidden] {
+  display: none;
+}
+
+.online-results__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 0.5px solid var(--separator);
+}
+
+.online-results.is-collapsed .online-results__head {
+  border-bottom: none;
+}
+
+.online-results__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  color: var(--label);
+}
+
+.online-results__title .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+
+.online-results__count {
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.online-results__meta {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-results__meta.is-error {
+  color: #ff453a;
+}
+
+.online-results__toggle {
+  flex: none;
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+
+.online-results__toggle:hover {
+  color: var(--accent);
+}
+
+.online-results__list {
+  max-height: 246px;
+  overflow-y: auto;
+}
+
+.online-results.is-collapsed .online-results__list {
+  display: none;
+}
+
+.online-results__hint {
+  padding: 12px;
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  line-height: 1.8;
+}
+
+.online-results__error {
+  color: #ff453a;
+  font-size: var(--text-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-top: 0.5px solid var(--separator);
+}
+
+.online-result:first-child {
+  border-top: none;
+}
+
+.online-result:hover {
+  background: var(--bg-hover);
+}
+
+.online-result__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.online-result__title {
+  font-size: var(--text-subhead);
+  color: var(--label);
+}
+
+.online-result__sub {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+
+.online-result__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+
+.online-result__tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--fill-quaternary);
+}
+
+.online-result__source {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-result__action {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-xs);
+  background: var(--fill-quaternary);
+  font-size: var(--text-caption);
+  color: var(--label-2);
+}
+
+.online-result__action:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.online-result__action:disabled {
+  opacity: 0.6;
+}
+
 /* ------------------------------ 队列视图 ------------------------------ */
 
 .queue-panel {

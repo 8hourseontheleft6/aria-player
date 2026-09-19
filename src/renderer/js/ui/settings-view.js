@@ -371,6 +371,106 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       })
     ]))
 
+    /* ---------- 在线音源 ---------- */
+    /*
+     * 这里只管「机制」：装载、开关、移除用户自己放进来的音源脚本。
+     * 本项目不内置任何音源 —— 没有音源时搜索结果里就不会出现「网络结果」那一块。
+     */
+    const sourcesHost = h('div', { class: 'settings__sources' })
+    const sourcesCount = h('span', { class: 'settings__row-value', text: '—' })
+
+    async function refreshSources () {
+      let list = []
+      try {
+        list = await remote.sources.list()
+      } catch {
+        list = []
+      }
+      sourcesCount.textContent = list.length
+        ? `${list.filter((item) => item.enabled).length}/${list.length} 已启用`
+        : '尚未添加'
+      clear(sourcesHost)
+      if (!list.length) {
+        sourcesHost.append(h('div', { class: 'settings__sources-empty' },
+          '还没有音源。点「导入脚本」选择 .js 音源脚本，或点「打开目录」把脚本放进去（目录里的 .js 会在下次刷新时自动装载）。'))
+        return
+      }
+      for (const item of list) {
+        sourcesHost.append(h('div', { class: 'settings__source' },
+          h('div', { class: 'settings__source-main' },
+            h('div', { class: 'settings__source-name' },
+              item.name,
+              item.version ? h('span', { class: 'settings__source-version', text: `v${item.version}` }) : null,
+              item.error ? h('span', { class: 'settings__source-error', text: '装载失败' }) : null
+            ),
+            h('div', { class: 'settings__source-sub', text: item.error || item.description || item.file })
+          ),
+          switchControl(item.enabled, async (value) => {
+            await remote.sources.setEnabled(item.id, value)
+            await refreshSources()
+          }),
+          h('button', {
+            class: 'btn btn--sm btn--destructive',
+            type: 'button',
+            onClick: async () => {
+              await remote.sources.remove(item.id)
+              toast({ message: `已移除音源「${item.name}」`, type: 'success' })
+              await refreshSources()
+            }
+          }, '移除')
+        ))
+      }
+    }
+
+    scroll.appendChild(group('在线音源', [
+      row({
+        title: '启用在线音源',
+        sub: '打开后，搜索时会同时向已启用的音源查询，结果单独显示在「网络结果」里。本项目不内置音源，需要你自己导入（脚本由你自行准备，访问什么服务、是否合规也由你判断）。',
+        control: switchControl(settings.onlineSources === true,
+          (value) => actions.setSetting({ onlineSources: value }))
+      }),
+      row({
+        title: '已装载音源',
+        sub: '脚本放在 <userData>/music-sources/*.js；接口说明见 docs/EXTENDING.md 的「在线音源」一节',
+        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        sourcesCount,
+        h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async () => {
+            const picked = await remote.sources.pickFile()
+            if (!picked || picked.canceled) return
+            try {
+              const result = await remote.sources.install({ text: picked.text, name: picked.name })
+              toast({ message: `已导入音源「${result.name}」`, type: 'success' })
+            } catch (err) {
+              toast({ message: `导入失败：${String(err?.message || err)}`, type: 'error', duration: 4200 })
+            }
+            await refreshSources()
+          }
+        }, '导入脚本'),
+        h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async () => {
+            await remote.sources.openDir()
+          }
+        }, '打开目录'),
+        h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async () => {
+            await remote.sources.reload()
+            await refreshSources()
+            toast({ message: '已重新装载音源', type: 'success' })
+          }
+        }, '刷新'))
+      }),
+      row({ title: '音源列表', control: h('div') }),
+      sourcesHost
+    ]))
+    refreshSources()
+
     /* ---------- 插件 ---------- */
     const plugins = host.loaded()
     scroll.appendChild(group('插件与扩展点', [

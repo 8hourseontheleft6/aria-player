@@ -2,7 +2,8 @@
 
 import { h, on, clear } from '../core/dom.js'
 import { icon } from '../core/icons.js'
-import { formatDurationLong, normalizeForSearch } from '../core/format.js'
+import { formatDurationLong, formatDuration, normalizeForSearch } from '../core/format.js'
+import { remote } from '../core/remote.js'
 import { selectVisibleTracks, selectTitle, describeMatch } from '../core/selectors.js'
 import { EVENTS } from '../core/bus.js'
 import { createTrackList } from './track-list.js'
@@ -304,9 +305,133 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
 
   const empty = h('div', { class: 'empty hidden' })
 
+  /* ---------------- 网络结果（在线音源） ----------------
+   *
+   * 搜索结果分两块：上面是本地曲目（原来的列表），这里是音源返回的网络结果。
+   * 本仓库不内置任何音源，所以没装音源时这里根本不出现；
+   * 装了音源但没打开总开关也一样不出现（和在线补全的默认行为保持一致）。
+   */
+  const onlineList = h('div', { class: 'online-results__list' })
+  const onlineSummary = h('div', { class: 'online-results__summary' })
+  const onlineSection = h('div', { class: 'online-results', hidden: true })
+
+  const onlineHead = h('div', { class: 'online-results__head' },
+    h('div', { class: 'online-results__title' },
+      icon('search', { className: 'icon icon--stroke' }),
+      h('span', { text: '网络结果' }),
+      onlineSummary
+    ),
+    h('button', {
+      class: 'online-results__toggle',
+      type: 'button',
+      onClick: () => {
+        onlineCollapsed = !onlineCollapsed
+        renderOnline()
+      }
+    }, h('span', { text: '收起' }))
+  )
+  onlineSection.append(onlineHead, onlineList)
+  let onlineCollapsed = false
+  let lastOnlineSignature = ''
+
+  async function copyOnlineUrl (item, button) {
+    const original = button.textContent
+    button.textContent = '解析中…'
+    button.disabled = true
+    try {
+      const result = await remote.sources.resolve(item)
+      await navigator.clipboard.writeText(result.url)
+      toast({ message: `已复制「${item.title}」的播放地址（${result.sourceName}）`, type: 'success' })
+    } catch (err) {
+      toast({ message: `解析失败：${String(err?.message || err)}`, type: 'error', duration: 4200 })
+    } finally {
+      button.textContent = original
+      button.disabled = false
+    }
+  }
+
+  function renderOnline () {
+    const state = store.get()
+    const enabled = state.settings.onlineSources === true
+    const search = state.ui.onlineSearch
+    const relevant = enabled && search && search.query === state.ui.query ? search : null
+    const signature = relevant
+      ? `${relevant.status}|${relevant.results.length}|${relevant.perSource.map((s) => `${s.id}:${s.count}:${s.error || ''}`).join(',')}|${onlineCollapsed}`
+      : 'hidden'
+    if (signature === lastOnlineSignature) return
+    lastOnlineSignature = signature
+
+    if (!relevant) {
+      onlineSection.hidden = true
+      return
+    }
+    onlineSection.hidden = false
+    onlineCollapsed = onlineCollapsed && relevant.status === 'done'
+    onlineSection.classList.toggle('is-collapsed', onlineCollapsed)
+    onlineHead.querySelector('.online-results__toggle span').textContent = onlineCollapsed ? '展开' : '收起'
+
+    clear(onlineSummary)
+    if (relevant.status === 'loading') {
+      onlineSummary.append(h('span', { class: 'online-results__meta', text: '搜索中…' }))
+    } else if (relevant.status === 'error') {
+      onlineSummary.append(h('span', { class: 'online-results__meta is-error', text: `失败：${relevant.error}` }))
+    } else {
+      const failed = relevant.perSource.filter((item) => item.error).length
+      onlineSummary.append(
+        h('span', { class: 'online-results__count', text: `${relevant.results.length} 首` }),
+        h('span', {
+          class: 'online-results__meta',
+          text: `${relevant.perSource.length} 个音源` +
+            `${failed ? `（${failed} 个出错）` : ''} · ${Math.round(relevant.elapsedMs)}ms`
+        })
+      )
+    }
+
+    clear(onlineList)
+    if (relevant.status === 'loading') {
+      onlineList.append(h('div', { class: 'online-results__hint', text: '正在向已启用的音源查询…' }))
+      return
+    }
+    if (!relevant.results.length) {
+      const failed = relevant.perSource.filter((item) => item.error)
+      onlineList.append(h('div', { class: 'online-results__hint' },
+        h('div', { text: failed.length && failed.length === relevant.perSource.length
+          ? '所有音源都出错了：'
+          : '音源没有返回结果。' }),
+        ...failed.slice(0, 3).map((item) => h('div', { class: 'online-results__error', text: `${item.name}：${item.error}` }))
+      ))
+      return
+    }
+    for (const item of relevant.results) {
+      const copyButton = h('button', {
+        class: 'online-results__action',
+        type: 'button',
+        title: '解析出播放地址并复制到剪贴板',
+        onClick: (event) => {
+          event.stopPropagation()
+          copyOnlineUrl(item, copyButton)
+        }
+      }, '复制地址')
+      onlineList.append(h('div', { class: 'online-result' },
+        h('div', { class: 'online-result__main' },
+          h('div', { class: 'online-result__title truncate', text: item.title, title: item.title }),
+          h('div', { class: 'online-result__sub truncate' },
+            [item.artist, item.album].filter(Boolean).join(' · ') || '—')
+        ),
+        h('div', { class: 'online-result__meta' },
+          item.quality ? h('span', { class: 'online-result__tag', text: item.quality }) : null,
+          h('span', { class: 'online-result__source', text: item.sourceName }),
+          h('span', { class: 'online-result__duration tabular', text: item.duration ? formatDuration(item.duration) : '' })
+        ),
+        copyButton
+      ))
+    }
+  }
+
   const element = h('div', { class: 'content-inner view-root' },
     toolbar,
     header,
+    onlineSection,
     empty,
     trackList.element
   )
@@ -360,6 +485,8 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     scopeSelect.classList.toggle('is-deep', searchScope === 'deep')
     searchInput.placeholder = searchScope === 'deep' ? '搜索歌词、年份、流派…' : '搜索歌名、专辑、艺人'
     if (searchPanelOpen) renderSearchPanel()
+    // 搜索结果分两块：这块是网络结果（音源），下面那块是本地曲目
+    renderOnline()
 
     /* 空状态 */
     clear(empty)
