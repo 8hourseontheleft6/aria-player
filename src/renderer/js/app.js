@@ -144,7 +144,7 @@ async function main () {
   /* 动作（UI 只调用这里，不直接改 store / 播放器）                        */
   /* ------------------------------------------------------------------ */
   /** 换视图 / 换来源 / 换搜索词时都要清掉多选：列表已经不是同一批歌了 */
-  const clearedSelection = { selection: [], selectionAnchor: null }
+  const clearedSelection = { selection: [], selectionAnchor: null, selecting: false }
 
   const actions = {
     setView (view) {
@@ -190,20 +190,45 @@ async function main () {
           selection,
           selectionAnchor: anchor && selection.includes(anchor)
             ? anchor
-            : (selection.length ? selection[selection.length - 1] : null)
+            : (selection.length ? selection[selection.length - 1] : null),
+          // 多选模式只在「本来就开着 且 还有勾选项」时保留：
+          // 全部取消勾选之后就自动退出，不会留在「开着但一个没选」的中间态
+          selecting: state.ui.selecting === true && selection.length > 0
         }
       }))
     },
 
-    /** Ctrl/Cmd 点选：加进选择或从中移除，锚点跟着走 */
+    /** Ctrl/Cmd 点选：加进选择或从中移除，锚点跟着走（顺带进入多选模式） */
     toggleSelection (id) {
       const selection = store.get().ui.selection
       const next = selection.includes(id) ? selection.filter((value) => value !== id) : [...selection, id]
       actions.setSelection(next, id)
+      store.set((state) => ({ ...state, ui: { ...state.ui, selecting: true } }))
+    },
+
+    /**
+     * 显式进入多选模式（右键菜单「开始多选」、点行首的勾选框走这里）。
+     * 「多选」是一个单独的操作，不是点着点着就悄悄进去了 ——
+     * 普通点击永远只是「选中这一首」。
+     */
+    startSelection (trackId = null) {
+      const current = store.get().ui.selection
+      const selection = trackId
+        ? (current.includes(trackId) ? current.slice() : [trackId])
+        : current.slice()
+      store.set((state) => ({
+        ...state,
+        ui: {
+          ...state.ui,
+          selection,
+          selectionAnchor: trackId || state.ui.selectionAnchor,
+          selecting: true
+        }
+      }))
     },
 
     clearSelection () {
-      if (!store.get().ui.selection.length) return
+      if (!store.get().ui.selection.length && !store.get().ui.selecting) return
       store.set((state) => ({ ...state, ui: { ...state.ui, ...clearedSelection } }))
     },
 
@@ -1189,6 +1214,7 @@ async function main () {
       if (mod && event.key.toLowerCase() === 'a' && !isTextInput(event.target)) {
         const list = actions.currentListTracks ? actions.currentListTracks() : null
         if (list && list.length) {
+          if (!store.get().ui.selecting) actions.startSelection()
           actions.setSelection(list.map((track) => track.id))
           event.preventDefault()
         }

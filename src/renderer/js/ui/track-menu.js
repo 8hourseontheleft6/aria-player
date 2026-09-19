@@ -51,12 +51,12 @@ export function createTrackMenu ({ store, bus, player, host, actions }) {
       },
       { separator: true },
       {
-        label: '选择多首',
+        label: '开始多选',
         icon: 'checkmark',
         onClick: () => {
-          actions.setSelection([track.id], track.id)
+          actions.startSelection(track.id)
           bus.emit(EVENTS.TOAST, {
-            message: '按住 Ctrl 点其它歌可以多选，Shift 点选一整段',
+            message: '已进入多选：点行首的勾选框或直接点歌都能加进来，Esc 退出',
             type: 'info',
             duration: 3200
           })
@@ -147,7 +147,7 @@ export function createTrackMenu ({ store, bus, player, host, actions }) {
       },
       { separator: true },
       {
-        label: '取消选择',
+        label: '结束多选',
         icon: 'close',
         onClick: () => actions.clearSelection()
       }

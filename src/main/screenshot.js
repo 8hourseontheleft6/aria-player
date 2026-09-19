@@ -248,6 +248,8 @@ async function runScreenshots ({ win }) {
         if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
         await new Promise((r) => setTimeout(r, 1400))
         const tracks = actions.currentListTracks()
+        // 走「开始多选」这条真实入口，截图里才会是勾选状态
+        actions.startSelection(tracks[2] && tracks[2].id)
         actions.setSelection([2, 3, 4, 5, 6].map((index) => tracks[index] && tracks[index].id).filter(Boolean))
         await new Promise((r) => setTimeout(r, 700))
         return true`)

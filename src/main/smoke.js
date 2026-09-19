@@ -2351,7 +2351,7 @@ async function runSmoke ({ win, ctx }) {
       batchCheck.batchItems.header.includes('已选中 2 首') &&
       batchCheck.batchItems.text.includes('播放这 2 首') &&
       batchCheck.batchItems.text.includes('添加到播放列表') &&
-      batchCheck.batchItems.text.includes('取消选择'),
+      batchCheck.batchItems.text.includes('结束多选'),
       `选中 ${batchCheck.picked.length} 首 → 工具条按钮命中=${batchCheck.buttonHit}，面板标题「${batchCheck.afterAdd.pickerTitle}」，` +
       `新建的列表收到 ${batchCheck.afterAdd.tracks.length} 首且顺序一致=${batchCheck.afterAdd.tracks.join() === batchCheck.picked.join()}，加完自动清空选择=${batchCheck.afterAdd.selectionCleared}；` +
       `批量「下一首播放」：队列 ${batchCheck.queueBefore} → ${batchCheck.queueAfter.length} 首，3 首插在当前曲目之后=${batchQueueOk}；` +
@@ -2380,6 +2380,34 @@ async function runSmoke ({ win, ctx }) {
           headPartial: document.querySelector('.tracklist__check').classList.contains('is-partial')
         }
       }
+      // 序号和勾选框是两列，各自装各自的东西。
+      // 曾经因为用 row.children[0] 拿「序号格」——左边加了勾选框之后它变成了勾选框，
+      // 结果序号和播放键被画进勾选框里，序号那列反而空着（用户反馈「序号又没了」）。
+      const layout = () => {
+        const nodes = rows()
+        const row = nodes[0]
+        const index = row.querySelector('.track-row__index')
+        const check = row.querySelector('.track-row__check')
+        const indexText = (index.textContent || '').trim()
+        // 序号不只是「在 DOM 里」，还得真的画出来（悬停那一行会用播放键顶掉序号，
+        // 所以挑一行没被悬停的来看）
+        const calmRow = nodes.find((node) => !node.matches(':hover')) || row
+        const calmNum = calmRow.querySelector('.track-row__num')
+        return {
+          indexText,
+          // 序号必须和这一行的实际位置对得上（虚拟滚动时行会被复用，这正是容易错的地方）
+          indexMatches: Number(indexText) === Number(row.dataset.index) + 1,
+          indexHasCheck: Boolean(index.querySelector('.track-row__check')),
+          indexHasNumber: Boolean(index.querySelector('.track-row__num')),
+          numVisible: Boolean(calmNum) &&
+            getComputedStyle(calmNum).visibility === 'visible' &&
+            calmNum.getBoundingClientRect().width > 0,
+          checkHasSvg: Boolean(check.querySelector('svg')),
+          checkText: (check.textContent || '').trim(),
+          checkHasNumber: Boolean(check.querySelector('.track-row__num')),
+          checkHasPlay: Boolean(check.querySelector('.track-row__play'))
+        }
+      }
 
       actions.setView('songs')
       actions.setQuery('')
@@ -2387,12 +2415,19 @@ async function runSmoke ({ win, ctx }) {
       actions.clearSelection()
       await settle(900)
       const idle = state()
+      const idleLayout = layout()
 
-      // 选中两首：勾选框应该全部露出来，其中两首打勾
-      const ids = rows().slice(0, 2).map((node) => node.dataset.id)
-      actions.setSelection(ids, ids[0])
+      // 普通点击只选中一首：**不该**进入多选模式（勾选框不该全露出来）
+      const plainRow = rows()[1]
+      plainRow.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      await settle(400)
+      const afterPlainClick = { ...state(), layout: layout() }
+
+      // 显式进入多选（右键菜单「开始多选」走的就是这条）
+      actions.startSelection(plainRow.dataset.id)
       await settle(500)
       const selecting = state()
+      const selectingLayout = layout()
 
       // 点第 5 行的勾选框：它被打勾，且不该顺手起播
       const before = store.get().playback.trackId
@@ -2414,20 +2449,36 @@ async function runSmoke ({ win, ctx }) {
       const cleared = state()
       const total = store.get().library.tracks.length
 
-      return { idle, selecting, afterToggle, all, selectionSize, cleared, total }
+      return {
+        idle, idleLayout, afterPlainClick, selecting, selectingLayout,
+        afterToggle, all, selectionSize, cleared, total
+      }
     `)
     record('多选：勾选框（选中的打勾、没选的空着）',
+      // ① 序号和勾选框各就各位（曾经把序号画进勾选框里过）
+      checkboxCheck.idleLayout.indexMatches === true &&
+      checkboxCheck.idleLayout.indexHasNumber === true &&
+      checkboxCheck.idleLayout.numVisible === true &&
+      checkboxCheck.idleLayout.indexHasCheck === false &&
+      checkboxCheck.idleLayout.checkHasSvg === true &&
+      checkboxCheck.idleLayout.checkHasNumber === false &&
+      checkboxCheck.idleLayout.checkHasPlay === false &&
       checkboxCheck.idle.rows > 5 &&
       checkboxCheck.idle.checked === 0 &&
       checkboxCheck.idle.visibleUnhovered === 0 &&
       checkboxCheck.idle.selecting === false &&
-      checkboxCheck.selecting.checked === 2 &&
-      checkboxCheck.selecting.ariaChecked === 2 &&
-      // 多选状态下每一行的框都要露出来，才能一眼看出哪些没选
+      // ② 普通点击只选中一首，不进入多选模式
+      checkboxCheck.afterPlainClick.selecting === false &&
+      checkboxCheck.afterPlainClick.visibleUnhovered === 0 &&
+      checkboxCheck.afterPlainClick.checked === 1 &&
+      // ③ 显式开始多选后，所有勾选框露出来
+      checkboxCheck.selecting.checked === 1 &&
+      checkboxCheck.selecting.ariaChecked === 1 &&
       checkboxCheck.selecting.visible === checkboxCheck.selecting.rows &&
       checkboxCheck.selecting.selecting === true &&
       checkboxCheck.selecting.headPartial === true &&
-      checkboxCheck.afterToggle.checked === 3 &&
+      checkboxCheck.selectingLayout.indexMatches === true &&
+      checkboxCheck.afterToggle.checked === 2 &&
       checkboxCheck.afterToggle.trackId === checkboxCheck.afterToggle.before &&
       checkboxCheck.all.checked === checkboxCheck.all.rows &&
       checkboxCheck.all.headChecked === true &&
@@ -2436,11 +2487,15 @@ async function runSmoke ({ win, ctx }) {
       checkboxCheck.cleared.checked === 0 &&
       checkboxCheck.cleared.visibleUnhovered === 0 &&
       checkboxCheck.cleared.selecting === false,
+      `第 1 行：序号格「${checkboxCheck.idleLayout.indexText}」（与行号对应=${checkboxCheck.idleLayout.indexMatches}，有数字=${checkboxCheck.idleLayout.indexHasNumber}、真的可见=${checkboxCheck.idleLayout.numVisible}、有勾选框=${checkboxCheck.idleLayout.indexHasCheck}）、` +
+      `勾选框里有图标=${checkboxCheck.idleLayout.checkHasSvg}（有数字=${checkboxCheck.idleLayout.checkHasNumber}、有播放键=${checkboxCheck.idleLayout.checkHasPlay}）；` +
       `未选中时：${checkboxCheck.idle.rows} 行里可见勾选框 ${checkboxCheck.idle.visible} 个（除悬停那一行外 ${checkboxCheck.idle.visibleUnhovered} 个 —— 平时藏着，悬停才出现）；` +
-      `选中 2 首后：可见 ${checkboxCheck.selecting.visible}/${checkboxCheck.selecting.rows} 个、打勾 ${checkboxCheck.selecting.checked} 个（aria-checked=${checkboxCheck.selecting.ariaChecked}）、表头半选=${checkboxCheck.selecting.headPartial}；` +
+      `普通点击一首后：打勾 ${checkboxCheck.afterPlainClick.checked} 个、仍是多选模式=${checkboxCheck.afterPlainClick.selecting}；` +
+      `显式「开始多选」后：可见 ${checkboxCheck.selecting.visible}/${checkboxCheck.selecting.rows} 个、打勾 ${checkboxCheck.selecting.checked} 个（aria-checked=${checkboxCheck.selecting.ariaChecked}）、表头半选=${checkboxCheck.selecting.headPartial}；` +
       `点第 5 行的框 → 打勾变成 ${checkboxCheck.afterToggle.checked} 个，且没有起播（曲目未变=${checkboxCheck.afterToggle.trackId === checkboxCheck.afterToggle.before}）；` +
       `点表头 → 全部 ${checkboxCheck.all.checked}/${checkboxCheck.all.rows} 行打勾（共选中 ${checkboxCheck.selectionSize}/${checkboxCheck.total} 首）；` +
       `再点表头 → 打勾 ${checkboxCheck.cleared.checked} 个、可见 ${checkboxCheck.cleared.visible} 个（收起）`)
+
     /* ---------- 多艺人的拆分 ---------- */
 
     // 真实资料库里两种合作写法：顿号（Taylor Swift、Kendrick Lamar）和
@@ -2665,38 +2720,54 @@ async function runSmoke ({ win, ctx }) {
       `拖动中被抬起的行 transform=${sidebarInfo.liftedTransform}，同时有 ${sidebarInfo.neighboursAnimating} 个标签在过渡；` +
       `拖动没有误触切换视图（仍是 ${sidebarInfo.viewAfterDrag}）；已还原为 ${sidebarInfo.orderRestored.join(' → ')}`)
 
-    const rowHoverTarget = await evaluate(win, `
-      const { actions } = window.__aria
-      actions.setView('songs')
-      actions.setQuery('')
-      await new Promise((r) => setTimeout(r, 700))
-      const row = document.querySelectorAll('.track-row')[2]
-      if (!row) return { missing: true }
-      const rect = row.getBoundingClientRect()
-      return {
-        missing: false,
-        center: { x: Math.round(rect.left + rect.width * 0.4), y: Math.round(rect.top + rect.height / 2) },
-        top: Math.round(rect.top * 100) / 100
-      }
-    `)
-    win.webContents.sendInputEvent({
-      type: 'mouseMove',
-      x: rowHoverTarget.center ? rowHoverTarget.center.x : 400,
-      y: rowHoverTarget.center ? rowHoverTarget.center.y : 300
-    })
-    await sleep(700)
-    const rowHovered = await evaluate(win, `
-      const row = document.querySelector('.track-row:hover')
-      if (!row) return { missing: true }
-      const style = getComputedStyle(row)
-      return {
-        missing: false,
-        top: Math.round(row.getBoundingClientRect().top * 100) / 100,
-        transform: style.transform,
-        boxShadow: style.boxShadow,
-        separatorHidden: getComputedStyle(row, '::after').opacity === '0'
-      }
-    `)
+    /*
+     * 悬停那一行的位置要稳定：先把指针挪开，量一行，再把指针移上去。
+     * 列表在别的检查之后可能刚发生过重排（多选工具条出现/消失会改变视口高度），
+     * 指针底下换了一行的话，悬停是「刚刚才开始」的，量到的 transform 还在过渡中间
+     * （实测拿到过 -0.2px）——所以这里重试几次，直到悬停稳定为止。
+     */
+    let rowHoverTarget = { missing: true }
+    let rowHovered = { missing: true }
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 620 })
+      await sleep(400)
+      rowHoverTarget = await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('songs')
+        actions.setQuery('')
+        await new Promise((r) => setTimeout(r, 500))
+        const row = document.querySelectorAll('.track-row')[2]
+        if (!row) return { missing: true }
+        const rect = row.getBoundingClientRect()
+        return {
+          missing: false,
+          attempt: ${attempt},
+          center: { x: Math.round(rect.left + rect.width * 0.4), y: Math.round(rect.top + rect.height / 2) },
+          top: Math.round(rect.top * 100) / 100
+        }
+      `)
+      win.webContents.sendInputEvent({
+        type: 'mouseMove',
+        x: rowHoverTarget.center ? rowHoverTarget.center.x : 400,
+        y: rowHoverTarget.center ? rowHoverTarget.center.y : 300
+      })
+      await sleep(800)
+      rowHovered = await evaluate(win, `
+        const row = document.querySelector('.track-row:hover')
+        if (!row) return { missing: true }
+        const style = getComputedStyle(row)
+        return {
+          missing: false,
+          attempt: ${attempt},
+          top: Math.round(row.getBoundingClientRect().top * 100) / 100,
+          transform: style.transform,
+          boxShadow: style.boxShadow,
+          separatorHidden: getComputedStyle(row, '::after').opacity === '0'
+        }
+      `)
+      // 已经停在最终位移上（-1.5px）就算稳定
+      if (!rowHovered.missing && Math.abs(rowLift(rowHovered.transform) + 1.5) < 0.2) break
+    }
     // 打开「减少动画」：位移与阴影必须消失（时长归零挡不住静态差异）
     const rowReduced = await evaluate(win, `
       const { actions } = window.__aria

@@ -125,9 +125,11 @@ export function initialState () {
       // 深度搜索的歌词命中结果：{ query, ids, scanning, scanned, matched, elapsedMs }
       searchLyrics: null,
       sort: { key: 'default', direction: 'asc' },
-      // 多选：选中的曲目 id（有序）+ 范围选择的锚点
+      // 多选：选中的曲目 id（有序）+ 范围选择的锚点 + 是否处于「多选模式」
+      // （多选模式要显式进入：右键菜单「开始多选」或点勾选框；普通点击不会把它打开）
       selection: [],
       selectionAnchor: null,
+      selecting: false,
       nowPlayingOpen: false,
       queueOpen: false,
       sidebarVisible: true,

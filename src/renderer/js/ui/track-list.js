@@ -33,6 +33,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     onClick: () => {
       const selected = new Set(store.get().ui.selection)
       const all = tracks.length > 0 && tracks.every((track) => selected.has(track.id))
+      if (!all && !store.get().ui.selecting) actions.startSelection()
       actions.setSelection(all ? [] : tracks.map((track) => track.id))
     }
   }, checkIcon())
@@ -82,7 +83,6 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       actions.setSelection(all ? [] : tracks.map((track) => track.id))
     }
   })
-
   const selectionBar = h('div', { class: 'tracklist__selection', hidden: true },
     h('div', { class: 'tracklist__selection-info' },
       icon('checkmark', { className: 'icon icon--stroke' }),
@@ -121,7 +121,8 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       h('button', {
         class: 'btn btn--sm',
         type: 'button',
-        text: '取消选择',
+        text: '结束多选',
+        title: '退出多选模式 (Esc)',
         onClick: () => actions.clearSelection()
       }))
   )
@@ -154,21 +155,24 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       style: { top: `${index * ROW_HEIGHT}px` }
     })
 
-    // 勾选框：选中的打勾、没选的空着。平时藏起来，行悬停或多选状态下出现
+    // 勾选框：选中的打勾、没选的空着。平时藏起来，行悬停或处在多选模式下出现
     const check = h('button', {
       class: 'track-row__check',
       type: 'button',
       role: 'checkbox',
-      title: '选择这一首（Ctrl / Shift 可以多选）',
+      title: '选择这一首（点它就开始多选）',
       'aria-checked': 'false',
       onClick: (event) => {
         event.stopPropagation()
-        actions.toggleSelection(track.id)
+        // 第一次点 = 进入多选模式并勾上这一首；已经在多选里 = 正常的勾选 / 取消勾选
+        if (store.get().ui.selecting) actions.toggleSelection(track.id)
+        else actions.startSelection(track.id)
       }
     }, checkIcon())
     row.__check = check
 
     const indexCell = h('div', { class: 'track-row__index' })
+    row.__index = indexCell
     const artCell = h('div', { class: 'track-row__art' }, icon('music'))
     const titleNode = h('div', { class: 'track-row__title' })
     const artistNode = h('div', { class: 'track-row__artist truncate', text: track.artist })
@@ -201,13 +205,14 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
 
     /*
      * 点击语义（和桌面上的文件列表一致）：
-     *   · Ctrl / Cmd 点击：加进选择或去掉，不播放；
+     *   · Ctrl / Cmd 点击：加进选择或去掉，不播放（这就算开始多选了）；
      *   · Shift 点击：从锚点到这一首整段选中，不播放；
      *   · 开了「单击歌曲直接播放」时：点行就播（这个设置是用户明确要求的，
-     *     不能被多选状态悄悄顶掉），多选走勾选框 / Ctrl / Shift；
-     *   · 其余情况：已经在多选里 → 点行 = 勾选 / 取消勾选这一首
-     *     （勾选框就摆在眼前，这时候「点一下把其它选择全清掉」才奇怪）；
-     *     还没开始多选 → 只选中这一首。
+     *     不能被多选模式悄悄顶掉），多选走勾选框 / Ctrl / Shift；
+     *   · 已经在多选模式里：点行 = 勾选 / 取消勾选这一首
+     *     （勾选框都露出来了，这时候「点一下把其它选择全清掉」才奇怪）；
+     *   · 其余情况：点行只选中这一首，**不会**进入多选模式 ——
+     *     多选要显式开始（右键菜单「开始多选」或点勾选框）。
      * 勾选框自己有 stopPropagation，不会走到这里。
      */
     on(row, 'click', (event) => {
@@ -227,7 +232,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
         actions.playTrack(track, tracks)
         return
       }
-      if (store.get().ui.selection.length > 0) {
+      if (store.get().ui.selecting) {
         actions.toggleSelection(track.id)
         return
       }
@@ -267,7 +272,12 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       row.__check.setAttribute('aria-checked', checked ? 'true' : 'false')
     }
 
-    const indexCell = row.children[0]
+    /*
+     * 用存下来的引用，不要用 row.children[0]。
+     * 左边加了勾选框那一列之后，children[0] 就是勾选框了 —— 曾经因此把序号和播放键
+     * 画进了勾选框里，序号那一列反而空着（用户反馈「序号又没了」）。
+     */
+    const indexCell = row.__index
     clear(indexCell)
 
     if (isCurrent) {
@@ -390,11 +400,11 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
 
   /** 把 store 里的选择同步到已渲染的行 + 工具条 + 表头的全选框 */
   function syncSelection () {
-    const selected = store.get().ui.selection || []
+    const state = store.get()
+    const selected = state.ui.selection || []
     selection = new Set(selected)
-    const selecting = selected.length > 0
-    // 多选状态下每一行都露出勾选框：一眼能看出选了哪几首
-    element.classList.toggle('is-selecting', selecting)
+    // 「多选模式」是显式进入的：只有它打开时，所有行的勾选框才一起露出来
+    element.classList.toggle('is-selecting', state.ui.selecting === true)
     for (const node of rendered.values()) {
       const checked = selection.has(node.dataset.id)
       node.classList.toggle('is-selected', checked)
@@ -467,8 +477,9 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       const track = tracks.find((item) => item.id === store.get().ui.selectionAnchor)
       if (track) actions.playTrack(track, tracks)
     } else if (event.key === 'a' && (event.ctrlKey || event.metaKey)) {
-      // 列表里按 Ctrl+A 就是「全选当前列表」
+      // 列表里按 Ctrl+A 就是「全选当前列表」，顺便进入多选模式
       event.preventDefault()
+      if (!store.get().ui.selecting) actions.startSelection()
       actions.setSelection(tracks.map((track) => track.id))
     } else if (event.key === 'Escape') {
       actions.clearSelection()
@@ -492,10 +503,11 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   store.select((state) => `${state.playback.trackId}|${state.playback.status}|${state.settings.showRowArtwork}`,
     () => schedule())
   store.select((state) => state.ui.sort, paintSortHeaders)
-  // 选择可能是别处改的（工具条、右键菜单、切视图时清空），统一在这里同步
+  // 选择 / 多选模式可能是别处改的（工具条、右键菜单、切视图时清空），统一在这里同步
   store.select((state) => state.ui.selection, syncSelection, {
     equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index])
   })
+  store.select((state) => state.ui.selecting === true, () => syncSelection())
   store.select((state) => state.ui.source, () => syncSelection())
   syncSelection()
   paintSortHeaders()
