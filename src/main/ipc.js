@@ -50,6 +50,7 @@ function registerIpc (ctx) {
   const library = ctx.get('library')
   const lyrics = ctx.get('lyrics')
   const online = ctx.get('online')
+  const ai = ctx.get('ai')
   const sources = ctx.get('musicSources')
 
   /** @type {Map<string, Function>} */
@@ -101,6 +102,11 @@ function registerIpc (ctx) {
     'online:cover': (_event, track) => online.fetchCover(track || {}),
     'online:clear-cache': () => online.clearCache(),
     'online:stats': () => online.getStats(),
+
+    /* ---------- 外部模型（用户自填 API，走主进程发请求） ---------- */
+    'ai:chat': (_event, payload) => ai.chat(payload || {}),
+    'ai:test': () => ai.test(),
+    'ai:status': () => ({ configured: ai.configured() }),
 
     /* ---------- 在线音源（用户自己放进来的音源脚本） ---------- */
     'sources:list': () => sources.list(),

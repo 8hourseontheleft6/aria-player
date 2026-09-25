@@ -15,8 +15,9 @@ import { createStore, initialState } from './core/store.js'
 import { remote, isElectron } from './core/remote.js'
 import { normalizeForSearch } from './core/format.js'
 import { createAudioEngine } from './core/audio-engine.js'
-import { matchPreset, matchByMetadata } from './core/equalizer-presets.js'
+import { matchPreset, matchByMetadata, PRESETS } from './core/equalizer-presets.js'
 import { analyzeTrack, cachedAnalysis, analyzeBuffer, classifyStyle } from './core/style-analyzer.js'
+import { classifyWithAi, cachedAiStyle, parseAnswer } from './core/ai-style.js'
 import { createPlaylist } from './core/playlist.js'
 import { createPluginHost } from './core/plugin-host.js'
 import { registerBuiltinModes } from './core/playback-modes.js'
@@ -725,11 +726,17 @@ async function main () {
       let key = config.preset || 'flat'
       if (config.auto) {
         const analysis = state.settings.styleAnalysis === false ? null : cachedAnalysis(state.playback.trackId)
-        const matched = matchPreset(track, analysis)
+        const aiStyle = aiStyleEnabled() ? cachedAiStyle(state.playback.trackId) : null
+        // 优先级：外部模型（它能看到歌名/专辑这些本地算不出的线索）> 声音特征 > 标签
+        const matched = aiStyle?.key || matchPreset(track, analysis)
         if (matched) key = matched
         // 还没分析过就补一次；算完再应用（analyzing 里的去重避免来回触发）
         if (!analysis && track && state.settings.styleAnalysis !== false) {
           analyzeEqualizerTrack(track)
+        }
+        // 开了外部模型且还没问过，就把「特征 + 曲目信息」发过去问一次
+        if (!aiStyle && track && aiStyleEnabled()) {
+          askAiForStyle(track, analysis)
         }
       }
       return engine.setEqualizer(key, { enabled: true })
@@ -743,7 +750,8 @@ async function main () {
       return {
         preset: engine.equalizerSnapshot()?.preset || 'off',
         byMetadata: matchByMetadata(track),
-        byAudio: analysis ? { key: analysis.key, confidence: analysis.confidence, features: analysis.features } : null
+        byAudio: analysis ? { key: analysis.key, confidence: analysis.confidence, features: analysis.features } : null,
+        byAi: aiStyleEnabled() ? cachedAiStyle(state.playback.trackId) : null
       }
     },
 
@@ -931,6 +939,40 @@ async function main () {
       if (result) actions.applyEqualizer()
     } finally {
       analyzing.delete(track.id)
+    }
+  }
+
+  /** 外部模型（自填 API）是否接管风格判断 */
+  function aiStyleEnabled () {
+    const ai = store.get().settings.ai || {}
+    return ai.enabled === true && ai.useForStyle !== false && Boolean(ai.baseUrl && ai.model)
+  }
+
+  /** 正在问外部模型的曲目（同一首别重复问） */
+  const askingAi = new Set()
+
+  /**
+   * 把「曲目信息 + 本地特征」发给外部模型，让它挑一组预设。
+   * 只发文本，**不上传音频**；答得不在列表里就当没答（本地判断继续生效）。
+   */
+  async function askAiForStyle (track, analysis) {
+    if (!track?.id || askingAi.has(track.id)) return
+    askingAi.add(track.id)
+    try {
+      const result = await classifyWithAi({ track, features: analysis?.features || null })
+      // 有用就立刻生效；没用也缓存下来，不再反复问同一首
+      actions.applyEqualizer()
+      bus.emit(EVENTS.TOAST, {
+        message: result
+          ? `外部模型判断为「${PRESETS[result.key]?.displayName || result.key}」${result.reason ? `：${result.reason}` : ''}`
+          : '外部模型没有给出可用结果，继续用本地判断',
+        type: result ? 'success' : 'info',
+        duration: 2600
+      })
+    } catch {
+      // 静默：外部模型只是锦上添花，不该影响播放
+    } finally {
+      askingAi.delete(track.id)
     }
   }
 
@@ -1547,6 +1589,8 @@ async function main () {
   /* 调试与二次开发入口：开发者工具控制台里可以直接用 window.__aria */
   window.__aria = {
     bus, store, player, engine, playlist, host, artwork, actions, EVENTS, prewarmer,
+    // 主进程桥（自检要直接调 ai:test 这类只有主进程能发的请求）
+    remote,
     // 艺人名拆分（合作写法的规则都在这里，控制台里可以直接试）
     splitArtists,
     // 均衡器的风格匹配（自检直接拿它验规则）
@@ -1555,6 +1599,12 @@ async function main () {
     // 声音特征分析（自检拿合成波形验分类器）
     styleAnalyzer: { analyzeBuffer, classifyStyle },
     cachedAnalysis,
+    // 外部模型风格判断（自检拿它直接问一次假接口）
+    aiStyle: {
+      classifyWithAi,
+      cached: cachedAiStyle,
+      parseAnswer
+    },
     // 最小化后的释放 / 恢复（自检会用它读释放账目）
     background: backgroundRelease,
     // 视图组件：自检与调试会用到（例如媒体墙的 debugState / 平移）

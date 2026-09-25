@@ -140,6 +140,41 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 文本输入（外部模型的地址 / 模型名 / 密钥） */
+.settings__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings__input {
+  width: 220px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--fill-tertiary);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-subhead);
+  transition: background var(--dur-fast) var(--ease-ios), box-shadow var(--dur-fast) var(--ease-ios);
+}
+
+.settings__input::placeholder {
+  color: var(--label-3);
+}
+
+.settings__input:hover {
+  background: var(--fill-secondary);
+}
+
+.settings__input:focus {
+  outline: none;
+  background: var(--fill-secondary);
+  box-shadow: var(--focus-ring);
+}
+
 /* 设置里的下拉（输出设备 / 均衡器预设）：外观由 components.css 的 select 规则统一管，
    这里只管宽度 —— 原来那套 bg-input 在深色下会被系统外观盖掉，才出现白底下拉框 */
 .settings__select {

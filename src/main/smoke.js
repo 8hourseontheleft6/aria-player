@@ -3058,6 +3058,101 @@ async function runSmoke ({ win, ctx }) {
       `标签 Pop + 声音 electronic(0.8) → ${uiRound2.conflict}；只看标签 Classical → ${uiRound2.tagOnly}；` +
       `标签 Classical + 声音 pop(0.35) → ${uiRound2.trustTag}`)
 
+    /* ---------- 外部模型 API（自填地址）：用本地假服务端到端验一遍 ---------- */
+    /*
+     * 不联网：本机起一个 OpenAI 兼容的 /chat/completions，
+     * 返回 {"preset":"electronic",...}，然后验证
+     *   ① 设置页能测通（ai:test）
+     *   ② 风格判断真的会用它（曲目标签写 Pop，模型说 electronic）
+     *   ③ 模型返回非法值时整体作废（保持本地判断）
+     */
+    const httpModule = require('node:http')
+    const fakeAi = httpModule.createServer((req, res) => {
+      let body = ''
+      req.on('data', (chunk) => { body += chunk })
+      req.on('end', () => {
+        const wantsInvalid = body.includes('__invalid__')
+        const payload = wantsInvalid
+          ? { choices: [{ message: { content: '```json\n{"preset":"techno-3000"}\n```' } }] }
+          : { model: 'fake-model', choices: [{ message: { content: '{"preset":"electronic","confidence":0.9,"reason":"低频很重"}' } }] }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(payload))
+      })
+    })
+    await new Promise((resolve) => fakeAi.listen(0, '127.0.0.1', resolve))
+    const fakePort = fakeAi.address().port
+    const fakeBase = `http://127.0.0.1:${fakePort}/v1`
+
+    try {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        await actions.setSetting({
+          ai: { enabled: true, useForStyle: true, baseUrl: ${JSON.stringify(fakeBase)}, key: 'test-key', model: 'fake-model', timeout: 8000 }
+        })
+        return true`)
+      const aiCheck = await evaluate(win, `
+        const { actions, store, engine, aiStyle } = window.__aria
+        const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+
+        /* ① 连接测试 */
+        const tested = await window.__aria.remote.ai.test()
+
+        /* ② 判定：把标签故意写成 Pop，看模型能不能盖过它 */
+        actions.setEqualizer({ enabled: true, auto: true, preset: 'flat' })
+        const track = { ...store.get().library.tracks[0], genre: 'Pop' }
+        store.get().library.byId.set(track.id, track)
+        const asked = await aiStyle.classifyWithAi({ track, features: { bassRatio: 0.62, zcr: 700, crest: 2.1 } })
+        await actions.setSetting({ playbackTrack: track.id }).catch(() => {})
+        engine.setEqualizer(asked ? asked.key : 'flat', { enabled: true })
+        await settle(200)
+        const applied = engine.equalizerSnapshot()
+
+        /* ③ 非法返回值要作废 */
+        const invalid = await aiStyle.classifyWithAi({
+          track: { ...track, id: 'invalid-probe', title: '__invalid__' },
+          features: null
+        })
+
+        /* 设置页那几行在不在 */
+        actions.setView('settings')
+        await settle(900)
+        const rows = [...document.querySelectorAll('.settings__row')].map((node) => node.textContent)
+        const inputs = [...document.querySelectorAll('.settings__input')].map((node) => node.placeholder)
+        actions.setView('songs')
+        await settle(300)
+        return {
+          tested,
+          asked,
+          appliedPreset: applied ? applied.preset : null,
+          invalid,
+          hasGroup: rows.some((text) => text.includes('启用外部模型')),
+          hasTestRow: rows.some((text) => text.includes('连接测试')),
+          inputs
+        }
+      `)
+      record('外部模型 API：测试连接、按模型判断风格、非法返回作废',
+        aiCheck.tested?.ok === true &&
+        aiCheck.asked?.key === 'electronic' &&
+        aiCheck.appliedPreset === 'electronic' &&
+        aiCheck.invalid === null &&
+        aiCheck.hasGroup === true &&
+        aiCheck.hasTestRow === true &&
+        aiCheck.inputs.length >= 3,
+        `本地假接口（${fakeBase}）→ 测试连接 ok=${aiCheck.tested?.ok}（${aiCheck.tested?.message}）；` +
+        `标签写 Pop 的歌 → 模型判 ${aiCheck.asked?.key}（置信度 ${aiCheck.asked?.confidence}、理由「${aiCheck.asked?.reason}」），引擎生效 ${aiCheck.appliedPreset}；` +
+        `非法返回值 → ${aiCheck.invalid === null ? '整体作废' : '被采用了（不对）'}；` +
+        `设置页分组=${aiCheck.hasGroup}、测试行=${aiCheck.hasTestRow}、输入框 ${aiCheck.inputs.length} 个 ${JSON.stringify(aiCheck.inputs)}`)
+    } finally {
+      // 收工：关掉假服务并把设置恢复（别把测试地址留在真实设置里）
+      await evaluate(win, `
+        await window.__aria.actions.setSetting({
+          ai: { enabled: false, useForStyle: true, baseUrl: '', key: '', model: '', timeout: 30000 }
+        })
+        window.__aria.actions.setEqualizer({ enabled: false })
+        return true`).catch(() => {})
+      await new Promise((resolve) => fakeAi.close(resolve))
+    }
+
     /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
     const audioOutput = await evaluate(win, `
       const { actions, store, engine } = window.__aria

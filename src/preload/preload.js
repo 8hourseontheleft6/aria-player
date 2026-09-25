@@ -69,9 +69,18 @@ contextBridge.exposeInMainWorld('aria', {
     onWatchError: (handler) => on('library:watch-error', handler)
   },
 
-  lyrics: {
-    load: (input) => ipcRenderer.invoke('lyrics:load', input)
+  /*
+   * 外部模型：请求由主进程发出（渲染层的 CSP 不允许外部 HTTP），
+   * 已保存的密钥也不会被读回渲染层 —— 这里只有「发内容」和「测连接」两件事。
+   */
+  ai: {
+    chat: (payload) => ipcRenderer.invoke('ai:chat', payload),
+    test: () => ipcRenderer.invoke('ai:test'),
+    status: () => ipcRenderer.invoke('ai:status')
   },
+
+  lyrics: {
+    load: (input) => ipcRenderer.invoke('lyrics:load', input)  },
 
   online: {
     lyrics: (track) => ipcRenderer.invoke('online:lyrics', track),

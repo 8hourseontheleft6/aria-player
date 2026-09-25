@@ -765,6 +765,108 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       }))
     ], { collapsible: true, collapsed: true }))
 
+    /* ---------- 外部模型（自填 API） ---------- */
+    /*
+     * 密钥处理：只「写」不「读」。
+     * 主进程保存的密钥不会回到渲染层，所以输入框留空 = 不改动已有密钥；
+     * 想换就填新的，想清空就点旁边的「清除」。这样窗口被截图/投屏也不泄露。
+     */
+    const ai = settings.ai || {}
+    const aiBase = h('input', {
+      class: 'settings__input',
+      type: 'text',
+      spellcheck: 'false',
+      placeholder: 'https://api.openai.com/v1',
+      value: ai.baseUrl || ''
+    })
+    const aiModel = h('input', {
+      class: 'settings__input',
+      type: 'text',
+      spellcheck: 'false',
+      placeholder: 'gpt-4o-mini / deepseek-chat / qwen2.5:7b',
+      value: ai.model || ''
+    })
+    const aiKey = h('input', {
+      class: 'settings__input',
+      type: 'password',
+      spellcheck: 'false',
+      placeholder: ai.key ? '已保存（留空则不修改）' : 'sk-…（本地模型可留空）',
+      value: ''
+    })
+    const saveAi = (patch) => actions.setSetting({ ai: { ...ai, ...patch } })
+    on(aiBase, 'change', () => saveAi({ baseUrl: aiBase.value.trim() }))
+    on(aiModel, 'change', () => saveAi({ model: aiModel.value.trim() }))
+    on(aiKey, 'change', () => {
+      if (aiKey.value) saveAi({ key: aiKey.value.trim() })
+    })
+    const aiTestButton = h('button', {
+      class: 'btn btn--sm',
+      type: 'button',
+      text: '测试连接',
+      onClick: async (event) => {
+        const button = event.currentTarget
+        button.disabled = true
+        button.textContent = '测试中…'
+        // 输入框里可能刚改还没失焦，测之前先存一次
+        await saveAi({
+          baseUrl: aiBase.value.trim(),
+          model: aiModel.value.trim(),
+          ...(aiKey.value ? { key: aiKey.value.trim() } : {})
+        })
+        const result = await remote.ai.test()
+        button.disabled = false
+        button.textContent = '测试连接'
+        toast({
+          message: result?.ok ? result.message : `连接失败：${result?.message || '未知错误'}`,
+          type: result?.ok ? 'success' : 'error',
+          duration: result?.ok ? 2600 : 5200
+        })
+        if (result?.ok) aiKey.value = ''
+      }
+    })
+    const aiKeyClear = h('button', {
+      class: 'btn btn--sm',
+      type: 'button',
+      text: '清除密钥',
+      onClick: () => {
+        aiKey.value = ''
+        saveAi({ key: '' })
+        toast({ message: '已清除保存的密钥', type: 'success' })
+      }
+    })
+
+    scroll.appendChild(group('外部模型（自填 API）', [
+      row({
+        title: '启用外部模型',
+        sub: '用你自己填的接口来判断歌曲风格（挑均衡器预设）。协议是 OpenAI 兼容的 /chat/completions，所以 OpenAI、DeepSeek、通义都行，本地跑的 Ollama / LM Studio / vLLM 也只要改接口地址（例如 http://127.0.0.1:11434/v1）。请求由主进程发出：渲染层发不出外部请求，密钥也不会被读回界面。',
+        control: switchControl(ai.enabled === true, (value) => saveAi({ enabled: value }))
+      }),
+      row({
+        title: '接口地址',
+        sub: '结尾的 /v1 要保留，Aria 会自己拼 /chat/completions。',
+        control: h('div', { class: 'settings__field' }, aiBase)
+      }),
+      row({
+        title: '模型名',
+        control: h('div', { class: 'settings__field' }, aiModel)
+      }),
+      row({
+        title: '密钥',
+        sub: '只存在本机的设置文件里（settings.json），不会上传到别处；界面上不会把已保存的密钥显示出来。本地模型通常不需要密钥。',
+        control: h('div', { class: 'settings__field' }, aiKey, aiKeyClear)
+      }),
+      row({
+        title: '连接测试',
+        sub: '发一句最小请求验证地址、密钥与模型名。失败时会显示接口的原始错误（密钥已打码）。',
+        control: aiTestButton
+      }),
+      row({
+        title: '用它判断风格',
+        sub: '关闭后外部模型不参与风格判断（其它用途以后再加）。判断结果会显示成一条提示，并把「当前判定依据」补上模型给出的理由。',
+        control: switchControl(ai.useForStyle !== false, (value) => saveAi({ useForStyle: value }))
+      })
+    ], { collapsible: true, collapsed: true, sub: '隐私：只发送歌曲信息与本地特征，音频文件不会上传' }))
+
     /* ---------- 快捷键 ---------- */
     scroll.appendChild(group('快捷键', SHORTCUTS.map(([key, description]) => row({
       title: description,

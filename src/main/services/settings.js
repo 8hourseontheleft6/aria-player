@@ -36,6 +36,19 @@ const DEFAULTS = {
   equalizer: { enabled: false, auto: true, preset: 'flat' },
   // 自动均衡时是否用「声音特征分析」辅助判断风格（本地解码，不联网）
   styleAnalysis: true,
+  /*
+   * 外部模型（用户自填 API，OpenAI 兼容的 /chat/completions）。
+   * 目前只用于「判断风格挑均衡器预设」：只发文本（曲目信息 + 本地特征），
+   * 音频文件不上传。密钥存在本机的 settings.json 里，且不会被读回渲染层。
+   */
+  ai: {
+    enabled: false,
+    useForStyle: true,
+    baseUrl: '',
+    key: '',
+    model: '',
+    timeout: 30000
+  },
   // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
   sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
   // 默认侧栏与灵动岛不同时出现；打开后侧栏开着也显示灵动岛
