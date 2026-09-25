@@ -22,7 +22,8 @@ export const onlineMedia = {
       id: 'lrclib',
       priority: 50,
       async load (track, { settings }) {
-        if (!settings?.onlineFeatures || settings.onlineLyrics === false) return null
+        // 歌词直接加载：只看歌词源自己的开关（默认开），不看总开关（用户要求）
+        if (settings?.onlineLyrics === false) return null
         const result = await api.services.remote.online.lyrics({
           title: track.title,
           artist: track.artist,

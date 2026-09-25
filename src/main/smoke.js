@@ -5036,12 +5036,20 @@ async function runSmoke ({ win, ctx }) {
       duration: onlineTrack.duration
     }
 
-    // 默认关闭：不应该发起任何请求
-    settingsService.set({ onlineFeatures: false })
+    /*
+     * 新契约（用户要求「在线歌词直接加载，不要用户确认」）：
+     *   · 歌词不看总开关 —— 关着也照样去匹配，否则没有 .lrc 的歌永远没歌词；
+     *   · 封面仍归总开关管 —— 它会下载图片，默认不该联网。
+     */
+    settingsService.set({ onlineFeatures: false, onlineLyrics: true, onlineCovers: true })
     await sleep(200)
-    const disabled = await online.fetchLyrics(sample)
-    record('在线功能默认关闭', disabled.skipped === true,
-      '总开关关闭时不发起请求')
+    const lyricsWhenMasterOff = await online.fetchLyrics(sample)
+    const coversWhenMasterOff = await online.fetchCover(sample)
+    record('在线歌词不看总开关（直接加载）；封面仍归总开关',
+      lyricsWhenMasterOff.skipped !== true &&
+      coversWhenMasterOff.skipped === true,
+      `总开关关闭时：歌词 skipped=${lyricsWhenMasterOff.skipped}（应为 false/undefined = 仍会联网）、` +
+      `封面 skipped=${coversWhenMasterOff.skipped}（应为 true）`)
 
     settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
     await sleep(300)
