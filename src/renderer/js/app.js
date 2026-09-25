@@ -15,7 +15,8 @@ import { createStore, initialState } from './core/store.js'
 import { remote, isElectron } from './core/remote.js'
 import { normalizeForSearch } from './core/format.js'
 import { createAudioEngine } from './core/audio-engine.js'
-import { matchPreset } from './core/equalizer-presets.js'
+import { matchPreset, matchByMetadata } from './core/equalizer-presets.js'
+import { analyzeTrack, cachedAnalysis, analyzeBuffer, classifyStyle } from './core/style-analyzer.js'
 import { createPlaylist } from './core/playlist.js'
 import { createPluginHost } from './core/plugin-host.js'
 import { registerBuiltinModes } from './core/playback-modes.js'
@@ -712,20 +713,38 @@ async function main () {
 
     /**
      * 把当前设置落到引擎上。
-     * 自动模式下按「正在播放的那首歌」的流派挑预设，挑不到就保持手动选的。
+     * 自动模式下按「正在播放的那首歌」挑预设：标签优先、音频分析兜底
+     * （分析是异步的，算完会自己再调一次这里）。
      */
     applyEqualizer () {
       const state = store.get()
       const config = state.settings.equalizer || { enabled: false, auto: true, preset: 'flat' }
       if (!config.enabled) return engine.setEqualizer('flat', { enabled: false })
 
+      const track = state.library.byId.get(state.playback.trackId) || null
       let key = config.preset || 'flat'
       if (config.auto) {
-        const track = state.library.byId.get(state.playback.trackId)
-        const matched = matchPreset(track)
+        const analysis = state.settings.styleAnalysis === false ? null : cachedAnalysis(state.playback.trackId)
+        const matched = matchPreset(track, analysis)
         if (matched) key = matched
+        // 还没分析过就补一次；算完再应用（analyzing 里的去重避免来回触发）
+        if (!analysis && track && state.settings.styleAnalysis !== false) {
+          analyzeEqualizerTrack(track)
+        }
       }
       return engine.setEqualizer(key, { enabled: true })
+    },
+
+    /** 当前生效预设的判定依据（设置页与全屏播放页都用它做说明） */
+    equalizerBasis () {
+      const state = store.get()
+      const track = state.library.byId.get(state.playback.trackId) || null
+      const analysis = cachedAnalysis(state.playback.trackId)
+      return {
+        preset: engine.equalizerSnapshot()?.preset || 'off',
+        byMetadata: matchByMetadata(track),
+        byAudio: analysis ? { key: analysis.key, confidence: analysis.confidence, features: analysis.features } : null
+      }
     },
 
     async setSetting (patch) {
@@ -891,6 +910,29 @@ async function main () {
 
   /** 均衡器开着但音频图还没建（等第一次播放的用户手势），见文件末尾的说明 */
   let pendingEqualizer = false
+
+  /** 正在做音频分析的曲目（同一首别重复算） */
+  const analyzing = new Set()
+
+  /**
+   * 分析一首曲目的声音特征，算完把均衡器重算一遍。
+   *
+   * 为什么值得：本地库里一大半文件没有流派标签，光看元数据自动均衡几乎不生效；
+   * 解码 30 秒算三个特征（低音占比 / 过零率 / 峰值因数）就能给出一个靠谱的风格。
+   * 分析失败一律静默 —— 它只是锦上添花，不该影响播放。
+   */
+  async function analyzeEqualizerTrack (track) {
+    if (!track?.id || analyzing.has(track.id)) return
+    analyzing.add(track.id)
+    try {
+      // 注意：这里不传引擎的上下文 —— 那会把音频图提前建出来（见 applyEqualizer 的说明）。
+      // 分析器自己临时建一个用完就关，代价比强行激活播放链小。
+      const result = await analyzeTrack(track, null)
+      if (result) actions.applyEqualizer()
+    } finally {
+      analyzing.delete(track.id)
+    }
+  }
 
   function registerOnlineTrack (item, resolved) {
     const id = `online:${item.uid || item.sourceId + ':' + item.sourceTrackId}`
@@ -1509,6 +1551,10 @@ async function main () {
     splitArtists,
     // 均衡器的风格匹配（自检直接拿它验规则）
     matchPreset,
+    matchByMetadata,
+    // 声音特征分析（自检拿合成波形验分类器）
+    styleAnalyzer: { analyzeBuffer, classifyStyle },
+    cachedAnalysis,
     // 最小化后的释放 / 恢复（自检会用它读释放账目）
     background: backgroundRelease,
     // 视图组件：自检与调试会用到（例如媒体墙的 debugState / 平移）

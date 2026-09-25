@@ -291,6 +291,18 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
     /* ---------- 播放 ---------- */
     /*
+     * 「当前判定依据」要现算：它跟着正在播放的歌走。
+     */
+    const basis = actions.equalizerBasis ? actions.equalizerBasis() : null
+    const basisLabel = (() => {
+      if (!settings.equalizer?.enabled) return '均衡器已关闭'
+      if (settings.equalizer?.auto === false) return '手动选择的预设'
+      const parts = []
+      if (basis?.byAudio) parts.push(`声音（低音 ${basis.byAudio.features.bassRatio.toFixed(2)}、过零 ${Math.round(basis.byAudio.features.zcr)}、峰值因数 ${basis.byAudio.features.crest.toFixed(1)}）`)
+      if (basis?.byMetadata) parts.push(`标签（${basis.byMetadata}）`)
+      return parts.length ? parts.join(' + ') : '还没有线索'
+    })()
+    /*
      * 输出设备列表要现取：插拔耳机、切蓝牙都会变。
      * 名字需要 media 权限（主进程已放行），拿不到就退化成「输出设备 N」。
      */
@@ -346,13 +358,24 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           select.value = settings.equalizer?.preset || 'flat'
           select.disabled = settings.equalizer?.auto !== false
           on(select, 'change', () => actions.setEqualizer({ preset: select.value }))
-          return select
+          return h('div', { class: 'select' }, select)
         })()
+      }),
+      row({
+        title: '用声音辅助判断风格',
+        sub: '只看标签常常判不准：本地库里一大半文件没有流派标签，写着「Pop」的合辑里也可能塞着电子和摇滚。打开后 Aria 会解码当前歌曲的中段 30 秒，算三个特征（低音占比 / 过零率 / 峰值因数）来判断风格 —— 全程本地，不联网，结果按曲目缓存。',
+        control: switchControl(settings.styleAnalysis !== false,
+          (value) => actions.setSetting({ styleAnalysis: value }))
+      }),
+      row({
+        title: '当前判定依据',
+        sub: '自动模式实际用了哪条线索。标签来自文件元数据，声音来自上面那套特征分析；两者不一致时以声音为准。',
+        control: h('span', { class: 'settings__row-value', text: basisLabel })
       }),
       row({
         title: '输出设备',
         sub: '通话 / 游戏语音时想让对方听不到音乐：把这里选成你的耳机（通话留在原设备）。音乐只进你的耳朵，麦克风拾不到它，对方就什么也听不到。留「跟随系统」则与其它应用共用默认输出。',
-        control: outputSelect
+        control: h('div', { class: 'select' }, outputSelect)
       }),
       row({
         title: '单击歌曲直接播放',
@@ -747,6 +770,41 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       title: description,
       control: h('span', { class: 'kbd', text: key })
     }))))
+
+    /*
+     * 系统媒体键单独一组，而且**直接从主进程的注册表渲染**。
+     *
+     * 之前这一组是手写的，某次整理快捷键列表时被顺手删掉，
+     * 于是「哪个键对应哪个操作」的说明就这么消失了（用户反馈）。
+     * 现在清单只有一个来源：main/ipc.js 的 MEDIA_KEYS → app:info.mediaKeys。
+     */
+    const mediaKeys = state.app.info?.mediaKeys || []
+    if (mediaKeys.length) {
+      const KEY_LABEL = {
+        MediaPlayPause: '播放 / 暂停键',
+        MediaNextTrack: '下一首键',
+        MediaPreviousTrack: '上一首键',
+        MediaStop: '停止键'
+      }
+      const COMMAND_LABEL = {
+        'play-pause': '播放 / 暂停',
+        next: '下一首',
+        previous: '上一首',
+        stop: '停止'
+      }
+      scroll.appendChild(group('系统媒体键', [
+        row({
+          title: '注册为全局快捷键',
+          sub: '在任何程序里按键盘上的媒体键都能控制 Aria。关掉之后系统会把它交还给别的播放器。也可以从托盘菜单里随时切换。',
+          control: switchControl(state.settings.globalMediaKeys !== false,
+            (value) => actions.setSetting({ globalMediaKeys: value }))
+        }),
+        ...mediaKeys.map((item) => row({
+          title: COMMAND_LABEL[item.command] || item.command,
+          control: h('span', { class: 'kbd', text: KEY_LABEL[item.accelerator] || item.accelerator })
+        }))
+      ], { collapsible: true, collapsed: true }))
+    }
 
     /* ---------- 关于 ---------- */
     const info = state.app.info

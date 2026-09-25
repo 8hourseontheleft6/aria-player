@@ -2879,6 +2879,185 @@ async function runSmoke ({ win, ctx }) {
       `设置页三行（开关=${scrollbarEq.hasSwitchRow}、自动=${scrollbarEq.hasAutoRow}、预设选项 ${scrollbarEq.presetOptions.length} 个）；` +
       `开着均衡器播放：状态=${scrollbarEq.playingState}、已播 ${scrollbarEq.time}s、生效预设=${scrollbarEq.eqAfterPlay}`)
 
+    /* ---------- 下拉框外观 / 媒体键清单 / 全屏均衡器 / 声音特征分类 ---------- */
+    await ensureVisible(win)
+    const uiRound2 = await evaluate(win, `
+      const { actions, store, engine } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+
+      /* ① 深色模式下的下拉框不能再是白底黑字 */
+      actions.setView('settings')
+      await settle(1100)
+      const readSelect = () => {
+        const node = document.querySelector('.settings select')
+        if (!node) return null
+        const style = getComputedStyle(node)
+        return {
+          appearance: style.appearance,
+          background: style.backgroundColor,
+          color: style.color,
+          // 原生外观没被拿掉时，深色下系统会画白底
+          wrapped: Boolean(node.closest('.select')),
+          chevron: getComputedStyle(node.closest('.select'), '::after').content
+        }
+      }
+      actions.setSetting({ theme: 'dark' })
+      await settle(700)
+      const darkSelect = readSelect()
+      actions.setSetting({ theme: 'light' })
+      await settle(700)
+      const lightSelect = readSelect()
+      actions.setSetting({ theme: 'system' })
+      await settle(500)
+      const selectStyle = darkSelect
+      // 深色下必须是「浅字 + 半透明灰底」，白底就是用户报的那个 bug
+      const darkReadable = Boolean(darkSelect) &&
+        darkSelect.color.includes('255, 255, 255') &&
+        darkSelect.background.includes('120, 120, 128') &&
+        !darkSelect.background.includes('255, 255, 255')
+      const lightReadable = Boolean(lightSelect) &&
+        lightSelect.color.includes('0, 0, 0') &&
+        !lightSelect.background.includes('255, 255, 255')
+
+      /* ② 系统媒体键要列出来（之前手写那份被删掉后就再没显示过） */
+      const MEDIA_LABELS = ['播放 / 暂停键', '下一首键', '上一首键', '停止键']
+      const countMediaRows = () => [...document.querySelectorAll('.settings__row')]
+        .filter((node) => MEDIA_LABELS.some((label) => node.textContent.includes(label)))
+        .map((node) => node.textContent)
+      const info = store.get().app.info
+      const declaredKeys = (info && info.mediaKeys ? info.mediaKeys : []).map((item) => item.accelerator)
+      const hasMediaGroup = [...document.querySelectorAll('.settings__group-title')]
+        .some((node) => node.textContent.includes('系统媒体键'))
+      // 展开那一组才能量到里面的行
+      const mediaHead = [...document.querySelectorAll('.settings__group-head')]
+        .find((node) => node.textContent.includes('系统媒体键'))
+      mediaHead?.click()
+      await settle(600)
+      const mediaRowsOpen = countMediaRows()
+
+      /* ③ 全屏播放页里也能调均衡器 */
+      actions.openNowPlaying()
+      await settle(800)
+      const eqButton = [...document.querySelectorAll('.now-playing__topbar .btn')]
+        .find((node) => node.title.includes('均衡器'))
+      eqButton?.click()
+      await settle(600)
+      const popover = document.querySelector('.popover')
+      const popoverText = popover ? popover.textContent : ''
+      const presetRow = popover
+        ? [...popover.querySelectorAll('.popover__row')].find((node) => node.textContent.includes('摇滚'))
+        : null
+      presetRow?.click()
+      await settle(700)
+      const afterPick = store.get().settings.equalizer
+      const applied = engine.equalizerSnapshot()
+      actions.setEqualizer({ enabled: false })
+      actions.closeNowPlaying()
+      await settle(500)
+
+      /* ④ 声音特征分类器：拿合成波形当输入，验证它真的在听声音 */
+      const Ctx = window.AudioContext || window.webkitAudioContext
+      const ctx = new Ctx()
+      const makeBuffer = (fill) => {
+        const length = Math.floor(ctx.sampleRate * 4)
+        const buffer = ctx.createBuffer(1, length, ctx.sampleRate)
+        const data = buffer.getChannelData(0)
+        fill(data, ctx.sampleRate)
+        return buffer
+      }
+      // 低音很重的鼓点（电子）
+      const bassy = window.__aria.styleAnalyzer.analyzeBuffer(makeBuffer((data, rate) => {
+        for (let i = 0; i < data.length; i++) {
+          const beat = (i % Math.floor(rate / 4)) < rate / 40 ? 1 : 0.35
+          data[i] = Math.sin((2 * Math.PI * 60 * i) / rate) * 0.9 * beat + (Math.random() - 0.5) * 0.25 * beat
+        }
+      }))
+      // 高频噪声为主的失真感（摇滚）
+      const bright = window.__aria.styleAnalyzer.analyzeBuffer(makeBuffer((data) => {
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() - 0.5) * 0.8
+      }))
+      // 动态很大的稀疏正弦（古典）
+      const dynamic = window.__aria.styleAnalyzer.analyzeBuffer(makeBuffer((data, rate) => {
+        for (let i = 0; i < data.length; i++) {
+          data[i] = Math.sin((2 * Math.PI * 220 * i) / rate) * 0.9 * Math.pow(Math.abs(Math.sin((Math.PI * i) / data.length)), 3)
+        }
+      }))
+      const classified = {
+        bassy: window.__aria.styleAnalyzer.classifyStyle(bassy),
+        bright: window.__aria.styleAnalyzer.classifyStyle(bright),
+        dynamic: window.__aria.styleAnalyzer.classifyStyle(dynamic)
+      }
+      ctx.close()
+
+      // 标签 vs 声音：声音置信度高时以声音为准
+      const conflict = window.__aria.matchPreset(
+        { genre: 'Pop' },
+        { key: 'electronic', confidence: 0.8 }
+      )
+      const tagOnly = window.__aria.matchByMetadata({ genre: 'Classical' })
+      const trustTag = window.__aria.matchPreset({ genre: 'Classical' }, { key: 'pop', confidence: 0.35 })
+
+      actions.setView('songs')
+      await settle(400)
+      return {
+        selectStyle,
+        darkSelect,
+        lightSelect,
+        darkReadable,
+        lightReadable,
+        hasMediaGroup,
+        declaredKeys,
+        mediaRowsOpen,
+        eqButtonFound: Boolean(eqButton),
+        popoverText: popoverText.slice(0, 120),
+        presetPicked: presetRow ? true : false,
+        afterPick,
+        appliedPreset: applied ? applied.preset : null,
+        bassy,
+        bright,
+        dynamic,
+        classified,
+        conflict,
+        tagOnly,
+        trustTag
+      }
+    `)
+    record('下拉框在深色下也看得清（拿掉原生外观 + 主题化箭头）',
+      uiRound2.selectStyle?.appearance === 'none' &&
+      uiRound2.selectStyle?.wrapped === true &&
+      uiRound2.darkReadable === true &&
+      uiRound2.lightReadable === true,
+      `appearance=${uiRound2.selectStyle?.appearance}、包了 .select=${uiRound2.selectStyle?.wrapped}、箭头 content=${uiRound2.selectStyle?.chevron}；` +
+      `深色：字 ${uiRound2.darkSelect?.color} / 底 ${uiRound2.darkSelect?.background}（可读=${uiRound2.darkReadable}）；` +
+      `浅色：字 ${uiRound2.lightSelect?.color} / 底 ${uiRound2.lightSelect?.background}（可读=${uiRound2.lightReadable}）`)
+    record('设置里列出系统媒体键（清单来自主进程注册表）',
+      uiRound2.hasMediaGroup === true &&
+      uiRound2.declaredKeys.length === 4 &&
+      uiRound2.mediaRowsOpen.length >= 4,
+      `有「系统媒体键」分组=${uiRound2.hasMediaGroup}；主进程注册 ${uiRound2.declaredKeys.length} 个（${uiRound2.declaredKeys.join(', ')}）；` +
+      `展开后列出 ${uiRound2.mediaRowsOpen.length} 行：${JSON.stringify(uiRound2.mediaRowsOpen.slice(0, 4))}`)
+    record('全屏播放页里能调均衡器',
+      uiRound2.eqButtonFound === true &&
+      uiRound2.popoverText.includes('均衡器') &&
+      uiRound2.popoverText.includes('摇滚') &&
+      uiRound2.presetPicked === true &&
+      uiRound2.afterPick?.auto === false &&
+      uiRound2.afterPick?.preset === 'rock' &&
+      uiRound2.appliedPreset === 'rock',
+      `顶栏有均衡器按钮=${uiRound2.eqButtonFound}；面板列出预设=${uiRound2.presetPicked}（含「摇滚」）；` +
+      `点它之后设置 auto=${uiRound2.afterPick?.auto}、preset=${uiRound2.afterPick?.preset}，引擎生效=${uiRound2.appliedPreset}`)
+    record('风格判断会「听」声音：低音重的判电子、噪声重的判摇滚、动态大的判古典',
+      uiRound2.classified.bassy.key === 'electronic' &&
+      uiRound2.classified.bright.key === 'rock' &&
+      uiRound2.classified.dynamic.key === 'classical' &&
+      uiRound2.conflict === 'electronic' &&
+      uiRound2.tagOnly === 'classical' &&
+      uiRound2.trustTag === 'classical',
+      `合成波形 → 低音鼓点 ${JSON.stringify(uiRound2.bassy)} / 宽带噪声 ${JSON.stringify(uiRound2.bright)} / 大动态正弦 ${JSON.stringify(uiRound2.dynamic)}；` +
+      `分类：${uiRound2.classified.bassy.key} / ${uiRound2.classified.bright.key} / ${uiRound2.classified.dynamic.key}；` +
+      `标签 Pop + 声音 electronic(0.8) → ${uiRound2.conflict}；只看标签 Classical → ${uiRound2.tagOnly}；` +
+      `标签 Classical + 声音 pop(0.35) → ${uiRound2.trustTag}`)
+
     /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
     const audioOutput = await evaluate(win, `
       const { actions, store, engine } = window.__aria

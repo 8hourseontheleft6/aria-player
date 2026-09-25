@@ -146,10 +146,30 @@ const RULES = [
 
 /**
  * 按曲目挑预设。
- * @param {object|null} track 需要 genre 字段（元数据里读到的风格），缺失时返回 null
- * @returns {string|null} 预设 key；没有线索返回 null（调用方保持当前预设）
+ *
+ * 判断依据有两条，**标签优先、声音兜底**：
+ *   1. 元数据（流派字段 + 标题/专辑线索）—— 作者写的是什么；
+ *   2. 音频特征（见 style-analyzer.js）—— 听起来是什么。
+ * 本地音乐库里一大半文件没有流派标签，只靠第 1 条基本等于没开自动；
+ * 反过来，标签写错的情况也很常见（整张合辑都标成「Pop」），所以第 2 条要有决定权。
+ * 两条都没有结论时返回 null，调用方保持当前预设。
+ *
+ * @param {object|null} track 需要 genre 字段
+ * @param {object|null} analysis analyzeTrack() 的结果（可选）
+ * @returns {string|null} 预设 key
  */
-export function matchPreset (track) {
+export function matchPreset (track, analysis = null) {
+  const fromTags = matchByMetadata(track)
+
+  // 音频分析可信就一直用它；置信度低时让标签说话
+  if (analysis && analysis.key && (analysis.confidence ?? 0) >= 0.5) return analysis.key
+  if (fromTags) return fromTags
+  if (analysis && analysis.key) return analysis.key
+  return null
+}
+
+/** 只看元数据的匹配（导出给设置页做「依据」说明用） */
+export function matchByMetadata (track) {
   if (!track) return null
   const fields = [track.genre, track.title, track.album, track.artist]
     .filter(Boolean)

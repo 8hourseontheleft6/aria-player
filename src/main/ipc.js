@@ -178,7 +178,13 @@ function registerIpc (ctx) {
       node: process.versions.node,
       platform: process.platform,
       userData: app.getPath('userData'),
-      isMac: process.platform === 'darwin'
+      isMac: process.platform === 'darwin',
+      /*
+       * 系统媒体键清单（注册用的就是上面那张 MEDIA_KEYS 表）。
+       * 设置页的快捷键列表直接渲染它 —— 之前那份是手写的，删掉一次就再也没人发现，
+       * 于是「什么键对应什么操作」的说明凭空消失了。
+       */
+      mediaKeys: MEDIA_KEYS.map(([accelerator, command]) => ({ accelerator, command }))
     }),
     'shell:open-external': (_event, url) => {
       if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url)

@@ -34,6 +34,8 @@ const DEFAULTS = {
   audioOutputDevice: '',
   // 声音均衡器：enabled 总开关；auto 按流派自动挑预设；preset 关掉自动后用手动选的
   equalizer: { enabled: false, auto: true, preset: 'flat' },
+  // 自动均衡时是否用「声音特征分析」辅助判断风格（本地解码，不联网）
+  styleAnalysis: true,
   // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
   sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
   // 默认侧栏与灵动岛不同时出现；打开后侧栏开着也显示灵动岛

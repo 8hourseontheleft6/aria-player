@@ -140,17 +140,11 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 设置里的下拉（目前是输出设备） */
+/* 设置里的下拉（输出设备 / 均衡器预设）：外观由 components.css 的 select 规则统一管，
+   这里只管宽度 —— 原来那套 bg-input 在深色下会被系统外观盖掉，才出现白底下拉框 */
 .settings__select {
   max-width: 220px;
-  height: 28px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: var(--bg-input);
-  color: var(--label);
-  font: inherit;
-  font-size: var(--text-subhead);
+  min-width: 132px;
 }
 
 /* ---------------------- 可收起分组 ---------------------- */

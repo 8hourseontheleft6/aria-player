@@ -7,7 +7,8 @@ import { formatDuration, formatRate } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { createArtworkView } from '../widgets/artwork-node.js'
 import { createLyricsView } from '../widgets/lyrics-view.js'
-import { openPopover } from '../widgets/overlay.js'
+import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
+import { presetOptions, matchPreset, PRESETS } from '../../core/equalizer-presets.js'
 
 const RATE_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
@@ -48,11 +49,65 @@ export function createNowPlayingPanel ({ store, bus, player, artwork, host, acti
     }
   }, icon('folder', { className: 'icon icon--stroke' }))
 
+  /*
+   * 均衡器：全屏播放页里也能直接调。
+   *
+   * 面板里放的是「开关 + 自动 + 预设」三件事 —— 和设置页同一套 actions，
+   * 区别只是这里离正在播放的歌最近，试听风格时不用来回切页面。
+   */
+  const eqButton = h('button', {
+    class: 'btn btn--icon',
+    type: 'button',
+    title: '声音均衡器',
+    onClick: () => openEqualizerMenu(eqButton)
+  }, icon('sliders', { className: 'icon icon--stroke' }))
+
+  function openEqualizerMenu (anchor) {
+    const settings = store.get().settings.equalizer || { enabled: false, auto: true, preset: 'flat' }
+    const current = store.get().playback.trackId
+      ? store.get().library.byId.get(store.get().playback.trackId)
+      : null
+    const matched = settings.enabled && settings.auto !== false ? matchPreset(current) : null
+    const apply = (patch) => {
+      closeAllLayers()
+      actions.setEqualizer(patch)
+    }
+    const rows = [
+      { title: '声音均衡器' },
+      {
+        label: settings.enabled ? '关闭均衡器' : '开启均衡器',
+        value: settings.enabled ? '已开启' : '已关闭',
+        onClick: () => apply({ enabled: !settings.enabled })
+      },
+      {
+        label: '按歌曲风格自动选择',
+        value: settings.auto !== false ? '开' : '关',
+        onClick: () => apply({ auto: settings.auto === false })
+      },
+      { separator: true },
+      { title: matched ? `自动匹配到「${PRESETS[matched].displayName}」` : '选择预设' },
+      ...presetOptions().map((option) => ({
+        label: option.label,
+        // 自动模式下手动项是灰的：这时生效的是自动匹配出来的那一组
+        value: settings.auto === false
+          ? (settings.preset === option.value ? '使用中' : '')
+          : (matched === option.value ? '自动选中' : ''),
+        onClick: () => apply({ auto: false, preset: option.value, enabled: true })
+      }))
+    ]
+    openPopover({
+      anchor,
+      placement: 'bottom-end',
+      content: popoverRows(rows)
+    })
+  }
+
   const topbar = h('div', { class: 'now-playing__topbar' },
     closeButton,
     h('div', { class: 'now-playing__caption', text: '正在播放' }),
     h('div', { class: 'now-playing__spacer' }),
     revealButton,
+    eqButton,
     lyricsToggle,
     queueToggle
   )

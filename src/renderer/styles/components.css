@@ -3,6 +3,74 @@
    这些是「iOS 控件」在桌面上的实现，尺寸与比例参照 UIKit。
    ========================================================================== */
 
+/* ------------------------------ 下拉框 ------------------------------ */
+/*
+ * 原生 select 在深色模式下会用系统配色 —— 深色界面里冒出一个白底下拉框，
+ * 白底上的浅色字根本看不清（用户反馈）。统一成 iOS 风格：
+ * appearance: none 拿掉系统外观，底色/文字/圆角都走令牌；
+ * 箭头画在 .select 容器的伪元素上（这样能跟着主题变色，data-URI 办不到）。
+ */
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 30px;
+  padding: 0 26px 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--fill-tertiary);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-subhead);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-ios),
+    box-shadow var(--dur-fast) var(--ease-ios);
+}
+
+select:hover {
+  background: var(--fill-secondary);
+}
+
+select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+select:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 展开后的列表是系统画的，但颜色能给 —— 不给的话深色下同样是白底 */
+select option {
+  background: var(--bg-elevated);
+  color: var(--label);
+}
+
+.select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.select::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--label-3);
+  border-bottom: 1.5px solid var(--label-3);
+  transform: translateY(-2px) rotate(45deg);
+  pointer-events: none;
+}
+
+.select select {
+  width: 100%;
+}
+
 /* ------------------------------ 按钮 ------------------------------ */
 
 .btn {
