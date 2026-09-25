@@ -1,6 +1,103 @@
 /* ==========================================================================
    设置页：iOS「分组列表」样式
    ========================================================================== */
+/* ==========================================================================
+   设置：两级结构（总览 → 子页面）
+   ========================================================================== */
+
+.settings-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  padding: 4px 20px 40px;
+  align-content: start;
+}
+
+.settings-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-1);
+  text-align: left;
+  transition:
+    transform var(--dur-fast) var(--ease-ios),
+    box-shadow var(--dur-fast) var(--ease-ios);
+}
+
+.settings-card:hover {
+  transform: translateY(var(--lift));
+  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-2);
+}
+
+.settings-card:active {
+  transform: none;
+}
+
+.settings-card__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--fill-tertiary);
+  color: var(--accent);
+}
+
+.settings-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-card__title {
+  font-size: var(--text-body);
+  color: var(--label);
+}
+
+.settings-card__hint {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+}
+
+.settings-card__chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--label-4);
+  flex: none;
+}
+
+/* 返回键只在子页面里出现 */
+.settings__back {
+  display: none;
+}
+
+.content-inner.is-detail .settings__back {
+  display: inline-flex;
+}
+
+/* 子页面从右侧滑入 */
+.settings.is-entering {
+  animation: settings-slide-in var(--dur) var(--ease-ios);
+}
+
+@keyframes settings-slide-in {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 分组里的小标题（例如快捷键组里的「系统媒体键」） */
+.settings__subhead {
+  padding: 14px 14px 4px;
+  font-size: var(--text-footnote);
+  font-weight: 500;
+  color: var(--label-3);
+}
 
 .settings {
   padding: 0 20px 40px;

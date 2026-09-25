@@ -36,6 +36,8 @@ const DEFAULTS = {
   equalizer: { enabled: false, auto: true, preset: 'flat' },
   // 自动均衡时是否用「声音特征分析」辅助判断风格（本地解码，不联网）
   styleAnalysis: true,
+  // 音频可视化样式：bars | wave | ring（点可视化区域循环切换）
+  visualizerStyle: 'bars',
   /*
    * 外部模型（用户自填 API，OpenAI 兼容的 /chat/completions）。
    * 目前只用于「判断风格挑均衡器预设」：只发文本（曲目信息 + 本地特征），

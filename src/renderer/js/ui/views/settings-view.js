@@ -7,6 +7,7 @@ import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from 
 import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
 import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
+import { createPillSelect } from '../widgets/pill-menu.js'
 
 const THEMES = [
   { id: 'system', label: '跟随系统' },
@@ -41,24 +42,71 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   const element = h('div', { class: 'content-inner view-root' })
 
   /*
-   * 顶部分区导航：设置项多了之后一屏屏翻很累，点一下直接跳到那一大块
-   * （按分组标题找锚点，不依赖硬编码索引）。
-   * 注意：这两个声明必须在工具栏之前 —— 工具栏里要用 sectionNav，
-   * 放在后面就是 TDZ（这个文件已经栽过一次，见 infoLayer）。
+   * 一级视图：分类入口（图标 + 文字）。点进去才渲染那一类，返回键回总览。
+   * 做法是「一次性建好所有分组，然后按分类显隐」——比每次重建快，也不会丢滚动位置。
    */
-  const SECTIONS = [
-    { label: '音乐库', groups: ['音乐文件夹'] },
-    { label: '播放与音效', groups: ['播放', '均衡器', '歌词'] },
-    { label: '外观与系统', groups: ['外观', '系统集成', '快捷键', '系统媒体键'] },
-    { label: '在线与扩展', groups: ['在线功能', '在线音源', '插件与扩展点', '外部模型（自填 API）', '封面缓存'] },
-    { label: '关于', groups: ['关于'] }
+  const CATEGORIES = [
+    { key: 'library', label: '音乐库', icon: 'folder', groups: ['音乐文件夹'], hint: '扫描目录、封面缓存' },
+    { key: 'audio', label: '播放与音效', icon: 'sliders', groups: ['播放', '均衡器', '歌词'], hint: '输出设备、均衡器、歌词' },
+    { key: 'appearance', label: '外观与系统', icon: 'sparkles', groups: ['外观', '系统集成', '快捷键'], hint: '主题、托盘、快捷键' },
+    { key: 'online', label: '在线与扩展', icon: 'target', groups: ['在线功能', '在线音源', '插件与扩展点', '外部模型（自填 API）'], hint: '在线补全、音源、插件、外部模型' },
+    { key: 'about', label: '关于', icon: 'info', groups: ['关于'], hint: '版本与配置目录' }
   ]
-  const sectionNav = h('div', { class: 'settings-nav' })
+  let activeCategory = null
+
+  const navBack = h('button', {
+    class: 'btn btn--icon settings__back',
+    type: 'button',
+    title: '返回设置总览',
+    onClick: () => openCategory(null)
+  }, icon('chevronLeft', { className: 'icon icon--stroke' }))
+
+  const navTitle = h('div', { class: 'view-toolbar__title', text: '设置' })
+
+  const overview = h('div', { class: 'settings-overview scroll view-body' })
+
+  function openCategory (key) {
+    activeCategory = key
+    const category = CATEGORIES.find((item) => item.key === key) || null
+    element.classList.toggle('is-detail', Boolean(category))
+    navTitle.textContent = category ? category.label : '设置'
+    overview.hidden = Boolean(category)
+    scroll.hidden = !category
+    // 只显示当前分类的分组
+    for (const node of scroll.querySelectorAll('.settings__group')) {
+      const title = node.querySelector('.settings__group-title')?.textContent || ''
+      node.hidden = Boolean(category) && !category.groups.includes(title)
+    }
+    if (category) {
+      scroll.scrollTop = 0
+      // 从右侧滑入
+      scroll.classList.remove('is-entering')
+      void scroll.offsetWidth
+      scroll.classList.add('is-entering')
+    }
+  }
+
+  function renderOverview () {
+    overview.replaceChildren(...CATEGORIES.map((category) => h('button', {
+      class: 'settings-card',
+      type: 'button',
+      dataset: { category: category.key },
+      onClick: () => openCategory(category.key)
+    },
+    h('span', { class: 'settings-card__icon' }, icon(category.icon, { className: 'icon icon--stroke' })),
+    h('span', { class: 'settings-card__text' },
+      h('span', { class: 'settings-card__title', text: category.label }),
+      h('span', { class: 'settings-card__hint', text: category.hint })
+    ),
+    icon('chevronRight', { className: 'icon icon--stroke settings-card__chevron' })
+    )))
+  }
+  renderOverview()
 
   const toolbar = h('div', { class: 'view-toolbar' },
-    h('div', { class: 'view-toolbar__title', text: '设置' }),
-    h('div', { class: 'view-toolbar__spacer' }),
-    sectionNav
+    navBack,
+    navTitle,
+    h('div', { class: 'view-toolbar__spacer' })
   )
 
   const scroll = h('div', { class: 'settings scroll view-body' })
@@ -104,13 +152,15 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       tabindex: '0',
       'aria-label': text,
       onMouseenter: (event) => showTip(event.currentTarget, text, event),
+      // 悬停期间跟着指针走：只听 mouseenter 的话，指针一动气泡就「漂」在原地
+      onMousemove: (event) => showTip(event.currentTarget, text, event),
       onMouseleave: hideTip,
       onFocus: (event) => showTip(event.currentTarget, text, null),
       onBlur: hideTip
     }, 'i')
   }
 
-  element.append(toolbar, scroll, infoLayer)
+  element.append(toolbar, overview, scroll, infoLayer)
   // 滚动时气泡会跟丢，直接收起来
   on(scroll, 'scroll', hideTip, { passive: true })
 
@@ -238,7 +288,6 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   let outputDevices = []
   let outputDevicesLoaded = false
   let outputDevicesListenerAdded = false
-  let sectionNavListenerAdded = false
 
   function render () {
     const state = store.get()
@@ -342,19 +391,24 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 输出设备列表要现取：插拔耳机、切蓝牙都会变。
      * 名字需要 media 权限（主进程已放行），拿不到就退化成「输出设备 N」。
      */
-    const outputSelect = h('select', { class: 'settings__select' })
+    const outputSelect = createPillSelect({
+      title: '输出设备',
+      value: store.get().settings.audioOutputDevice || '',
+      items: [{ value: '', label: '跟随系统' }],
+      onPick: (value) => actions.setOutputDevice(value)
+    })
     function paintOutputDevices () {
       const current = store.get().settings.audioOutputDevice || ''
-      outputSelect.replaceChildren(
-        h('option', { value: '', text: '跟随系统' }),
+      outputSelect.setItems([
+        { value: '', label: '跟随系统' },
         ...outputDevices
           .filter((device) => device.deviceId && device.deviceId !== 'default')
-          .map((device, index) => h('option', {
+          .map((device, index) => ({
             value: device.deviceId,
-            text: device.label || `输出设备 ${index + 1}`
+            label: device.label || `输出设备 ${index + 1}`
           }))
-      )
-      outputSelect.value = current
+      ])
+      outputSelect.setValue(current)
     }
     async function loadOutputDevices () {
       try {
@@ -366,7 +420,6 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       }
       paintOutputDevices()
     }
-    on(outputSelect, 'change', () => actions.setOutputDevice(outputSelect.value))
     paintOutputDevices()
     // 已经有缓存就不再异步刷一遍（否则每次改设置都会重放一次宽度跳动）
     if (!outputDevicesLoaded) loadOutputDevices()
@@ -380,12 +433,13 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 折叠标题上直接写清当前状态（开关 / 自动 / 生效预设），
      * 展开后是完整设置 + 十段增益的可视化。
      */
-    const eqPresetSelect = h('select', { class: 'settings__select' })
-    eqPresetSelect.replaceChildren(...presetOptions().map((option) =>
-      h('option', { value: option.value, text: option.label })))
-    eqPresetSelect.value = settings.equalizer?.preset || 'flat'
-    eqPresetSelect.disabled = settings.equalizer?.auto !== false
-    on(eqPresetSelect, 'change', () => actions.setEqualizer({ preset: eqPresetSelect.value }))
+    const eqPresetSelect = createPillSelect({
+      title: '均衡器预设',
+      value: settings.equalizer?.preset || 'flat',
+      items: presetOptions(),
+      disabled: settings.equalizer?.auto !== false,
+      onPick: (value) => actions.setEqualizer({ preset: value })
+    })
 
     const eqSnapshot = { preset: basis?.preset, bands: basis?.bands || [] }
     const eqBands = (eqSnapshot ? eqSnapshot.bands : []).map((band) => {
@@ -426,7 +480,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       row({
         title: '均衡器预设',
         sub: '自动匹配关闭时使用这一组。原声 = 不做任何处理。',
-        control: h('div', { class: 'select' }, eqPresetSelect)
+        control: eqPresetSelect.element
       }),
       row({
         title: '用声音辅助判断风格',
@@ -445,7 +499,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       row({
         title: '输出设备',
         sub: '通话 / 游戏语音时想让对方听不到音乐：把这里选成你的耳机（通话留在原设备）。音乐只进你的耳朵，麦克风拾不到它，对方就什么也听不到。留「跟随系统」则与其它应用共用默认输出。',
-        control: h('div', { class: 'select' }, outputSelect)
+        control: outputSelect.element
       }),
       row({
         title: '单击歌曲直接播放',
@@ -938,46 +992,40 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       })
     ], { collapsible: true, sub: '隐私：只发送歌曲信息与本地特征，音频文件不会上传' }))
 
-    /* ---------- 快捷键 ---------- */
-    scroll.appendChild(group('快捷键', SHORTCUTS.map(([key, description]) => row({
+    /* ---------- 快捷键（含系统媒体键：放在同一组里，一条都不会漏看） ---------- */
+    const KEY_LABEL = {
+      MediaPlayPause: '键盘 ▶/⏸ 键',
+      MediaNextTrack: '键盘 ⏭ 键',
+      MediaPreviousTrack: '键盘 ⏮ 键',
+      MediaStop: '键盘 ⏹ 键'
+    }
+    const COMMAND_LABEL = {
+      'play-pause': '播放 / 暂停',
+      next: '下一首',
+      previous: '上一首',
+      stop: '停止'
+    }
+    const mediaKeys = state.app.info?.mediaKeys || []
+    const shortcutRows = SHORTCUTS.map(([key, description]) => row({
       title: description,
       control: h('span', { class: 'kbd', text: key })
-    }))))
-
-    /*
-     * 系统媒体键单独一组，而且**直接从主进程的注册表渲染**。
-     *
-     * 之前这一组是手写的，某次整理快捷键列表时被顺手删掉，
-     * 于是「哪个键对应哪个操作」的说明就这么消失了（用户反馈）。
-     * 现在清单只有一个来源：main/ipc.js 的 MEDIA_KEYS → app:info.mediaKeys。
-     */
-    const mediaKeys = state.app.info?.mediaKeys || []
+    }))
     if (mediaKeys.length) {
-      const KEY_LABEL = {
-        MediaPlayPause: '播放 / 暂停键',
-        MediaNextTrack: '下一首键',
-        MediaPreviousTrack: '上一首键',
-        MediaStop: '停止键'
-      }
-      const COMMAND_LABEL = {
-        'play-pause': '播放 / 暂停',
-        next: '下一首',
-        previous: '上一首',
-        stop: '停止'
-      }
-      scroll.appendChild(group('系统媒体键', [
-        row({
-          title: '注册为全局快捷键',
-          sub: '在任何程序里按键盘上的媒体键都能控制 Aria。关掉之后系统会把它交还给别的播放器。也可以从托盘菜单里随时切换。',
-          control: switchControl(state.settings.globalMediaKeys !== false,
-            (value) => actions.setSetting({ globalMediaKeys: value }))
-        }),
+      shortcutRows.push(
+        h('div', { class: 'settings__subhead', text: '系统媒体键（全局，任何程序里都生效）' }),
         ...mediaKeys.map((item) => row({
           title: COMMAND_LABEL[item.command] || item.command,
           control: h('span', { class: 'kbd', text: KEY_LABEL[item.accelerator] || item.accelerator })
-        }))
-      ], { collapsible: true }))
+        })),
+        row({
+          title: '注册为全局媒体键',
+          sub: '关掉之后系统会把这些键交还给别的播放器。托盘菜单里也能随时切换。',
+          control: switchControl(state.settings.globalMediaKeys !== false,
+            (value) => actions.setSetting({ globalMediaKeys: value }))
+        })
+      )
     }
+    scroll.appendChild(group('快捷键', shortcutRows))
 
     /* ---------- 关于 ---------- */
     const info = state.app.info
@@ -1002,7 +1050,9 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 还原滚动位置与焦点（见函数开头）。
      * 放在最后：此时新内容已经在 DOM 里，scrollTop 才设得住。
      */
-    if (previousScroll) scroll.scrollTop = previousScroll
+    if (previousScroll && activeCategory) scroll.scrollTop = previousScroll
+    // 重建之后把「当前分类」的显隐重新应用一遍（新节点默认都是显示的）
+    openCategory(activeCategory)
     /*
      * 整页重建时先把过渡关掉两帧。
      * 重建出来的控件都是「新节点」，分段控件的滑块、下拉框的宽度会从初始值过渡到目标值 ——
@@ -1011,35 +1061,6 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     scroll.classList.add('is-repainting')
     requestAnimationFrame(() => requestAnimationFrame(() => scroll.classList.remove('is-repainting')))
 
-    /* 分区导航：按分组标题找锚点，点一下滚过去；滚动时高亮当前块 */
-    const groupNodes = [...scroll.querySelectorAll('.settings__group')]
-    const sectionOf = (label) => groupNodes.find((node) =>
-      SECTIONS.find((section) => section.label === label)?.groups
-        .includes(node.querySelector('.settings__group-title')?.textContent || ''))
-    sectionNav.replaceChildren(...SECTIONS.map((section) => h('button', {
-      class: 'settings-nav__item',
-      type: 'button',
-      text: section.label,
-      dataset: { section: section.label },
-      onClick: () => {
-        const target = sectionOf(section.label)
-        if (target) scroll.scrollTo({ top: target.offsetTop - 8, behavior: 'smooth' })
-      }
-    })))
-    if (!sectionNavListenerAdded) {
-      on(scroll, 'scroll', () => {
-        // 高亮「当前正在看的那一块」：最后一个标题已经滚过顶部的分区
-        let active = SECTIONS[0].label
-        for (const section of SECTIONS) {
-          const node = sectionOf(section.label)
-          if (node && node.offsetTop - scroll.scrollTop <= 60) active = section.label
-        }
-        for (const item of sectionNav.children) {
-          item.classList.toggle('is-active', item.dataset.section === active)
-        }
-      }, { passive: true })
-      sectionNavListenerAdded = true
-    }
     if (activeId) {
       const restored = scroll.querySelector(`[data-setting-id="${activeId}"]`)
       // 焦点原本在「控件」上（开关 / 下拉），恢复时也优先还给它

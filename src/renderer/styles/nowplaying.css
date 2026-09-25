@@ -602,3 +602,29 @@ html[data-platform="darwin"] .now-playing__topbar {
     width: min(26vh, 170px);
   }
 }
+
+/* ---------------------- 音频可视化（点一下换样式） ---------------------- */
+.visualizer {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 74px;
+  margin-top: 10px;
+  border-radius: var(--radius-md);
+  background: var(--fill-floating);
+  box-shadow: 0 0 0 0.5px var(--separator);
+  overflow: hidden;
+  transition: background var(--dur-fast) var(--ease-ios), transform var(--dur-fast) var(--ease-ios);
+}
+
+.visualizer:hover {
+  background: var(--fill-floating-strong);
+  transform: translateY(var(--lift));
+}
+
+.visualizer__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 6px;
+}

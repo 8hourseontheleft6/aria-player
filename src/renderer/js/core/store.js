@@ -103,6 +103,7 @@ export function initialState () {
       audioOutputDevice: '',
       equalizer: { enabled: false, auto: true, preset: 'flat' },
       styleAnalysis: true,
+      visualizerStyle: 'bars',
       ai: { enabled: false, useForStyle: true, baseUrl: '', key: '', model: '', timeout: 30000 },
       // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
       sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
