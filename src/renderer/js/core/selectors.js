@@ -5,24 +5,34 @@
 
 import { normalizeForSearch } from './format.js'
 import { findPlaylist, tracksOf } from './playlists.js'
+import { compareByInitialThenTitle } from './pinyin.js'
 
 export const SORT_KEYS = ['default', 'title', 'artist', 'album', 'duration', 'year', 'added']
 
 const collatorOptions = { sensitivity: 'base', numeric: true }
 
+/**
+ * 排序比较器。
+ *
+ * `default` 现在等于「按标题的字母顺序（中文按拼音首字母）」——
+ * 用户反馈默认顺序看不出规律（原本是专辑/艺人序，列表里 T、S、T、M 混着），
+ * 而且右侧的首字母旋钮只有在字母序下才有意义。
+ * 想要回专辑/艺人序，用排序菜单里的「专辑」或「艺人」。
+ */
 export function compareTracks (sort) {
   const direction = sort?.direction === 'desc' ? -1 : 1
   const text = (a, b) => String(a || '').localeCompare(String(b || ''), 'zh-Hans-CN', collatorOptions)
+  const titles = (a, b) => compareByInitialThenTitle(a.title, b.title)
   const key = sort?.key || 'default'
 
   return (a, b) => {
     let result = 0
     switch (key) {
       case 'title':
-        result = text(a.title, b.title)
+        result = titles(a, b)
         break
       case 'artist':
-        result = text(a.artist, b.artist) || text(a.album, b.album) || text(a.title, b.title)
+        result = text(a.artist, b.artist) || text(a.album, b.album) || titles(a, b)
         break
       case 'album':
         result = text(a.album, b.album) || (a.discNo - b.discNo) || (a.trackNo - b.trackNo)
@@ -37,10 +47,11 @@ export function compareTracks (sort) {
         result = (a.mtimeMs || 0) - (b.mtimeMs || 0)
         break
       default:
-        result = text(a.albumArtist, b.albumArtist) || text(a.album, b.album) ||
-          (a.discNo - b.discNo) || (a.trackNo - b.trackNo) || text(a.title, b.title)
+        result = titles(a, b)
+        break
     }
-    if (result === 0) result = text(a.title, b.title) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+    // 同分时用标题收尾（同样走拼音），最后用路径保证稳定
+    if (result === 0) result = titles(a, b) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
     return result * direction
   }
 }

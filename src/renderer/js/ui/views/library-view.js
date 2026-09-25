@@ -11,7 +11,7 @@ import { createListMenuButton } from '../menus/list-menu.js'
 import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
 
 const SORT_OPTIONS = [
-  { key: 'default', label: '默认（艺人 / 专辑 / 音轨）' },
+  { key: 'default', label: '字母顺序（默认）' },
   { key: 'title', label: '标题' },
   { key: 'artist', label: '艺人' },
   { key: 'album', label: '专辑' },
