@@ -158,28 +158,75 @@
   min-height: 0;
   position: relative;
   padding-bottom: 24px;
-  /*
-   * 歌曲列表要有一条**看得见、拖得动**的滚动条。
-   * 全局的 .scroll 是 iOS 悬浮样式（thumb 平时透明、只在悬停容器时露出来，
-   * 而且只有 4px 宽）—— 在长列表里既找不到也拖不住（用户反馈「加上拖动条」）。
-   * 这里让它常显、加粗到 6px，悬停再加深。
-   */
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  /* 滚动条自己画（见下面的 .scrollbar），原生那条关掉，免得出现两条 */
+  scrollbar-width: none;
 }
 
 .tracklist__viewport::-webkit-scrollbar {
-  width: 14px;
+  width: 0;
+  height: 0;
 }
 
-.tracklist__viewport::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb);
-  border: 4px solid transparent;
+/* ---------------------- 灵动岛风格的滚动条 ---------------------- */
+/*
+ * 和顶栏灵动岛同一套语言：悬浮药丸 + --fill-floating + 0.5px 描边，
+ * 收起时细而淡，悬停 / 滚动变宽变亮，拖动时再放大一点并浮起来。
+ */
+.tracklist {
+  position: relative;
+}
+
+.scrollbar {
+  position: absolute;
+  top: 6px;
+  right: 3px;
+  bottom: 30px;
+  width: 12px;
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-ios);
+}
+
+.scrollbar.is-active,
+.scrollbar:hover {
+  opacity: 1;
+}
+
+.scrollbar.is-hidden {
+  display: none;
+}
+
+.scrollbar__thumb {
+  position: absolute;
+  top: 0;
+  width: 5px;
+  min-height: 34px;
   border-radius: var(--radius-pill);
-  background-clip: content-box;
+  background: var(--fill-floating);
+  box-shadow: 0 0 0 0.5px var(--separator);
+  backdrop-filter: saturate(180%) blur(12px);
+  transform-origin: center;
+  transition:
+    width var(--dur-fast) var(--ease-ios),
+    background var(--dur-fast) var(--ease-ios),
+    box-shadow var(--dur-fast) var(--ease-ios);
+  will-change: transform;
 }
 
-.tracklist__viewport::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--scrollbar-thumb) 170%, transparent);
+/* 悬停：变宽、更实 —— 和灵动岛展开一个道理 */
+.scrollbar:hover .scrollbar__thumb {
+  width: 9px;
+  background: var(--fill-floating-strong, var(--fill-floating));
+  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-1);
+}
+
+/* 拖动中：再放大一点并浮起来（被「拿住」的感觉） */
+.scrollbar.is-dragging .scrollbar__thumb {
+  width: 11px;
+  background: var(--fill-floating-strong, var(--fill-floating));
+  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-2);
 }
 
 /* ------------------------------ 多选工具条 ------------------------------ */

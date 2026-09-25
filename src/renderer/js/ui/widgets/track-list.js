@@ -8,6 +8,7 @@ import { icon } from '../../core/icons.js'
 import { formatDuration } from '../../core/format.js'
 import { highlightParts } from '../../core/selectors.js'
 import { openPlaylistPicker } from '../menus/playlist-picker.js'
+import { createScrollIndicator } from './scroll-indicator.js'
 import { EVENTS } from '../../core/bus.js'
 
 const ROW_HEIGHT = 54
@@ -127,7 +128,9 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       }))
   )
 
-  const element = h('div', { class: 'tracklist' }, head, selectionBar, viewport)
+  // 灵动岛风格的滚动条（原生那条已在 CSS 里关掉）
+  const scrollbar = createScrollIndicator(viewport, { label: '歌曲列表滚动' })
+  const element = h('div', { class: 'tracklist' }, head, selectionBar, viewport, scrollbar.element)
 
   /* ---------------- 状态 ---------------- */
   /** @type {Array<object>} */
@@ -451,6 +454,8 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     rendered.clear()
     syncSelection()
     schedule()
+    // 列表变长变短，滚动条的比例要重算
+    scrollbar.refresh()
   }
 
   function scrollToIndex (index, { center = true } = {}) {
@@ -467,6 +472,8 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
 
   /* ---------------- 事件 ---------------- */
   on(viewport, 'scroll', schedule, { passive: true })
+  // 行高变化 / 换列表之后滚动条的比例要跟着重算
+  on(viewport, 'scroll', () => scrollbar.refresh(), { passive: true })
   on(viewport, 'keydown', (event) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()

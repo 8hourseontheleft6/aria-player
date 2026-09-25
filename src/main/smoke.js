@@ -534,9 +534,19 @@ async function runSmoke ({ win, ctx }) {
       }
 
       panel.querySelector('[data-scope="deep"]').click()
+      /*
+       * 点完立刻读 settings.searchScope 是读不到的：它要经
+       * 「写设置 → 主进程落盘 → 推 settings:changed」回来（异步 IPC）。
+       * ui.searchScope 是同步的，settings 那个轮询等它落地，两个都记下来。
+       */
       await settle(340)
+      const scopeImmediate = store.get().ui.searchScope
+      for (let i = 0; i < 24 && store.get().settings.searchScope !== 'deep'; i++) {
+        await settle(100)
+      }
       const afterScope = {
-        scope: store.get().settings.searchScope,
+        scope: scopeImmediate,
+        persisted: store.get().settings.searchScope,
         label: scopeButton.querySelector('span')?.textContent || '',
         isDeep: scopeButton.classList.contains('is-deep'),
         selected: panel.querySelector('.search-panel__scope.is-selected')?.textContent || '',
@@ -587,12 +597,13 @@ async function runSmoke ({ win, ctx }) {
       searchPanelCheck.opened.hidden === false &&
       searchPanelCheck.opened.scopes.length === 2 &&
       searchPanelCheck.opened.history.length === 2 &&
-      searchPanelCheck.afterScope.scope === 'deep' &&
+      // scope 只存在设置里（ui 里没有这个字段），而且是异步落盘的 —— 上面轮询等它到位
+      searchPanelCheck.afterScope.persisted === 'deep' &&
       searchPanelCheck.afterScope.selected === '含歌词等' &&
       searchPanelCheck.afterPick.query === 'Blues' &&
       searchPanelCheck.afterEscape.hidden === true,
       `展开后面板可见（范围 ${JSON.stringify(searchPanelCheck.opened.scopes)}，历史 ${JSON.stringify(searchPanelCheck.opened.history)}）；` +
-      `切到深度档后按钮显示「${searchPanelCheck.afterScope.label}」、提示「${searchPanelCheck.afterScope.hint}」、占位「${searchPanelCheck.afterScope.placeholder}」；` +
+      `切到深度档后按钮显示「${searchPanelCheck.afterScope.label}」、scope=${searchPanelCheck.afterScope.scope}（落盘 ${searchPanelCheck.afterScope.persisted}）、提示「${searchPanelCheck.afterScope.hint}」、占位「${searchPanelCheck.afterScope.placeholder}」；` +
       `点历史「${searchPanelCheck.pickedTerm || '（没有历史项可点）'}」回填「${searchPanelCheck.afterPick.query}」；Esc 收起=${searchPanelCheck.afterEscape.hidden}`)
 
     /* ---------- 「看得见、点得到」：程序化 click 抓不到的那类问题 ----------
@@ -2711,6 +2722,162 @@ async function runSmoke ({ win, ctx }) {
       uiFixes.thumbColor.includes('rgba'),
       `平移后 pan=(${uiFixes.panned.x}, ${uiFixes.panned.y}) → 播放另一张专辑后 (${uiFixes.afterPlay.x}, ${uiFixes.afterPlay.y})，位置保持=${uiFixes.panKept}；` +
       `歌曲列表 scrollbar-color=「${uiFixes.thumbColor}」`)
+
+    /* ---------- 灵动岛风格的滚动条 + 声音均衡器 ---------- */
+    await ensureVisible(win)
+    const scrollbarEq = await evaluate(win, `
+      const { actions, store, player, engine } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+
+      /* ① 自定义滚动条：比例正确、可拖动、拖动中放大 */
+      actions.setView('songs')
+      actions.setQuery('')
+      actions.setSource({ type: 'all', value: null })
+      await settle(900)
+      const viewport = document.querySelector('.tracklist__viewport')
+      const bar = document.querySelector('.tracklist .scrollbar')
+      const thumb = bar ? bar.querySelector('.scrollbar__thumb') : null
+      const ratio = (node) => {
+        const box = node.getBoundingClientRect()
+        return { top: Math.round(box.top), height: Math.round(box.height), width: Math.round(box.width) }
+      }
+      const idleThumb = thumb ? ratio(thumb) : null
+      const trackBox = bar ? ratio(bar) : null
+      // 比例：滑块高 ≈ 可视高 / 内容高 × 轨道高
+      const expected = Math.max(34, Math.round((viewport.clientHeight / viewport.scrollHeight) * trackBox.height))
+      const shapeOk = Math.abs(idleThumb.height - expected) <= 2
+      // 把列表滚到中段，滑块应该跟着走
+      viewport.scrollTop = Math.round((viewport.scrollHeight - viewport.clientHeight) / 2)
+      await settle(400)
+      const midThumb = ratio(thumb)
+      const movedOk = midThumb.top > idleThumb.top + 20
+      // 真实指针拖滑块（pointerdown/move/up），列表要跟着滚，且拖动中有放大态
+      const barBox = bar.getBoundingClientRect()
+      const thumbBox = thumb.getBoundingClientRect()
+      const startY = Math.round(thumbBox.top + thumbBox.height / 2)
+      const send = (type, y, extra = {}) => thumb.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: Math.round(barBox.left + barBox.width / 2), clientY: y,
+        pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, ...extra
+      }))
+      viewport.scrollTop = 0
+      await settle(300)
+      const beforeDrag = viewport.scrollTop
+      send('pointerdown', startY)
+      send('pointermove', startY + 120)
+      const draggingClass = bar.classList.contains('is-dragging')
+      const draggingWidth = Math.round(thumb.getBoundingClientRect().width)
+      send('pointerup', startY + 120, { buttons: 0 })
+      await settle(400)
+      const afterDrag = viewport.scrollTop
+      const dragOk = afterDrag > beforeDrag + 50 && draggingClass === true && draggingWidth >= idleThumb.width
+      send('pointerup', startY, { completed: true, buttons: 0 })
+      // 收工：把滚动位置还回去 —— 后面的「悬停浮起」「各视图可滚动」都假设列表在顶部
+      viewport.scrollTop = 0
+      await settle(300)
+
+      /* ② 均衡器：预设数据来自 data.json，自动匹配按流派 */
+      const flat = engine.equalizerSnapshot()
+      const rockApplied = actions.setEqualizer({ enabled: true, auto: false, preset: 'rock' })
+      await settle(300)
+      const rock = engine.equalizerSnapshot()
+      const rockLow = rock.bands[0].gain
+      const autoOff = actions.setEqualizer({ enabled: false })
+      await settle(300)
+
+      // 自动匹配：Rock 流派 → rock；古典 → classical；没有线索 → null（保持手动选的那组）
+      const matched = {
+        rock: window.__aria.matchPreset({ genre: 'Alternative Rock', title: '', artist: '' }),
+        classical: window.__aria.matchPreset({ genre: 'Classical', title: '', artist: '' }),
+        electronic: window.__aria.matchPreset({ genre: 'EDM', title: '', artist: '' }),
+        chinese: window.__aria.matchPreset({ genre: '摇滚', title: '', artist: '' }),
+        pop: window.__aria.matchPreset({ genre: 'J-Pop', title: '', artist: '' }),
+        none: window.__aria.matchPreset({ genre: '', title: '', artist: '' })
+      }
+
+      // 设置页要有这三行，且关掉自动后预设下拉可选
+      actions.setView('settings')
+      await settle(900)
+      const rows = [...document.querySelectorAll('.settings__row')].map((node) => node.textContent)
+      const hasSwitchRow = rows.some((text) => text.includes('声音均衡器'))
+      const hasAutoRow = rows.some((text) => text.includes('按歌曲风格自动选择'))
+      const presetRow = [...document.querySelectorAll('.settings__row')]
+        .find((node) => node.textContent.includes('均衡器预设'))
+      const presetSelect = presetRow ? presetRow.querySelector('select') : null
+      const presetOptions = presetSelect ? [...presetSelect.options].map((option) => option.text) : []
+
+      /* ③ 开着均衡器播放不能哑（WebAudio 接管输出的最大风险） */
+      actions.setEqualizer({ enabled: true, auto: false, preset: 'pop' })
+      await settle(300)
+      const track = store.get().library.tracks[3]
+      await player.playTrack(track.id)
+      await settle(2200)
+      const playingState = store.get().playback.status
+      const time = player.getTime()
+      await player.pause()
+      const eqAfterPlay = engine.equalizerSnapshot()
+      actions.setEqualizer({ enabled: false })
+      await settle(300)
+      actions.setView('songs')
+      await settle(400)
+
+      return {
+        hasBar: Boolean(bar && thumb),
+        shapeOk,
+        expectedThumb: expected,
+        idleThumb,
+        trackBox,
+        movedOk,
+        dragOk,
+        beforeDrag,
+        afterDrag,
+        draggingWidth,
+        flatPreset: flat ? flat.preset : null,
+        rockPreset: rock ? rock.preset : null,
+        rockLow,
+        rockWet: rock ? rock.wet : null,
+        rockWidth: rock ? rock.sideWidth : null,
+        autoOffOff: autoOff === null || autoOff.preset === 'off',
+        appliedPresetFromAction: rockApplied ? rockApplied.preset : null,
+        matched,
+        hasSwitchRow,
+        hasAutoRow,
+        presetOptions,
+        playingState,
+        time,
+        eqAfterPlay: eqAfterPlay ? eqAfterPlay.preset : null
+      }
+    `)
+    record('滚动条（灵动岛风格）：比例对、能拖、拖动中放大',
+      scrollbarEq.hasBar === true &&
+      scrollbarEq.shapeOk === true &&
+      scrollbarEq.movedOk === true &&
+      scrollbarEq.dragOk === true,
+      `滑块高 ${scrollbarEq.idleThumb?.height}px（按比例应为 ${scrollbarEq.expectedThumb}px，轨道 ${scrollbarEq.trackBox?.height}px）；` +
+      `滚到中段后滑块上移=${scrollbarEq.movedOk}；拖动 120px：scrollTop ${scrollbarEq.beforeDrag} → ${scrollbarEq.afterDrag}，` +
+      `拖动中宽度 ${scrollbarEq.draggingWidth}px（静止 ${scrollbarEq.idleThumb?.width}px）`)
+    record('声音均衡器：预设可切、按流派自动匹配、开着也能正常出声',
+      scrollbarEq.flatPreset === 'off' &&
+      scrollbarEq.rockPreset === 'rock' &&
+      scrollbarEq.rockLow === 4 &&
+      scrollbarEq.rockWet > 0 &&
+      scrollbarEq.rockWidth === 0.45 &&
+      scrollbarEq.autoOffOff === true &&
+      scrollbarEq.matched.rock === 'rock' &&
+      scrollbarEq.matched.classical === 'classical' &&
+      scrollbarEq.matched.electronic === 'electronic' &&
+      scrollbarEq.matched.chinese === 'rock' &&
+      scrollbarEq.matched.pop === 'pop' &&
+      scrollbarEq.matched.none === null &&
+      scrollbarEq.hasSwitchRow === true &&
+      scrollbarEq.hasAutoRow === true &&
+      scrollbarEq.presetOptions.length === 5 &&
+      scrollbarEq.playingState === 'playing' &&
+      scrollbarEq.time > 1 &&
+      scrollbarEq.eqAfterPlay === 'pop',
+      `关闭时预设=${scrollbarEq.flatPreset}；选「摇滚」→ ${scrollbarEq.rockPreset}（31Hz 增益 ${scrollbarEq.rockLow}dB、混响湿度 ${scrollbarEq.rockWet}、声场宽度 ${scrollbarEq.rockWidth}）；` +
+      `自动匹配：Rock→${scrollbarEq.matched.rock}、Classical→${scrollbarEq.matched.classical}、EDM→${scrollbarEq.matched.electronic}、摇滚→${scrollbarEq.matched.chinese}、J-Pop→${scrollbarEq.matched.pop}、无线索→${scrollbarEq.matched.none}；` +
+      `设置页三行（开关=${scrollbarEq.hasSwitchRow}、自动=${scrollbarEq.hasAutoRow}、预设选项 ${scrollbarEq.presetOptions.length} 个）；` +
+      `开着均衡器播放：状态=${scrollbarEq.playingState}、已播 ${scrollbarEq.time}s、生效预设=${scrollbarEq.eqAfterPlay}`)
 
     /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
     const audioOutput = await evaluate(win, `

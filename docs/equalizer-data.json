@@ -1,0 +1,204 @@
+{
+  "presets": {
+    "classical": {
+      "displayName": "古典/交响",
+      "eq": [
+        {"freq": 31,  "gain": 1.0, "q": 0.707},
+        {"freq": 63,  "gain": 0.5, "q": 0.707},
+        {"freq": 125, "gain": 0.0, "q": 0.707},
+        {"freq": 250, "gain": 0.0, "q": 0.707},
+        {"freq": 500, "gain": 0.0, "q": 0.707},
+        {"freq": 1000,"gain": 0.0, "q": 0.707},
+        {"freq": 2000,"gain": -1.0,"q": 0.707},
+        {"freq": 4000,"gain": -1.5,"q": 0.707},
+        {"freq": 8000,"gain": -2.0,"q": 0.707},
+        {"freq": 16000,"gain": -3.0,"q": 0.707}
+      ],
+      "compressor": {
+        "threshold": -24,
+        "ratio": 1.5,
+        "attack": 5,
+        "release": 50,
+        "makeupGain": 0
+      },
+      "reverb": {
+        "type": "convolution",
+        "irFile": "hall_medium.wav",
+        "mix": 0.18,
+        "decay": 1.0
+      },
+      "stereoWidth": {
+        "lowCutoff": 150,
+        "midSideGainLow": 0.0,
+        "midSideGainHigh": 0.08
+      },
+      "saturation": {
+        "enable": false,
+        "drive": 0,
+        "type": "none"
+      },
+      "loudnessNormalization": {
+        "targetLUFS": -23,
+        "enabled": true
+      }
+    },
+
+    "rock": {
+      "displayName": "摇滚/金属",
+      "eq": [
+        {"freq": 31,  "gain": 4.0, "q": 0.707},
+        {"freq": 63,  "gain": 5.0, "q": 0.700},
+        {"freq": 125, "gain": 3.0, "q": 0.600},
+        {"freq": 250, "gain": 1.0, "q": 0.650},
+        {"freq": 500, "gain": -2.0,"q": 0.750},
+        {"freq": 1000,"gain": -1.0,"q": 0.720},
+        {"freq": 2000,"gain": 1.0, "q": 0.680},
+        {"freq": 4000,"gain": 3.0, "q": 0.660},
+        {"freq": 8000,"gain": 4.0, "q": 0.640},
+        {"freq": 16000,"gain": 5.0, "q": 0.620}
+      ],
+      "compressor": {
+        "threshold": -22,
+        "ratio": 4.0,
+        "attack": 2,
+        "release": 40,
+        "makeupGain": 2
+      },
+      "parallelCompression": {
+        "enable": true,
+        "threshold": -28,
+        "ratio": 8.0,
+        "mix": 0.25
+      },
+      "reverb": {
+        "type": "convolution",
+        "irFile": "room_small.wav",
+        "mix": 0.14,
+        "decay": 0.65
+      },
+      "stereoWidth": {
+        "lowCutoff": 180,
+        "midSideGainLow": 0.05,
+        "midSideGainHigh": 0.45
+      },
+      "saturation": {
+        "enable": true,
+        "drive": 0.06,
+        "type": "soft_clip"
+      },
+      "loudnessNormalization": {
+        "targetLUFS": -16,
+        "enabled": true
+      }
+    },
+
+    "pop": {
+      "displayName": "流行/人声",
+      "eq": [
+        {"freq": 31,  "gain": 3.0, "q": 0.710},
+        {"freq": 63,  "gain": 3.5, "q": 0.690},
+        {"freq": 125, "gain": 2.0, "q": 0.670},
+        {"freq": 250, "gain": 1.0, "q": 0.730},
+        {"freq": 500, "gain": 0.5, "q": 0.740},
+        {"freq": 1000,"gain": 1.5, "q": 0.760},
+        {"freq": 2000,"gain": 2.0, "q": 0.780},
+        {"freq": 4000,"gain": 1.5, "q": 0.770},
+        {"freq": 8000,"gain": 1.0, "q": 0.790},
+        {"freq": 16000,"gain": 0.5, "q": 0.810}
+      ],
+      "compressor": {
+        "threshold": -26,
+        "ratio": 2.5,
+        "attack": 3,
+        "release": 70,
+        "makeupGain": 1
+      },
+      "reverb": {
+        "type": "algorithmic",
+        "size": 0.55,
+        "preDelay": 25,
+        "mix": 0.17,
+        "damping": 0.42
+      },
+      "stereoWidth": {
+        "lowCutoff": 130,
+        "midSideGainLow": 0.02,
+        "midSideGainHigh": 0.32
+      },
+      "saturation": {
+        "enable": false,
+        "drive": 0,
+        "type": "none"
+      },
+      "loudnessNormalization": {
+        "targetLUFS": -14,
+        "enabled": true
+      }
+    },
+
+    "electronic": {
+      "displayName": "电子/DJ/舞曲",
+      "eq": [
+        {"freq": 31,  "gain": 5.0, "q": 0.550},
+        {"freq": 63,  "gain": 6.0, "q": 0.530},
+        {"freq": 125, "gain": 4.0, "q": 0.580},
+        {"freq": 250, "gain": 1.0, "q": 0.610},
+        {"freq": 500, "gain": -1.0,"q": 0.630},
+        {"freq": 1000,"gain": 0.0, "q": 0.590},
+        {"freq": 2000,"gain": 1.0, "q": 0.570},
+        {"freq": 4000,"gain": 2.0, "q": 0.560},
+        {"freq": 8000,"gain": 3.0, "q": 0.540},
+        {"freq": 16000,"gain": 4.0, "q": 0.520}
+      ],
+      "compressor": {
+        "threshold": -20,
+        "ratio": 5.0,
+        "attack": 1,
+        "release": 30,
+        "makeupGain": 3
+      },
+      "multibandCompression": {
+        "enable": true,
+        "bands": [
+          {"lowFreq": 0,   "highFreq": 200,  "threshold": -22, "ratio": 4.0},
+          {"lowFreq": 201, "highFreq": 3500, "threshold": -18, "ratio": 2.5},
+          {"lowFreq": 3501,"highFreq": 22050,"threshold": -24, "ratio": 3.0}
+        ]
+      },
+      "dynamicBassEnhancement": {
+        "enable": true,
+        "subHarmonicMix": 0.07,
+        "lowpassFreq": 90
+      },
+      "reverb": {
+        "type": "convolution",
+        "irFile": "hall_large.wav",
+        "mix": 0.38,
+        "decay": 1.2
+      },
+      "stereoWidth": {
+        "lowCutoff": 110,
+        "midSideGainLow": 0.03,
+        "midSideGainHigh": 0.75
+      },
+      "saturation": {
+        "enable": true,
+        "drive": 0.04,
+        "type": "tube"
+      },
+      "loudnessNormalization": {
+        "targetLUFS": -11,
+        "enabled": true
+      }
+    }
+  },
+
+  "globalSettings": {
+    "sampleRate": 48000,
+    "outputChannels": 2,
+    "headphoneMode": true,
+    "hrirPath": "path/to/hrir_data.sofa",
+    "enableCrossfeed": true,
+    "crossfeedStrength": 0.33
+  }
+}

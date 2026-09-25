@@ -6,6 +6,7 @@ import { remote } from '../../core/remote.js'
 import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
+import { presetOptions } from '../../core/equalizer-presets.js'
 
 const THEMES = [
   { id: 'system', label: '跟随系统' },
@@ -323,6 +324,31 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     navigator.mediaDevices?.addEventListener?.('devicechange', loadOutputDevices)
 
     scroll.appendChild(group('播放', [
+      row({
+        title: '声音均衡器',
+        sub: '按预设给声音做处理（十段均衡 + 压缩 + 混响 + 声场 + 饱和）。预设参数来自 data.json：古典/交响、摇滚/金属、流行/人声、电子/舞曲。注意：开启后音频会改走 WebAudio 输出，极少数设备上第一次播放可能有不到一秒的衔接。',
+        control: switchControl(settings.equalizer?.enabled === true,
+          (value) => actions.setEqualizer({ enabled: value }))
+      }),
+      row({
+        title: '按歌曲风格自动选择',
+        sub: '从曲目的流派字段（以及标题/专辑里的线索）判断风格，自动切换到对应预设；识别不出来时用你手动选的那一组。关掉它就固定使用下面选的预设。',
+        control: switchControl(settings.equalizer?.auto !== false,
+          (value) => actions.setEqualizer({ auto: value }))
+      }),
+      row({
+        title: '均衡器预设',
+        sub: '自动匹配关闭时使用这一组。原声 = 除了必要的输出以外不做任何处理。',
+        control: (() => {
+          const select = h('select', { class: 'settings__select' })
+          select.replaceChildren(...presetOptions().map((option) =>
+            h('option', { value: option.value, text: option.label })))
+          select.value = settings.equalizer?.preset || 'flat'
+          select.disabled = settings.equalizer?.auto !== false
+          on(select, 'change', () => actions.setEqualizer({ preset: select.value }))
+          return select
+        })()
+      }),
       row({
         title: '输出设备',
         sub: '通话 / 游戏语音时想让对方听不到音乐：把这里选成你的耳机（通话留在原设备）。音乐只进你的耳朵，麦克风拾不到它，对方就什么也听不到。留「跟随系统」则与其它应用共用默认输出。',

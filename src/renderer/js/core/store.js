@@ -101,6 +101,7 @@ export function initialState () {
       jumpToMatchedLyric: true,
       playOnSingleClick: false,
       audioOutputDevice: '',
+      equalizer: { enabled: false, auto: true, preset: 'flat' },
       // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
       sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
       // 侧栏开着时是否也显示灵动岛（默认 false = 两者不同时出现）

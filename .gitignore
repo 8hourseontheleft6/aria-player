@@ -6,3 +6,5 @@ out/
 Thumbs.db
 
 *.err
+
+# 用户提供的均衡器参考数据已入库为 docs/equalizer-data.json

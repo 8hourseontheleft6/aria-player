@@ -4,6 +4,8 @@
  * 因此想换成 WebAudio 或加音效，只需要替换/包装这一层。
  */
 
+import { createEqualizer } from './equalizer.js'
+
 const ERROR_MESSAGES = {
   1: '播放被中止',
   2: '读取文件失败，文件可能已被移动',
@@ -199,11 +201,20 @@ export function createAudioEngine ({ bus }) {
     if (!Ctx) return null
     const context = new Ctx()
     const source = context.createMediaElementSource(audio)
-    source.connect(context.destination)
+    /*
+     * 均衡器串在 source 与 destination 之间。
+     * 建好之后音频输出就完全走 WebAudio 了 —— 这也是它「懒创建」的原因：
+     * 用户没开均衡器、插件也没要可视化时，一个节点都不建，播放路径保持原生。
+     */
+    const equalizer = createEqualizer(context)
+    source.connect(equalizer.input)
+    equalizer.output.connect(context.destination)
+
     const extraNodes = new Set()
     tap = {
       context,
       source,
+      equalizer,
       /** 把节点串到输出上，返回断开函数 */
       connect (node) {
         source.connect(node)
@@ -237,6 +248,33 @@ export function createAudioEngine ({ bus }) {
     return tap
   }
 
+  /**
+   * 设置均衡器。
+   *
+   * @param {string} key 预设 key（见 core/equalizer-presets.js）
+   * @param {object} options { enabled }
+   * @returns {object|null} 当前参数快照（拿不到上下文时返回 null）
+   */
+  function setEqualizer (key, { enabled = true } = {}) {
+    // 关闭且从没建过图：什么都不用做，播放路径保持原生
+    if (!enabled && !tap) return null
+    const active = getTap()
+    if (!active?.equalizer) return null
+    active.equalizer.apply(key, { enabled })
+    // 用户手势之外（例如启动时恢复设置）上下文可能是挂起的，这里顺手唤醒
+    if (context_state_suspended(active)) active.resume()
+    return active.equalizer.snapshot()
+  }
+
+  function context_state_suspended (active) {
+    return active?.context?.state === 'suspended'
+  }
+
+  /** 均衡器当前参数（没建过图时返回 null） */
+  function equalizerSnapshot () {
+    return tap?.equalizer ? tap.equalizer.snapshot() : null
+  }
+
   function dispose () {
     audio.pause()
     audio.removeAttribute('src')
@@ -266,6 +304,8 @@ export function createAudioEngine ({ bus }) {
     setMuted,
     setOutputDevice,
     outputDevice,
+    setEqualizer,
+    equalizerSnapshot,
     setRate,
     setPreservesPitch,
     lastError,

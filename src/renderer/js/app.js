@@ -15,6 +15,7 @@ import { createStore, initialState } from './core/store.js'
 import { remote, isElectron } from './core/remote.js'
 import { normalizeForSearch } from './core/format.js'
 import { createAudioEngine } from './core/audio-engine.js'
+import { matchPreset } from './core/equalizer-presets.js'
 import { createPlaylist } from './core/playlist.js'
 import { createPluginHost } from './core/plugin-host.js'
 import { registerBuiltinModes } from './core/playback-modes.js'
@@ -695,6 +696,38 @@ async function main () {
       return result
     },
 
+    /**
+     * 声音均衡器。
+     *
+     * @param {object} patch { enabled?, auto?, preset? }
+     * @returns {object|null} 应用后的参数快照
+     */
+    setEqualizer (patch = {}) {
+      const current = store.get().settings.equalizer || { enabled: false, auto: true, preset: 'flat' }
+      const next = { ...current, ...patch }
+      store.set((state) => ({ ...state, settings: { ...state.settings, equalizer: next } }))
+      remote.settings.set({ equalizer: next }).catch(() => {})
+      return actions.applyEqualizer()
+    },
+
+    /**
+     * 把当前设置落到引擎上。
+     * 自动模式下按「正在播放的那首歌」的流派挑预设，挑不到就保持手动选的。
+     */
+    applyEqualizer () {
+      const state = store.get()
+      const config = state.settings.equalizer || { enabled: false, auto: true, preset: 'flat' }
+      if (!config.enabled) return engine.setEqualizer('flat', { enabled: false })
+
+      let key = config.preset || 'flat'
+      if (config.auto) {
+        const track = state.library.byId.get(state.playback.trackId)
+        const matched = matchPreset(track)
+        if (matched) key = matched
+      }
+      return engine.setEqualizer(key, { enabled: true })
+    },
+
     async setSetting (patch) {
       const next = await remote.settings.set(patch)
       applySettings(next)
@@ -819,6 +852,8 @@ async function main () {
     engine.setMuted(settings.muted)
     engine.setRate(settings.playbackRate)
     engine.setPreservesPitch(settings.preservesPitch)
+    // 均衡器设置变了就落到引擎（自动模式下按当前曲目挑预设）
+    actions.applyEqualizer()
   }
 
   mediaQuery.addEventListener('change', () => {
@@ -826,6 +861,19 @@ async function main () {
   })
   remote.theme.onChanged(() => {
     if (store.get().settings.theme === 'system') applyTheme('system')
+  })
+
+  /*
+   * 首次播放后再补上均衡器。
+   *
+   * 开关是持久化的，但音频图不能在启动时就建：建了它播放路径就交给 WebAudio，
+   * 而那时还没有任何用户手势，AudioContext 只能挂起（等于没声音）。
+   * 所以记一笔「待应用」，等真的播起来（用户手势已经发生）再落地。
+   */
+  store.select((state) => state.playback.status === 'playing', (playing) => {
+    if (!playing || !pendingEqualizer) return
+    pendingEqualizer = false
+    actions.applyEqualizer()
   })
 
   /* ------------------------------------------------------------------ */
@@ -840,6 +888,9 @@ async function main () {
    *   · loadLibrary() 会整表替换，所以每次载入后要重新塞一遍。
    */
   const onlineTracks = new Map()
+
+  /** 均衡器开着但音频图还没建（等第一次播放的用户手势），见文件末尾的说明 */
+  let pendingEqualizer = false
 
   function registerOnlineTrack (item, resolved) {
     const id = `online:${item.uid || item.sourceId + ':' + item.sourceTrackId}`
@@ -1399,6 +1450,15 @@ async function main () {
         if (!result.ok) console.warn('[app] 输出设备恢复失败：', result.message)
       })
     }
+    /*
+     * 均衡器开关是持久化的，但音频图**不在启动时创建**：
+     * 建了它就会把播放路径交给 WebAudio，而这时还没有任何用户手势，
+     * AudioContext 只能是挂起状态（等于没声音）。等第一次播放或用户动设置时再建。
+     * 记一笔「待应用」，在首次播放后补上。
+     */
+    if (settings.equalizer?.enabled) {
+      pendingEqualizer = true
+    }
     store.set((state) => ({
       ...state,
       ready: true,
@@ -1447,6 +1507,8 @@ async function main () {
     bus, store, player, engine, playlist, host, artwork, actions, EVENTS, prewarmer,
     // 艺人名拆分（合作写法的规则都在这里，控制台里可以直接试）
     splitArtists,
+    // 均衡器的风格匹配（自检直接拿它验规则）
+    matchPreset,
     // 最小化后的释放 / 恢复（自检会用它读释放账目）
     background: backgroundRelease,
     // 视图组件：自检与调试会用到（例如媒体墙的 debugState / 平移）

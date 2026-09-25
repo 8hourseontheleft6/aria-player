@@ -205,6 +205,17 @@ html[data-reduce-motion='true'] .row:hover {
   `children[0]` 就变成勾选框了，曾因此把序号和播放键画进勾选框、序号那列反而空着。
 - **分段控件 / 灵动岛**：同心圆角 —— 外圆角 = 内圆角 + padding，
   例如容器 `--radius-md` + 2px padding → 滑块 `--radius-sm`。
+- **滚动条自己画**（`ui/widgets/scroll-indicator.js` + `.scrollbar`）：原生滚动条做不出
+  「悬浮药丸 + 悬停变宽 + 拖动再放大」，而这是灵动岛的语言，两处观感要同源
+  （`--fill-floating` / `--fill-floating-strong` + `0.5px` 描边 + 模糊底）。
+  三档状态：静止（细而淡）→ 悬停或滚动 `is-active`（变宽变亮）→ 拖动 `is-dragging`
+  （再放大并浮起来）。原生那条必须同时关掉（`scrollbar-width: none` +
+  `::-webkit-scrollbar { width: 0 }`），否则会出现两条。内容不够一屏时整条隐藏。
+- **声音均衡器**（`core/equalizer.js`）：节点一次建好，切预设只改参数 ——
+  重建整条链会爆音，而媒体元素只能 `createMediaElementSource` 一次。
+  关闭 = 参数归零（EQ 全 0、干声 100%、压缩与饱和旁路），不是拆链。
+  音频图**懒创建**：没开均衡器、插件也没要可视化时一个节点都不建，播放走原生路径；
+  开机时如果均衡器是开着的，要等第一次播放（用户手势）再建，否则 AudioContext 只能挂起。
 
 ---
 
