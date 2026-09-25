@@ -12,7 +12,7 @@
  *  · 指针事件穿透，不会挡住下面的界面。
  */
 
-import { h } from '../core/dom.js'
+import { h } from '../../core/dom.js'
 
 const SAMPLE_WINDOW_MS = 2000
 const PAINT_INTERVAL_MS = 250

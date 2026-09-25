@@ -103,6 +103,10 @@ npm start        # 启动
 npm run dev      # 启动并打开开发者工具
 ```
 
+> 如果 shell 里带着 `ELECTRON_RUN_AS_NODE=1`（有些工具链会设置），`electron .` 会退化成
+> 普通 Node 启动并报 `Cannot read properties of undefined (reading 'commandLine')`。
+> 先 `set ELECTRON_RUN_AS_NODE=`（或 PowerShell 里 `$env:ELECTRON_RUN_AS_NODE=''`）再启动。
+
 > 如果 `npm install` 阶段 Electron 二进制下载失败（网络受限），可以手动把已缓存的
 > `%LOCALAPPDATA%\electron\Cache\electron-v<版本>-win32-x64.zip` 解压到
 > `node_modules/electron/dist`，并在 `node_modules/electron/path.txt` 写入 `electron.exe`。
@@ -119,16 +123,16 @@ npm run perf             # 帧率诊断：逐视图量 rAF 间隔 + 拖动路径
 npm run audit            # 视觉审计：计算样式 / 几何 / 截图位图统计，输出 docs/screenshots/audit.json
 npm run shots            # 生成 docs/screenshots/ 下的界面截图
 npm run probe -- "D:\Music" 20   # 命令行探针：直接验证元数据与歌词解析（不启动 Electron）
-node scripts/probe-lyrics.js "D:\Music" 3
+node scripts/probes/probe-lyrics.js "D:\Music" 3
                          # 歌词探针：打印双语歌词的解析结果（主歌词 / 翻译 / 迷你歌词各显示什么）
-node scripts/probe-artists.js "D:\Music"
+node scripts/probes/probe-artists.js "D:\Music"
                          # 艺人字段探针：列出资料库里所有「一个字段塞了多个艺人」的写法，
                          # 按分隔符分组统计（拆分规则就是照着它的输出定的，见 core/grouping.js）
 npm run check            # 一次跑完下面三条静态检查
-node scripts/check-imports.js    # 找出未使用的 import
-node scripts/check-injected.js   # 校验 smoke 里注入到渲染层的代码片段能否解析
+node scripts/checks/check-imports.js    # 找出未使用的 import
+node scripts/checks/check-injected.js   # 校验 smoke 里注入到渲染层的代码片段能否解析
                                  # （注入代码写在模板字符串里，多一个括号很难肉眼发现）
-node scripts/check-styles.js     # 设计语言守卫：圆角/阴影是否走令牌、var() 是否有定义、
+node scripts/checks/check-styles.js     # 设计语言守卫：圆角/阴影是否走令牌、var() 是否有定义、
                                  # 亮暗两套主题的令牌是否成对（见 docs/DESIGN.md）
 npx electron scripts/preview.js docs/screenshots/01-library.png 104
                          # 把截图转成文本预览（结构图 + 色相图），无图形界面时也能审版面

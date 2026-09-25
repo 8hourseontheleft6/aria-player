@@ -1,8 +1,8 @@
 /** 可复用的封面网格（专辑视图、艺人详情都用它） */
 
-import { h, on } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { clear } from '../core/dom.js'
+import { h, on } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { clear } from '../../core/dom.js'
 
 export function createCoverGrid ({ lazy, onOpen, onPlay, className = '' }) {
   const element = h('div', { class: `cover-grid ${className}`.trim() })

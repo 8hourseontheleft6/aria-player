@@ -15,7 +15,7 @@ function walk (dir, out = []) {
 }
 
 let total = 0
-for (const file of walk(path.join(__dirname, '..', 'src', 'renderer'))) {
+for (const file of walk(path.join(__dirname, '..', '..', 'src', 'renderer'))) {
   const source = fs.readFileSync(file, 'utf8')
   const pattern = /import\s*\{([^}]+)\}\s*from/g
   let match

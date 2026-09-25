@@ -5,10 +5,10 @@
  * 具体的判断（是否已在资料库、要不要加目录）交给主进程，避免两边逻辑分叉。
  */
 
-import { h, on } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { remote } from '../core/remote.js'
-import { EVENTS } from '../core/bus.js'
+import { h, on } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { remote } from '../../core/remote.js'
+import { EVENTS } from '../../core/bus.js'
 
 export function createDropZone ({ bus, actions }) {
   const title = h('div', { class: 'drop-zone__title', text: '松开即可导入' })

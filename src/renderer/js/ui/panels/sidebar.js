@@ -1,12 +1,12 @@
 /** 侧边栏：视图导航（可拖动排序）、音乐文件夹、设置入口 */
 
-import { h, on, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { formatDurationLong } from '../core/format.js'
-import { flipReorder } from '../core/reorder.js'
-import { normalizePlaylists } from '../core/playlists.js'
-import { openPopover, popoverRows } from './overlay.js'
-import { EVENTS } from '../core/bus.js'
+import { h, on, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { formatDurationLong } from '../../core/format.js'
+import { flipReorder } from '../../core/reorder.js'
+import { normalizePlaylists } from '../../core/playlists.js'
+import { openPopover, popoverRows } from '../widgets/overlay.js'
+import { EVENTS } from '../../core/bus.js'
 
 /** 视图项的四个定义；顺序由 settings.sidebarOrder 决定（灵动岛用同一份顺序） */
 export const VIEW_ITEMS = {

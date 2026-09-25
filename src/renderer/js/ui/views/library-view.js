@@ -1,14 +1,14 @@
 /** 主内容区：全部歌曲 / 某文件夹的歌曲列表 */
 
-import { h, on, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { formatDurationLong, formatDuration, normalizeForSearch } from '../core/format.js'
-import { remote } from '../core/remote.js'
-import { selectVisibleTracks, selectTitle, describeMatch } from '../core/selectors.js'
-import { EVENTS } from '../core/bus.js'
-import { createTrackList } from './track-list.js'
-import { createListMenuButton } from './list-menu.js'
-import { openPopover, popoverRows } from './overlay.js'
+import { h, on, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { formatDurationLong, formatDuration, normalizeForSearch } from '../../core/format.js'
+import { remote } from '../../core/remote.js'
+import { selectVisibleTracks, selectTitle, describeMatch } from '../../core/selectors.js'
+import { EVENTS } from '../../core/bus.js'
+import { createTrackList } from '../widgets/track-list.js'
+import { createListMenuButton } from '../menus/list-menu.js'
+import { openPopover, popoverRows } from '../widgets/overlay.js'
 
 const SORT_OPTIONS = [
   { key: 'default', label: '默认（艺人 / 专辑 / 音轨）' },

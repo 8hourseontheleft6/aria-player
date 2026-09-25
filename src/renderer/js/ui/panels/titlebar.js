@@ -1,10 +1,10 @@
 /** 自绘标题栏：拖拽区 + 侧栏开关 + 视图切换（灵动岛）+ 扫描进度 + 窗口按钮 */
 
-import { h, on, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { remote } from '../core/remote.js'
-import { flipReorder } from '../core/reorder.js'
-import { EVENTS } from '../core/bus.js'
+import { h, on, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { remote } from '../../core/remote.js'
+import { flipReorder } from '../../core/reorder.js'
+import { EVENTS } from '../../core/bus.js'
 import { VIEW_ITEMS, normalizeOrder } from './sidebar.js'
 
 /**

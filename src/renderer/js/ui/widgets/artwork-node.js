@@ -1,8 +1,8 @@
 /** 复用的封面视图：曲目变化时异步换图，带占位图标 */
 
-import { h, clear, on } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { artworkKey } from '../core/artwork.js'
+import { h, clear, on } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { artworkKey } from '../../core/artwork.js'
 
 export function createArtworkView ({ artwork, className = 'artwork', fallbackIcon = 'music', onClick = null }) {
   const element = h('div', { class: className }, icon(fallbackIcon))

@@ -5,7 +5,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'smoke.js'), 'utf8')
+const source = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main', 'smoke.js'), 'utf8')
 const marker = 'await evaluate(win, `'
 let index = 0
 let count = 0

@@ -3,7 +3,7 @@
  * 拖动时通过 onInput 实时回调，松手时 onCommit 提交（用于 seek）。
  */
 
-import { h, on } from '../core/dom.js'
+import { h, on } from '../../core/dom.js'
 
 export function createSlider ({
   className = '',

@@ -9,9 +9,9 @@
  * 有一个明确的入口（外加右键菜单里那条），进去之后才谈得上勾选。
  */
 
-import { h } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { openPopover, popoverRows, closeAllLayers } from './overlay.js'
+import { h } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
 
 /**
  * @param {object} options

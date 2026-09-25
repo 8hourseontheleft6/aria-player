@@ -7,8 +7,8 @@
  * 前面几行英文、后面全是中文，看起来像「只剩翻译了」。
  */
 
-import { h, clear } from '../core/dom.js'
-import { EVENTS } from '../core/bus.js'
+import { h, clear } from '../../core/dom.js'
+import { EVENTS } from '../../core/bus.js'
 
 export function createMiniLyrics ({ store, bus, player, className = '' }) {
   const inner = h('div', { class: 'mini-lyrics__inner' })

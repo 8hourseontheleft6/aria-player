@@ -1,9 +1,9 @@
 /** 曲目右键菜单：内置动作 + 插件注册的 trackAction（选中多首时切换成批量菜单） */
 
-import { showContextMenu } from './overlay.js'
+import { showContextMenu } from '../widgets/overlay.js'
 import { openPlaylistPicker } from './playlist-picker.js'
-import { EVENTS } from '../core/bus.js'
-import { formatDuration } from '../core/format.js'
+import { EVENTS } from '../../core/bus.js'
+import { formatDuration } from '../../core/format.js'
 
 export function createTrackMenu ({ store, bus, player, host, actions }) {
   function open (track, event, options = {}) {

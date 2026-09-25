@@ -1,9 +1,9 @@
 /** 播放队列面板 */
 
-import { h, on, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { formatDuration } from '../core/format.js'
-import { EVENTS } from '../core/bus.js'
+import { h, on, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { formatDuration } from '../../core/format.js'
+import { EVENTS } from '../../core/bus.js'
 
 export function createQueuePanel ({ store, bus, player, artwork, actions }) {
   const countLabel = h('div', { class: 'view-toolbar__meta' })

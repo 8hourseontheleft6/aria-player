@@ -5,7 +5,7 @@
  * 只是数量不同，所以做成一个按 id 数组工作的函数。
  */
 
-import { openPopover, popoverRows, closeAllLayers } from './overlay.js'
+import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
 
 /**
  * @param {object} options

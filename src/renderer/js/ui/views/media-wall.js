@@ -19,11 +19,11 @@
  *    用 transform 反向补偿后动画归零，整墙平滑推移而不是硬跳。
  */
 
-import { h, on, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { EVENTS } from '../core/bus.js'
-import { albumKeyOf } from '../core/grouping.js'
-import { createMiniLyrics } from './mini-lyrics.js'
+import { h, on, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { EVENTS } from '../../core/bus.js'
+import { albumKeyOf } from '../../core/grouping.js'
+import { createMiniLyrics } from '../widgets/mini-lyrics.js'
 
 const DENSITIES = [
   { id: 's', label: '小', min: 96 },

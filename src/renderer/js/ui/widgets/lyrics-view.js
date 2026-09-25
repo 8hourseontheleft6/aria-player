@@ -18,10 +18,10 @@
  * 但从此上下两个方向都是原生滚动，随便翻。回正时再折回去。
  */
 
-import { h, on, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { EVENTS } from '../core/bus.js'
-import { karaokeProgress } from '../core/lrc.js'
+import { h, on, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { EVENTS } from '../../core/bus.js'
+import { karaokeProgress } from '../../core/lrc.js'
 import { createSlider } from './slider.js'
 import { openPopover } from './overlay.js'
 

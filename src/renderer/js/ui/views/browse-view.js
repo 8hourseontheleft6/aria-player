@@ -3,14 +3,14 @@
  * 四个页面各自有独立的滚动容器，切换时只显示其中一个。
  */
 
-import { h, on } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { EVENTS } from '../core/bus.js'
-import { formatDurationLong } from '../core/format.js'
-import { createCoverGrid, createArtistRows } from './cover-grid.js'
-import { createTrackList } from './track-list.js'
-import { createListMenuButton } from './list-menu.js'
-import { createLazyArtwork } from './artwork-node.js'
+import { h, on } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { EVENTS } from '../../core/bus.js'
+import { formatDurationLong } from '../../core/format.js'
+import { createCoverGrid, createArtistRows } from '../widgets/cover-grid.js'
+import { createTrackList } from '../widgets/track-list.js'
+import { createListMenuButton } from '../menus/list-menu.js'
+import { createLazyArtwork } from '../widgets/artwork-node.js'
 
 export function createBrowseView ({ store, bus, player, artwork, actions, lazy: injectedLazy = null }) {
   const lazy = injectedLazy || createLazyArtwork(artwork)

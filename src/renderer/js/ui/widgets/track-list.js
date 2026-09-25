@@ -3,12 +3,12 @@
  * 只渲染可视区的行，几万首也不卡；行高固定，用绝对定位 + 容器高度撑开滚动条。
  */
 
-import { h, on, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { formatDuration } from '../core/format.js'
-import { highlightParts } from '../core/selectors.js'
-import { openPlaylistPicker } from './playlist-picker.js'
-import { EVENTS } from '../core/bus.js'
+import { h, on, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { formatDuration } from '../../core/format.js'
+import { highlightParts } from '../../core/selectors.js'
+import { openPlaylistPicker } from '../menus/playlist-picker.js'
+import { EVENTS } from '../../core/bus.js'
 
 const ROW_HEIGHT = 54
 const OVERSCAN = 6

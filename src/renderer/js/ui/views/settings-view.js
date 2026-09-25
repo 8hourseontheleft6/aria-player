@@ -1,11 +1,11 @@
 /** 设置页：iOS 分组列表风格 */
 
-import { h, clear } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { remote } from '../core/remote.js'
-import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from '../core/format.js'
-import { createSlider } from './slider.js'
-import { toast } from './overlay.js'
+import { h, clear } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { remote } from '../../core/remote.js'
+import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from '../../core/format.js'
+import { createSlider } from '../widgets/slider.js'
+import { toast } from '../widgets/overlay.js'
 
 const THEMES = [
   { id: 'system', label: '跟随系统' },

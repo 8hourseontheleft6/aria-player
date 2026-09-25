@@ -1,7 +1,7 @@
 /** 浮层：弹出面板 / 右键菜单 / Toast */
 
-import { h, on, onOutsideClick } from '../core/dom.js'
-import { icon } from '../core/icons.js'
+import { h, on, onOutsideClick } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
 
 let layerRoot = null
 /** @type {Set<{close: Function}>} */

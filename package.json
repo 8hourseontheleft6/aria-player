@@ -11,12 +11,12 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "smoke": "electron . --smoke",
-    "check": "node scripts/check-imports.js && node scripts/check-injected.js && node scripts/check-styles.js && node --check src/main/main.js",
-    "check:styles": "node scripts/check-styles.js",
+    "check": "node scripts/checks/check-imports.js && node scripts/checks/check-injected.js && node scripts/checks/check-styles.js && node --check src/main/main.js",
+    "check:styles": "node scripts/checks/check-styles.js",
     "shots": "electron . --shots",
     "audit": "electron . --audit",
     "perf": "electron . --perf",
-    "probe": "node scripts/probe-library.js"
+    "probe": "node scripts/probes/probe-library.js"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"

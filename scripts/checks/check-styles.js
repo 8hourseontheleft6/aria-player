@@ -16,7 +16,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
-const ROOT = path.join(__dirname, '..')
+const ROOT = path.join(__dirname, '..', '..')
 const STYLES = path.join(ROOT, 'src', 'renderer', 'styles')
 
 function walk (dir, ext, out = []) {

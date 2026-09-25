@@ -1,12 +1,12 @@
 /** 底部播放条：进度、传输控制、播放模式、音量、倍速、歌词/队列入口 */
 
-import { h, on } from '../core/dom.js'
-import { icon } from '../core/icons.js'
-import { EVENTS } from '../core/bus.js'
-import { formatDuration, formatRate } from '../core/format.js'
-import { createSlider } from './slider.js'
-import { createArtworkView } from './artwork-node.js'
-import { openPopover, showContextMenu } from './overlay.js'
+import { h, on } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
+import { EVENTS } from '../../core/bus.js'
+import { formatDuration, formatRate } from '../../core/format.js'
+import { createSlider } from '../widgets/slider.js'
+import { createArtworkView } from '../widgets/artwork-node.js'
+import { openPopover, showContextMenu } from '../widgets/overlay.js'
 
 const RATE_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
