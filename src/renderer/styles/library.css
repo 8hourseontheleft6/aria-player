@@ -12,6 +12,8 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  /* 右侧滚动轮盘是绝对定位的，锚在这里 */
+  position: relative;
 }
 
 .tracklist.is-selecting {
@@ -167,66 +169,99 @@
   height: 0;
 }
 
-/* ---------------------- 灵动岛风格的滚动条 ---------------------- */
+/* ---------------------- 右侧滚动轮盘（可收缩 / 弹出） ---------------------- */
 /*
- * 和顶栏灵动岛同一套语言：悬浮药丸 + --fill-floating + 0.5px 描边，
- * 收起时细而淡，悬停 / 滚动变宽变亮，拖动时再放大一点并浮起来。
+ * 收起态：一条很窄的把手；鼠标靠近或滚动时展开成字母索引条。
+ * 展开后：一列首字母 + 一个表示视口的「选中框」，字母悬浮放大，点它跳组，
+ * 滚轮在轮盘上是大范围翻动，左键拖动选中框连续滚动。
  */
-.tracklist {
-  position: relative;
-}
-
-.scrollbar {
+.wheel {
   position: absolute;
-  top: 6px;
-  right: 3px;
-  bottom: 30px;
+  top: 8px;
+  right: 2px;
+  bottom: 32px;
   width: 12px;
   z-index: 6;
-  display: flex;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease-ios);
-}
-
-.scrollbar.is-active,
-.scrollbar:hover {
-  opacity: 1;
-}
-
-.scrollbar.is-hidden {
-  display: none;
-}
-
-.scrollbar__thumb {
-  position: absolute;
-  top: 0;
-  width: 5px;
-  min-height: 34px;
   border-radius: var(--radius-pill);
   background: var(--fill-floating);
   box-shadow: 0 0 0 0.5px var(--separator);
   backdrop-filter: saturate(180%) blur(12px);
-  transform-origin: center;
+  opacity: 0.5;
+  overflow: hidden;
   transition:
-    width var(--dur-fast) var(--ease-ios),
-    background var(--dur-fast) var(--ease-ios),
-    box-shadow var(--dur-fast) var(--ease-ios);
-  will-change: transform;
+    width var(--dur) var(--ease-ios),
+    opacity var(--dur) var(--ease-ios),
+    background var(--dur) var(--ease-ios);
 }
 
-/* 悬停：变宽、更实 —— 和灵动岛展开一个道理 */
-.scrollbar:hover .scrollbar__thumb {
-  width: 9px;
-  background: var(--fill-floating-strong, var(--fill-floating));
-  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-1);
+.wheel.is-active,
+.wheel:hover {
+  width: 30px;
+  opacity: 1;
+  background: var(--fill-floating-strong);
 }
 
-/* 拖动中：再放大一点并浮起来（被「拿住」的感觉） */
-.scrollbar.is-dragging .scrollbar__thumb {
-  width: 11px;
-  background: var(--fill-floating-strong, var(--fill-floating));
-  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-2);
+.wheel.is-hidden {
+  display: none;
+}
+
+/* 表示「当前看到的这一段」的选中框 */
+.wheel__box {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 0;
+  min-height: 28px;
+  border-radius: var(--radius-pill);
+  background: var(--label-3);
+  opacity: 0.45;
+  transition: background var(--dur-fast) var(--ease-ios), opacity var(--dur-fast) var(--ease-ios);
+}
+
+.wheel:hover .wheel__box {
+  background: var(--label-2);
+  opacity: 0.7;
+}
+
+.wheel.is-dragging .wheel__box {
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.wheel__marks {
+  position: absolute;
+  inset: 0;
+}
+
+.wheel__mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--label-2);
+  border-radius: var(--radius-2xs);
+  /* 收起时字母看不见（宽度不够），展开才露出来 */
+  opacity: 0;
+  transform: scale(0.7);
+  transition:
+    opacity var(--dur-fast) var(--ease-ios),
+    transform var(--dur-fast) var(--ease-ios),
+    color var(--dur-fast) var(--ease-ios);
+}
+
+.wheel.is-active .wheel__mark {
+  opacity: 1;
+  transform: none;
+}
+
+/* 悬浮到字母上放大 —— 和灵动岛同一套「靠近就长大」的语言 */
+.wheel__mark:hover {
+  transform: scale(1.35);
+  color: var(--label);
 }
 
 /* ------------------------------ 多选工具条 ------------------------------ */

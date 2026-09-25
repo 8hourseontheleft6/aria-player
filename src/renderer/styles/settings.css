@@ -26,6 +26,13 @@
   -webkit-column-break-inside: avoid;
 }
 
+/* 整页重建的那两帧：关掉过渡，免得滑块 / 宽度从初始值「长」出来 */
+.settings.is-repainting,
+.settings.is-repainting * {
+  transition: none !important;
+  animation: none !important;
+}
+
 .settings__group-title {
   padding: 0 4px 7px;
   font-size: var(--text-footnote);
@@ -140,6 +147,69 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 顶部分区导航（跳转到设置里的一大块） */
+.settings-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-quaternary);
+}
+
+.settings-nav__item {
+  padding: 3px 10px;
+  border-radius: var(--radius-2xs);
+  font-size: var(--text-footnote);
+  color: var(--label-2);
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+
+.settings-nav__item:hover {
+  color: var(--label);
+}
+
+.settings-nav__item.is-active {
+  background: var(--bg-elevated);
+  color: var(--label);
+  box-shadow: var(--elev-1);
+}
+
+/* 均衡器的十段频响示意 */
+.eq-bands {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+}
+
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 16px;
+}
+
+.eq-band__bar {
+  width: 6px;
+  min-height: 2px;
+  border-radius: var(--radius-2xs);
+  background: var(--accent);
+  transition: height var(--dur) var(--ease-ios);
+}
+
+.eq-band__bar.is-cut {
+  background: var(--label-4);
+}
+
+.eq-band__label {
+  font-size: 9px;
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 文本输入（外部模型的地址 / 模型名 / 密钥） */
 .settings__field {
   display: flex;
@@ -175,11 +245,11 @@
   box-shadow: var(--focus-ring);
 }
 
-/* 设置里的下拉（输出设备 / 均衡器预设）：外观由 components.css 的 select 规则统一管，
-   这里只管宽度 —— 原来那套 bg-input 在深色下会被系统外观盖掉，才出现白底下拉框 */
+/* 设置里的下拉（输出设备 / 均衡器预设）：外观由 components.css 的 select 规则统一管。
+   宽度**写死**，不然设备列表还没枚举回来时会先窄后宽（用户反馈的「突然变短然后变长」） */
 .settings__select {
-  max-width: 220px;
-  min-width: 132px;
+  width: 200px;
+  min-width: 200px;
 }
 
 /* ---------------------- 可收起分组 ---------------------- */

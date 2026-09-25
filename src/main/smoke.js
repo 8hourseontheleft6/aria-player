@@ -2729,49 +2729,70 @@ async function runSmoke ({ win, ctx }) {
       const { actions, store, player, engine } = window.__aria
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
 
-      /* ① 自定义滚动条：比例正确、可拖动、拖动中放大 */
+      /* ① 右侧滚动轮盘：收起→展开、选中框按比例、拖动跟手、字母索引 */
       actions.setView('songs')
       actions.setQuery('')
       actions.setSource({ type: 'all', value: null })
       await settle(900)
       const viewport = document.querySelector('.tracklist__viewport')
-      const bar = document.querySelector('.tracklist .scrollbar')
-      const thumb = bar ? bar.querySelector('.scrollbar__thumb') : null
-      const ratio = (node) => {
-        const box = node.getBoundingClientRect()
-        return { top: Math.round(box.top), height: Math.round(box.height), width: Math.round(box.width) }
+      const wheel = document.querySelector('.tracklist .wheel')
+      const box = wheel ? wheel.querySelector('.wheel__box') : null
+      const boxRect = () => {
+        const r = box.getBoundingClientRect()
+        return { top: Math.round(r.top), height: Math.round(r.height) }
       }
-      const idleThumb = thumb ? ratio(thumb) : null
-      const trackBox = bar ? ratio(bar) : null
-      // 比例：滑块高 ≈ 可视高 / 内容高 × 轨道高
-      const expected = Math.max(34, Math.round((viewport.clientHeight / viewport.scrollHeight) * trackBox.height))
-      const shapeOk = Math.abs(idleThumb.height - expected) <= 2
-      // 把列表滚到中段，滑块应该跟着走
+      const collapsedWidth = Math.round(wheel.getBoundingClientRect().width)
+      const expectedBox = Math.max(28, Math.round((viewport.clientHeight / viewport.scrollHeight) * wheel.clientHeight))
+      const shapeOk = Math.abs(boxRect().height - expectedBox) <= 2
+      // 悬浮展开：宽度要变大，并露出首字母
+      wheel.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+      await settle(500)
+      const expandedWidth = Math.round(wheel.getBoundingClientRect().width)
+      const marks = [...wheel.querySelectorAll('.wheel__mark')].map((node) => node.textContent)
+      const marksVisible = [...wheel.querySelectorAll('.wheel__mark')]
+        .filter((node) => getComputedStyle(node).opacity === '1').length
+      wheel.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+
+      // 滚到中段：选中框要跟着走
       viewport.scrollTop = Math.round((viewport.scrollHeight - viewport.clientHeight) / 2)
       await settle(400)
-      const midThumb = ratio(thumb)
-      const movedOk = midThumb.top > idleThumb.top + 20
-      // 真实指针拖滑块（pointerdown/move/up），列表要跟着滚，且拖动中有放大态
-      const barBox = bar.getBoundingClientRect()
-      const thumbBox = thumb.getBoundingClientRect()
-      const startY = Math.round(thumbBox.top + thumbBox.height / 2)
-      const send = (type, y, extra = {}) => thumb.dispatchEvent(new PointerEvent(type, {
-        bubbles: true, cancelable: true, clientX: Math.round(barBox.left + barBox.width / 2), clientY: y,
-        pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, ...extra
-      }))
+      const midTop = boxRect().top
+      const movedOk = midTop > 0
+      // 点一个字母直接跳过去
+      const letterNode = wheel.querySelector('.wheel__mark')
+      const beforeLetterJump = viewport.scrollTop
+      letterNode?.click()
+      await settle(300)
+      const afterLetterJump = viewport.scrollTop
+
+      // 真实指针拖选中框：必须**跟手**（拖动中就动，不是松手才跳）
       viewport.scrollTop = 0
       await settle(300)
+      const wheelBox = wheel.getBoundingClientRect()
+      const startBox = box.getBoundingClientRect()
+      const startY = Math.round(startBox.top + startBox.height / 2)
+      const send = (type, y, extra = {}) => box.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true,
+        clientX: Math.round(wheelBox.left + wheelBox.width / 2), clientY: y,
+        pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, ...extra
+      }))
       const beforeDrag = viewport.scrollTop
       send('pointerdown', startY)
       send('pointermove', startY + 120)
-      const draggingClass = bar.classList.contains('is-dragging')
-      const draggingWidth = Math.round(thumb.getBoundingClientRect().width)
+      // 关键：**还没有松手**时，选中框与 scrollTop 都已经动了
+      const midDragTop = boxRect().top
+      const midDragScroll = viewport.scrollTop
+      const draggingClass = wheel.classList.contains('is-dragging')
       send('pointerup', startY + 120, { buttons: 0 })
-      await settle(400)
-      const afterDrag = viewport.scrollTop
-      const dragOk = afterDrag > beforeDrag + 50 && draggingClass === true && draggingWidth >= idleThumb.width
-      send('pointerup', startY, { completed: true, buttons: 0 })
-      // 收工：把滚动位置还回去 —— 后面的「悬停浮起」「各视图可滚动」都假设列表在顶部
+      await settle(300)
+      const followed = midDragTop > 0 && midDragScroll > beforeDrag + 50 && draggingClass === true
+
+      // 滚轮快速翻动（轮盘上的滚轮是普通滚动的 4 倍）
+      const beforeWheel = viewport.scrollTop
+      wheel.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 }))
+      await settle(300)
+      const wheelJump = viewport.scrollTop - beforeWheel
+
       viewport.scrollTop = 0
       await settle(300)
 
@@ -2821,16 +2842,22 @@ async function runSmoke ({ win, ctx }) {
       await settle(400)
 
       return {
-        hasBar: Boolean(bar && thumb),
+        collapsedWidth,
+        expandedWidth,
+        expectedBox,
+        boxHeight: boxRect().height,
+        marks,
+        marksVisible,
+        hasBar: Boolean(wheel && box),
         shapeOk,
-        expectedThumb: expected,
-        idleThumb,
-        trackBox,
         movedOk,
-        dragOk,
+        followed,
         beforeDrag,
-        afterDrag,
-        draggingWidth,
+        midDragScroll,
+        midDragTop,
+        beforeLetterJump,
+        afterLetterJump,
+        wheelJump,
         flatPreset: flat ? flat.preset : null,
         rockPreset: rock ? rock.preset : null,
         rockLow,
@@ -2847,14 +2874,22 @@ async function runSmoke ({ win, ctx }) {
         eqAfterPlay: eqAfterPlay ? eqAfterPlay.preset : null
       }
     `)
-    record('滚动条（灵动岛风格）：比例对、能拖、拖动中放大',
+    record('右侧滚动轮盘：收起/展开、选中框按比例、拖动跟手、字母索引可用',
       scrollbarEq.hasBar === true &&
       scrollbarEq.shapeOk === true &&
+      scrollbarEq.expandedWidth > scrollbarEq.collapsedWidth + 10 &&
+      scrollbarEq.marks.length >= 5 &&
+      scrollbarEq.marksVisible >= 5 &&
       scrollbarEq.movedOk === true &&
-      scrollbarEq.dragOk === true,
-      `滑块高 ${scrollbarEq.idleThumb?.height}px（按比例应为 ${scrollbarEq.expectedThumb}px，轨道 ${scrollbarEq.trackBox?.height}px）；` +
-      `滚到中段后滑块上移=${scrollbarEq.movedOk}；拖动 120px：scrollTop ${scrollbarEq.beforeDrag} → ${scrollbarEq.afterDrag}，` +
-      `拖动中宽度 ${scrollbarEq.draggingWidth}px（静止 ${scrollbarEq.idleThumb?.width}px）`)
+      scrollbarEq.followed === true &&
+      scrollbarEq.afterLetterJump !== scrollbarEq.beforeLetterJump &&
+      scrollbarEq.wheelJump > 200,
+      `收起宽 ${scrollbarEq.collapsedWidth}px → 展开 ${scrollbarEq.expandedWidth}px；` +
+      `选中框高 ${scrollbarEq.boxHeight}px（按比例应为 ${scrollbarEq.expectedBox}px）；` +
+      `首字母 ${scrollbarEq.marks.length} 个（可见 ${scrollbarEq.marksVisible} 个）：${JSON.stringify(scrollbarEq.marks.slice(0, 8))}；` +
+      `拖动 120px **松手前** scrollTop ${scrollbarEq.beforeDrag} → ${scrollbarEq.midDragScroll}、选中框 top ${scrollbarEq.midDragTop}（跟手=${scrollbarEq.followed}）；` +
+      `点字母跳转 ${scrollbarEq.beforeLetterJump} → ${scrollbarEq.afterLetterJump}；` +
+      `轮盘滚轮 deltaY=100 → 翻动 ${Math.round(scrollbarEq.wheelJump)}px`)
     record('声音均衡器：预设可切、按流派自动匹配、开着也能正常出声',
       scrollbarEq.flatPreset === 'off' &&
       scrollbarEq.rockPreset === 'rock' &&

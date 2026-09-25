@@ -86,6 +86,12 @@
 
 /* ============================ 深色（默认） ============================ */
 html[data-theme="dark"] {
+  /*
+   * 关键：告诉浏览器「这是深色界面」。
+   * 不声明的话，原生控件（下拉框展开后的列表、滚动条、右键菜单）会按系统浅色主题画 ——
+   * 深色界面里冒出白底下拉框就是这么来的，光靠给 option 设背景是盖不住的。
+   */
+  color-scheme: dark;
   color-scheme: dark;
 
   --bg-window: #0a0a0c;
@@ -136,6 +142,7 @@ html[data-theme="dark"] {
 
 /* ============================ 浅色 ============================ */
 html[data-theme="light"] {
+  color-scheme: light;
   color-scheme: light;
 
   --bg-window: #ffffff;

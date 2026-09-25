@@ -749,6 +749,8 @@ async function main () {
       const analysis = cachedAnalysis(state.playback.trackId)
       return {
         preset: engine.equalizerSnapshot()?.preset || 'off',
+        // 十段增益（设置页画频响形状用）
+        bands: engine.equalizerSnapshot()?.bands || [],
         byMetadata: matchByMetadata(track),
         byAudio: analysis ? { key: analysis.key, confidence: analysis.confidence, features: analysis.features } : null,
         byAi: aiStyleEnabled() ? cachedAiStyle(state.playback.trackId) : null

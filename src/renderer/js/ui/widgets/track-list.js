@@ -8,7 +8,7 @@ import { icon } from '../../core/icons.js'
 import { formatDuration } from '../../core/format.js'
 import { highlightParts } from '../../core/selectors.js'
 import { openPlaylistPicker } from '../menus/playlist-picker.js'
-import { createScrollIndicator } from './scroll-indicator.js'
+import { createScrollIndicator, marksFromTracks } from './scroll-indicator.js'
 import { EVENTS } from '../../core/bus.js'
 
 const ROW_HEIGHT = 54
@@ -128,7 +128,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       }))
   )
 
-  // 灵动岛风格的滚动条（原生那条已在 CSS 里关掉）
+  // 右侧的滚动轮盘（可收缩 / 弹出、带首字母索引）
   const scrollbar = createScrollIndicator(viewport, { label: '歌曲列表滚动' })
   const element = h('div', { class: 'tracklist' }, head, selectionBar, viewport, scrollbar.element)
 
@@ -454,7 +454,8 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     rendered.clear()
     syncSelection()
     schedule()
-    // 列表变长变短，滚动条的比例要重算
+    // 列表变了：重算滚动比例与首字母索引
+    scrollbar.setMarks(marksFromTracks(tracks, ROW_HEIGHT))
     scrollbar.refresh()
   }
 

@@ -1,157 +1,197 @@
 /**
- * 灵动岛风格的滚动指示条（自定义，不用原生滚动条）。
+ * 右侧的「滚动轮盘」：可收缩、可弹出的字母索引条。
  *
- * 为什么自己画：原生滚动条没法做成「悬浮药丸 + 悬停放大 + 拖动再放大」的样子，
- * 而这是 Aria 顶栏灵动岛的语言。这里的观感刻意和灵动岛对齐：
- *   · 收起态：细、半透明（--fill-floating + 0.5px 描边）
- *   · 悬停 / 滚动：变宽变亮（scaleX + 更实的填充）
- *   · 拖动中：再放大一点并加阴影，像被「拿起来」
+ * 用户否掉了上一版细长滚动条（拖动时滑块不跟手、样式也不喜欢），要的是：
+ *   · 平时收成一条很窄的把手，鼠标靠近 / 悬浮才展开；
+ *   · 展开后中间是一列**首字母**（当前页歌曲的首字母），旁边一个「选中框」表示视口位置；
+ *   · 悬浮到字母上会放大，点它直接跳到那一组；
+ *   · 滚轮在轮盘上滚 = 大范围翻动（比普通滚动快得多）；
+ *   · 左键拖动选中框 = 连续滚动。
  *
- * 行为：
- *   · 拖动滑块 = 滚动（带指针捕获，松手才结束）
- *   · 点轨道空白 = 跳到那一段
- *   · 内容不够一屏时自动隐藏
+ * 上一版的 bug 也在这里修掉：拖动时滑块要**跟着手指走**。
+ * 之前拖动过程中提前 return，只更新了 scrollTop 却没更新滑块位置，
+ * 于是松手后滑块才「瞬移」过去。现在拖动中每帧都按指针位置画。
  */
 
 import { h, on } from '../../core/dom.js'
 
-const MIN_THUMB = 34
-const IDLE_DELAY = 900
+const IDLE_DELAY = 1100
+const WHEEL_SPEED = 4 // 轮盘上滚轮的倍率
 
-export function createScrollIndicator (scroller, { label = '滚动' } = {}) {
-  const thumb = h('div', { class: 'scrollbar__thumb' })
-  const element = h('div', {
-    class: 'scrollbar',
+export function createScrollIndicator (scroller, { label = '滚动', getMarks = null } = {}) {
+  const rail = h('div', { class: 'wheel__marks' })
+  const box = h('div', { class: 'wheel__box' })
+  const wheel = h('div', {
+    class: 'wheel',
     role: 'scrollbar',
     'aria-label': label,
-    'aria-orientation': 'vertical',
-    'aria-valuemin': '0'
-  }, thumb)
+    'aria-orientation': 'vertical'
+  }, rail, box)
 
   let idleTimer = null
   let dragging = false
-  let dragStartY = 0
-  let dragStartTop = 0
+  let dragOffset = 0
+  let marks = []
+  let lastTick = 0
 
-  /** 把当前滚动位置画到滑块上 */
-  function refresh () {
+  /** 视口高度 / 内容高度 → 选中框的位置与高度 */
+  function geometry () {
     const view = scroller.clientHeight
     const total = scroller.scrollHeight
-    if (!view || total <= view + 1) {
-      element.classList.add('is-hidden')
-      return
-    }
-    element.classList.remove('is-hidden')
-
-    const box = element.getBoundingClientRect()
-    const trackH = box.height || view
-    const thumbH = Math.max(MIN_THUMB, Math.round((view / total) * trackH))
-    const maxScroll = total - view
-    const maxTop = trackH - thumbH
-    const top = maxScroll > 0 ? Math.round((scroller.scrollTop / maxScroll) * maxTop) : 0
-
-    if (dragging) return // 拖动中由指针位置决定，别被滚动事件拽回去
-    thumb.style.height = `${thumbH}px`
-    thumb.style.transform = `translateY(${top}px)`
-    element.setAttribute('aria-valuemax', String(Math.round(maxScroll)))
-    element.setAttribute('aria-valuenow', String(Math.round(scroller.scrollTop)))
+    const trackH = wheel.clientHeight || view
+    const boxH = Math.max(28, Math.round((view / Math.max(1, total)) * trackH))
+    const maxScroll = Math.max(1, total - view)
+    const maxTop = Math.max(1, trackH - boxH)
+    const top = (scroller.scrollTop / maxScroll) * maxTop
+    return { view, total, trackH, boxH, maxScroll, maxTop, top }
   }
 
-  /** 动一下就「醒过来」，停一会儿再收起（灵动岛同款节奏） */
+  function refresh () {
+    const { view, total, boxH, top } = geometry()
+    if (!view || total <= view + 1) {
+      wheel.classList.add('is-hidden')
+      return
+    }
+    wheel.classList.remove('is-hidden')
+    box.style.height = `${boxH}px`
+    box.style.transform = `translateY(${Math.round(top)}px)`
+    wheel.setAttribute('aria-valuenow', String(Math.round(scroller.scrollTop)))
+
+    // 首字母：只在展开时才画（收起时别浪费）
+    if (wheel.classList.contains('is-active')) paintMarks()
+  }
+
+  /** 把首字母铺到轨道上，位置按「那一组在列表里的比例」定 */
+  function paintMarks () {
+    if (!marks.length) return
+    const { trackH } = geometry()
+    const total = Math.max(1, scroller.scrollHeight)
+    const nodes = marks.map((mark) => h('button', {
+      class: 'wheel__mark',
+      type: 'button',
+      text: mark.letter,
+      title: `${mark.letter}（${mark.count} 首）`,
+      style: { top: `${Math.round((mark.offset / total) * Math.max(0, trackH - 16))}px` },
+      onClick: (event) => {
+        event.stopPropagation()
+        scroller.scrollTop = mark.offset
+        wake()
+      }
+    }))
+    rail.replaceChildren(...nodes)
+  }
+
   function wake () {
-    element.classList.add('is-active')
+    wheel.classList.add('is-active')
+    paintMarks()
     if (idleTimer) clearTimeout(idleTimer)
     idleTimer = setTimeout(() => {
-      if (!dragging && !element.matches(':hover')) element.classList.remove('is-active')
+      if (!dragging && !wheel.matches(':hover')) wheel.classList.remove('is-active')
     }, IDLE_DELAY)
   }
 
-  function trackGeometry () {
-    const box = element.getBoundingClientRect()
-    const thumbH = thumb.getBoundingClientRect().height || MIN_THUMB
-    const maxTop = Math.max(1, box.height - thumbH)
-    const maxScroll = Math.max(1, scroller.scrollHeight - scroller.clientHeight)
-    return { box, maxTop, maxScroll }
+  function scrollFromPointer (clientY) {
+    const rect = wheel.getBoundingClientRect()
+    const { boxH, maxTop, maxScroll } = geometry()
+    const local = clientY - rect.top - dragOffset
+    const clamped = Math.max(0, Math.min(maxTop, local))
+    scroller.scrollTop = (clamped / maxTop) * maxScroll
+    // 关键：拖动过程中也要画，不然松手才「瞬移」
+    box.style.transform = `translateY(${Math.round(clamped)}px)`
   }
 
-  function scrollToTop (top) {
-    const { maxTop, maxScroll } = trackGeometry()
-    scroller.scrollTop = (Math.max(0, Math.min(maxTop, top)) / maxTop) * maxScroll
-  }
-
-  on(thumb, 'pointerdown', (event) => {
+  on(box, 'pointerdown', (event) => {
     event.preventDefault()
     event.stopPropagation()
     dragging = true
-    dragStartY = event.clientY
-    dragStartTop = thumb.getBoundingClientRect().top - element.getBoundingClientRect().top
-    element.classList.add('is-dragging', 'is-active')
-    try {
-      thumb.setPointerCapture(event.pointerId)
-    } catch {
-      // 没有指针捕获也能用
-    }
+    const rect = box.getBoundingClientRect()
+    dragOffset = event.clientY - rect.top
+    wheel.classList.add('is-dragging', 'is-active')
+    wake()
+    try { box.setPointerCapture(event.pointerId) } catch { /* 无所谓 */ }
   })
 
-  on(thumb, 'pointermove', (event) => {
+  on(box, 'pointermove', (event) => {
     if (!dragging) return
-    const delta = event.clientY - dragStartY
-    scrollToTop(dragStartTop + delta)
+    scrollFromPointer(event.clientY)
   })
 
   const endDrag = (event) => {
     if (!dragging) return
     dragging = false
-    element.classList.remove('is-dragging')
-    try {
-      if (event?.pointerId !== undefined) thumb.releasePointerCapture(event.pointerId)
-    } catch {
-      // 已经释放
-    }
+    wheel.classList.remove('is-dragging')
+    try { if (event?.pointerId !== undefined) box.releasePointerCapture(event.pointerId) } catch { /* 已释放 */ }
     wake()
     refresh()
   }
-  on(thumb, 'pointerup', endDrag)
-  on(thumb, 'pointercancel', endDrag)
+  on(box, 'pointerup', endDrag)
+  on(box, 'pointercancel', endDrag)
 
-  // 点轨道空白处 = 跳到那一段
-  on(element, 'pointerdown', (event) => {
-    if (event.target === thumb) return
-    const { box } = trackGeometry()
-    const thumbH = thumb.getBoundingClientRect().height || MIN_THUMB
-    scrollToTop(event.clientY - box.top - thumbH / 2)
+  // 点轮盘空白 = 跳到那一段
+  on(wheel, 'pointerdown', (event) => {
+    if (event.target !== wheel && event.target !== rail) return
+    const { boxH, maxTop, maxScroll } = geometry()
+    const rect = wheel.getBoundingClientRect()
+    const target = Math.max(0, Math.min(maxTop, event.clientY - rect.top - boxH / 2))
+    scroller.scrollTop = (target / maxTop) * maxScroll
     wake()
   })
 
-  on(element, 'mouseenter', () => {
-    element.classList.add('is-active')
-  })
-  on(element, 'mouseleave', () => {
-    if (!dragging) wake()
-  })
+  // 滚轮：大幅翻动（用户要「上下大规模翻动」）
+  on(wheel, 'wheel', (event) => {
+    event.preventDefault()
+    scroller.scrollTop += event.deltaY * WHEEL_SPEED
+    wake()
+  }, { passive: false })
+
+  on(wheel, 'mouseenter', () => wake())
+  on(wheel, 'mouseleave', () => { if (!dragging) wake() })
 
   on(scroller, 'scroll', () => {
     refresh()
-    wake()
+    const now = Date.now()
+    // 滚动时亮起来，但不要每帧都重画字母
+    if (!wheel.classList.contains('is-active')) wake()
+    else if (now - lastTick > 400) { lastTick = now; paintMarks() }
   }, { passive: true })
 
-  // 内容或容器尺寸变化时重新量（列表换页、窗口拉伸、进入多选让出列宽…）
-  const observer = typeof ResizeObserver === 'function'
-    ? new ResizeObserver(() => refresh())
-    : null
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => refresh()) : null
   observer?.observe(scroller)
   if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild)
-
-  const onWindowResize = () => refresh()
-  window.addEventListener('resize', onWindowResize)
+  window.addEventListener('resize', refresh)
 
   return {
-    element,
+    element: wheel,
     refresh,
+    /** 列表换了：重新算首字母（track-list 在 setTracks 时调用） */
+    setMarks (next) {
+      marks = Array.isArray(next) ? next : []
+      if (wheel.classList.contains('is-active')) paintMarks()
+    },
     destroy () {
       observer?.disconnect()
-      window.removeEventListener('resize', onWindowResize)
+      window.removeEventListener('resize', refresh)
       if (idleTimer) clearTimeout(idleTimer)
     }
   }
+}
+
+/**
+ * 把曲目列表折成「首字母 → 偏移量」。
+ * 用拼音/拉丁首字母不现实（要词典），所以直接取标题的第一个字符并大写 ——
+ * 中文歌就是「中」「爱」这类字，英文歌就是 A/B/C，和列表里看到的对得上。
+ */
+export function marksFromTracks (tracks, rowHeight) {
+  const out = []
+  let current = null
+  tracks.forEach((track, index) => {
+    const source = (track.title || track.artist || '#').trim()
+    const letter = (source[0] || '#').toUpperCase()
+    if (!current || current.letter !== letter) {
+      current = { letter, offset: index * rowHeight, count: 0 }
+      out.push(current)
+    }
+    current.count++
+  })
+  return out
 }

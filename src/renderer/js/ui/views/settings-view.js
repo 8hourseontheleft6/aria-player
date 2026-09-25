@@ -6,7 +6,7 @@ import { remote } from '../../core/remote.js'
 import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
-import { presetOptions } from '../../core/equalizer-presets.js'
+import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
 
 const THEMES = [
   { id: 'system', label: '跟随系统' },
@@ -40,9 +40,25 @@ const SHORTCUTS = [
 export function createSettingsView ({ store, bus, player, actions, host }) {
   const element = h('div', { class: 'content-inner view-root' })
 
+  /*
+   * 顶部分区导航：设置项多了之后一屏屏翻很累，点一下直接跳到那一大块
+   * （按分组标题找锚点，不依赖硬编码索引）。
+   * 注意：这两个声明必须在工具栏之前 —— 工具栏里要用 sectionNav，
+   * 放在后面就是 TDZ（这个文件已经栽过一次，见 infoLayer）。
+   */
+  const SECTIONS = [
+    { label: '音乐库', groups: ['音乐文件夹'] },
+    { label: '播放与音效', groups: ['播放', '均衡器', '歌词'] },
+    { label: '外观与系统', groups: ['外观', '系统集成', '快捷键', '系统媒体键'] },
+    { label: '在线与扩展', groups: ['在线功能', '在线音源', '插件与扩展点', '外部模型（自填 API）', '封面缓存'] },
+    { label: '关于', groups: ['关于'] }
+  ]
+  const sectionNav = h('div', { class: 'settings-nav' })
+
   const toolbar = h('div', { class: 'view-toolbar' },
     h('div', { class: 'view-toolbar__title', text: '设置' }),
-    h('div', { class: 'view-toolbar__spacer' })
+    h('div', { class: 'view-toolbar__spacer' }),
+    sectionNav
   )
 
   const scroll = h('div', { class: 'settings scroll view-body' })
@@ -60,16 +76,24 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     infoLayer.hidden = true
   }
 
-  function showTip (anchorNode, text) {
+  /**
+   * 把气泡放在**鼠标附近**（右下 12px），而不是按 ⓘ 的位置算。
+   * 之前按锚点算，两列布局下常常离指针很远（用户反馈「出现在鼠标右侧很远」）。
+   */
+  function showTip (anchorNode, text, event) {
     infoLayer.textContent = text
     infoLayer.hidden = false
-    // 先显示再量：宽度由内容决定
-    const rect = anchorNode.getBoundingClientRect()
     const box = infoLayer.getBoundingClientRect()
-    const left = Math.max(12, Math.min(rect.left - 8, window.innerWidth - box.width - 12))
-    const above = rect.top - box.height - 8
-    infoLayer.style.left = `${left}px`
-    infoLayer.style.top = `${above > 12 ? above : rect.bottom + 8}px`
+    const point = event && Number.isFinite(event.clientX)
+      ? { x: event.clientX, y: event.clientY }
+      : (() => { const r = anchorNode.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.bottom } })()
+    let left = point.x + 14
+    let top = point.y + 16
+    // 贴边时翻到另一侧，别被视口切掉
+    if (left + box.width > window.innerWidth - 8) left = Math.max(8, point.x - box.width - 14)
+    if (top + box.height > window.innerHeight - 8) top = Math.max(8, point.y - box.height - 12)
+    infoLayer.style.left = `${Math.round(left)}px`
+    infoLayer.style.top = `${Math.round(top)}px`
   }
 
   function infoIcon (text) {
@@ -79,9 +103,9 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       role: 'img',
       tabindex: '0',
       'aria-label': text,
-      onMouseenter: (event) => showTip(event.currentTarget, text),
+      onMouseenter: (event) => showTip(event.currentTarget, text, event),
       onMouseleave: hideTip,
-      onFocus: (event) => showTip(event.currentTarget, text),
+      onFocus: (event) => showTip(event.currentTarget, text, null),
       onBlur: hideTip
     }, 'i')
   }
@@ -204,6 +228,18 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
   /* ------------------------------ 渲染 ------------------------------ */
 
+  /**
+   * 输出设备列表缓存在**工厂作用域**里（不是 render 里）。
+   *
+   * 之前放在 render 内，于是每次改设置整页重建 → 列表清空 → 下拉框先变短（只剩「跟随系统」）
+   * → 异步 enumerateDevices 回来再变长。用户看到的「突然变短然后变长」就是这个
+   * （用户反馈里点名了输出设备那个框）。
+   */
+  let outputDevices = []
+  let outputDevicesLoaded = false
+  let outputDevicesListenerAdded = false
+  let sectionNavListenerAdded = false
+
   function render () {
     const state = store.get()
     const settings = state.settings
@@ -307,7 +343,6 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 名字需要 media 权限（主进程已放行），拿不到就退化成「输出设备 N」。
      */
     const outputSelect = h('select', { class: 'settings__select' })
-    let outputDevices = []
     function paintOutputDevices () {
       const current = store.get().settings.audioOutputDevice || ''
       outputSelect.replaceChildren(
@@ -325,6 +360,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       try {
         const list = await navigator.mediaDevices.enumerateDevices()
         outputDevices = list.filter((device) => device.kind === 'audiooutput')
+        outputDevicesLoaded = true
       } catch {
         outputDevices = []
       }
@@ -332,34 +368,65 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     }
     on(outputSelect, 'change', () => actions.setOutputDevice(outputSelect.value))
     paintOutputDevices()
-    loadOutputDevices()
-    navigator.mediaDevices?.addEventListener?.('devicechange', loadOutputDevices)
+    // 已经有缓存就不再异步刷一遍（否则每次改设置都会重放一次宽度跳动）
+    if (!outputDevicesLoaded) loadOutputDevices()
+    if (!outputDevicesListenerAdded) {
+      navigator.mediaDevices?.addEventListener?.('devicechange', loadOutputDevices)
+      outputDevicesListenerAdded = true
+    }
 
-    scroll.appendChild(group('播放', [
+    /*
+     * 均衡器独立成一个子菜单（用户反馈：每大块再细分一下）。
+     * 折叠标题上直接写清当前状态（开关 / 自动 / 生效预设），
+     * 展开后是完整设置 + 十段增益的可视化。
+     */
+    const eqPresetSelect = h('select', { class: 'settings__select' })
+    eqPresetSelect.replaceChildren(...presetOptions().map((option) =>
+      h('option', { value: option.value, text: option.label })))
+    eqPresetSelect.value = settings.equalizer?.preset || 'flat'
+    eqPresetSelect.disabled = settings.equalizer?.auto !== false
+    on(eqPresetSelect, 'change', () => actions.setEqualizer({ preset: eqPresetSelect.value }))
+
+    const eqSnapshot = { preset: basis?.preset, bands: basis?.bands || [] }
+    const eqBands = (eqSnapshot ? eqSnapshot.bands : []).map((band) => {
+      // 增益范围按 ±8dB 画，超出就截断（数据里最大是 +6）
+      const ratio = Math.max(-1, Math.min(1, (band.gain || 0) / 8))
+      const height = Math.round(Math.abs(ratio) * 22) + 2
+      return h('div', { class: 'eq-band', title: `${band.freq}Hz ${band.gain > 0 ? '+' : ''}${band.gain}dB` },
+        h('div', {
+          class: `eq-band__bar${ratio < 0 ? ' is-cut' : ''}`,
+          style: { height: `${height}px` }
+        }),
+        h('span', { class: 'eq-band__label', text: band.freq >= 1000 ? `${band.freq / 1000}k` : String(band.freq) })
+      )
+    })
+
+    const eqState = !settings.equalizer?.enabled
+      ? '已关闭'
+      : `${settings.equalizer?.auto === false ? '手动' : '自动'} · ${PRESETS[eqSnapshot?.preset]?.displayName || '原声'}`
+
+    scroll.appendChild(group('均衡器', [
       row({
         title: '声音均衡器',
-        sub: '按预设给声音做处理（十段均衡 + 压缩 + 混响 + 声场 + 饱和）。预设参数来自 data.json：古典/交响、摇滚/金属、流行/人声、电子/舞曲。注意：开启后音频会改走 WebAudio 输出，极少数设备上第一次播放可能有不到一秒的衔接。',
+        sub: '按预设给声音做处理（十段均衡 + 压缩 + 混响 + 声场 + 饱和）。预设参数来自 data.json：古典/交响、摇滚/金属、流行/人声、电子/舞曲。开启后音频会改走 WebAudio 输出，极少数设备上第一次播放可能有不到一秒的衔接。',
         control: switchControl(settings.equalizer?.enabled === true,
           (value) => actions.setEqualizer({ enabled: value }))
       }),
       row({
+        title: '当前频响',
+        sub: '十段增益的实时形状（±8dB 满格）。低于 0dB 的段用另一侧表示。',
+        control: h('div', { class: 'eq-bands' }, ...eqBands)
+      }),
+      row({
         title: '按歌曲风格自动选择',
-        sub: '从曲目的流派字段（以及标题/专辑里的线索）判断风格，自动切换到对应预设；识别不出来时用你手动选的那一组。关掉它就固定使用下面选的预设。',
+        sub: '判断顺序：外部模型（如果开了）→ 声音特征 → 流派标签。识别不出来就用你手动选的那一组。',
         control: switchControl(settings.equalizer?.auto !== false,
           (value) => actions.setEqualizer({ auto: value }))
       }),
       row({
         title: '均衡器预设',
-        sub: '自动匹配关闭时使用这一组。原声 = 除了必要的输出以外不做任何处理。',
-        control: (() => {
-          const select = h('select', { class: 'settings__select' })
-          select.replaceChildren(...presetOptions().map((option) =>
-            h('option', { value: option.value, text: option.label })))
-          select.value = settings.equalizer?.preset || 'flat'
-          select.disabled = settings.equalizer?.auto !== false
-          on(select, 'change', () => actions.setEqualizer({ preset: select.value }))
-          return h('div', { class: 'select' }, select)
-        })()
+        sub: '自动匹配关闭时使用这一组。原声 = 不做任何处理。',
+        control: h('div', { class: 'select' }, eqPresetSelect)
       }),
       row({
         title: '用声音辅助判断风格',
@@ -369,9 +436,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       }),
       row({
         title: '当前判定依据',
-        sub: '自动模式实际用了哪条线索。标签来自文件元数据，声音来自上面那套特征分析；两者不一致时以声音为准。',
+        sub: '自动模式实际用了哪条线索。标签来自文件元数据，声音来自上面那套特征分析。',
         control: h('span', { class: 'settings__row-value', text: basisLabel })
-      }),
+      })
+    ], { collapsible: true, sub: eqState }))
+
+    scroll.appendChild(group('播放', [
       row({
         title: '输出设备',
         sub: '通话 / 游戏语音时想让对方听不到音乐：把这里选成你的耳机（通话留在原设备）。音乐只进你的耳朵，麦克风拾不到它，对方就什么也听不到。留「跟随系统」则与其它应用共用默认输出。',
@@ -511,7 +581,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         sub: '后台一张一张地把封面读进缓存（界面正在加载封面时会自动让路），这样打开媒体墙基本是秒出',
         control: switchControl(settings.prewarmArtwork !== false, (value) => actions.setSetting({ prewarmArtwork: value }))
       })
-    ], { collapsible: true, collapsed: true }))
+    ], { collapsible: true }))
 
     scroll.appendChild(group('在线功能', [
       row({
@@ -743,8 +813,9 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         }, '用默认'))
       }),
       sourcesHost
-    ], { collapsible: true, collapsed: true }, {
+    ], {
       collapsible: true,
+      // 开着的时候自动展开：用户是来管音源的，不该还要再点一下
       collapsed: settings.onlineSources !== true,
       sub: settings.onlineSources === true ? '已开启' : '默认关闭'
     }))
@@ -763,7 +834,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         sub: point.description,
         control: h('span', { class: 'settings__row-value', text: `${host.list(pointId).length} 项` })
       }))
-    ], { collapsible: true, collapsed: true }))
+    ], { collapsible: true }))
 
     /* ---------- 外部模型（自填 API） ---------- */
     /*
@@ -865,7 +936,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         sub: '关闭后外部模型不参与风格判断（其它用途以后再加）。判断结果会显示成一条提示，并把「当前判定依据」补上模型给出的理由。',
         control: switchControl(ai.useForStyle !== false, (value) => saveAi({ useForStyle: value }))
       })
-    ], { collapsible: true, collapsed: true, sub: '隐私：只发送歌曲信息与本地特征，音频文件不会上传' }))
+    ], { collapsible: true, sub: '隐私：只发送歌曲信息与本地特征，音频文件不会上传' }))
 
     /* ---------- 快捷键 ---------- */
     scroll.appendChild(group('快捷键', SHORTCUTS.map(([key, description]) => row({
@@ -905,7 +976,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           title: COMMAND_LABEL[item.command] || item.command,
           control: h('span', { class: 'kbd', text: KEY_LABEL[item.accelerator] || item.accelerator })
         }))
-      ], { collapsible: true, collapsed: true }))
+      ], { collapsible: true }))
     }
 
     /* ---------- 关于 ---------- */
@@ -932,6 +1003,43 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 放在最后：此时新内容已经在 DOM 里，scrollTop 才设得住。
      */
     if (previousScroll) scroll.scrollTop = previousScroll
+    /*
+     * 整页重建时先把过渡关掉两帧。
+     * 重建出来的控件都是「新节点」，分段控件的滑块、下拉框的宽度会从初始值过渡到目标值 ——
+     * 用户看到的就是「突然变短然后变长」（反馈里点名的主题框与输出设备框）。
+     */
+    scroll.classList.add('is-repainting')
+    requestAnimationFrame(() => requestAnimationFrame(() => scroll.classList.remove('is-repainting')))
+
+    /* 分区导航：按分组标题找锚点，点一下滚过去；滚动时高亮当前块 */
+    const groupNodes = [...scroll.querySelectorAll('.settings__group')]
+    const sectionOf = (label) => groupNodes.find((node) =>
+      SECTIONS.find((section) => section.label === label)?.groups
+        .includes(node.querySelector('.settings__group-title')?.textContent || ''))
+    sectionNav.replaceChildren(...SECTIONS.map((section) => h('button', {
+      class: 'settings-nav__item',
+      type: 'button',
+      text: section.label,
+      dataset: { section: section.label },
+      onClick: () => {
+        const target = sectionOf(section.label)
+        if (target) scroll.scrollTo({ top: target.offsetTop - 8, behavior: 'smooth' })
+      }
+    })))
+    if (!sectionNavListenerAdded) {
+      on(scroll, 'scroll', () => {
+        // 高亮「当前正在看的那一块」：最后一个标题已经滚过顶部的分区
+        let active = SECTIONS[0].label
+        for (const section of SECTIONS) {
+          const node = sectionOf(section.label)
+          if (node && node.offsetTop - scroll.scrollTop <= 60) active = section.label
+        }
+        for (const item of sectionNav.children) {
+          item.classList.toggle('is-active', item.dataset.section === active)
+        }
+      }, { passive: true })
+      sectionNavListenerAdded = true
+    }
     if (activeId) {
       const restored = scroll.querySelector(`[data-setting-id="${activeId}"]`)
       // 焦点原本在「控件」上（开关 / 下拉），恢复时也优先还给它
