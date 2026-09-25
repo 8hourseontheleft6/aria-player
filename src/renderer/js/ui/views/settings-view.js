@@ -1,6 +1,6 @@
 /** 设置页：iOS 分组列表风格 */
 
-import { h, clear } from '../../core/dom.js'
+import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { remote } from '../../core/remote.js'
 import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from '../../core/format.js'
@@ -45,7 +45,49 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   )
 
   const scroll = h('div', { class: 'settings scroll view-body' })
-  element.append(toolbar, scroll)
+
+  /*
+   * 设置的说明文字统一走这个悬浮提示：鼠标停在 ⓘ 上（或 Tab 聚焦）才显示。
+   *
+   * 之前每条设置下面都挂着一两行说明，整页又长又碎。说明本身有用，但属于
+   * 「需要时才看」的信息 —— 收进 ⓘ 之后主列表只剩「标题 + 控件」，扫一眼就能找到要改的。
+   * 注意声明必须在使用之前：上一版把 infoLayer 用在了声明之前，TDZ 直接把渲染层干崩了。
+   */
+  const infoLayer = h('div', { class: 'setting-tip', hidden: true })
+
+  function hideTip () {
+    infoLayer.hidden = true
+  }
+
+  function showTip (anchorNode, text) {
+    infoLayer.textContent = text
+    infoLayer.hidden = false
+    // 先显示再量：宽度由内容决定
+    const rect = anchorNode.getBoundingClientRect()
+    const box = infoLayer.getBoundingClientRect()
+    const left = Math.max(12, Math.min(rect.left - 8, window.innerWidth - box.width - 12))
+    const above = rect.top - box.height - 8
+    infoLayer.style.left = `${left}px`
+    infoLayer.style.top = `${above > 12 ? above : rect.bottom + 8}px`
+  }
+
+  function infoIcon (text) {
+    if (!text) return null
+    return h('span', {
+      class: 'settings__info',
+      role: 'img',
+      tabindex: '0',
+      'aria-label': text,
+      onMouseenter: (event) => showTip(event.currentTarget, text),
+      onMouseleave: hideTip,
+      onFocus: (event) => showTip(event.currentTarget, text),
+      onBlur: hideTip
+    }, 'i')
+  }
+
+  element.append(toolbar, scroll, infoLayer)
+  // 滚动时气泡会跟丢，直接收起来
+  on(scroll, 'scroll', hideTip, { passive: true })
 
   /* ------------------------------ 小组件 ------------------------------ */
 
@@ -90,8 +132,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       onClick
     },
     h('div', { class: 'settings__row-text' },
-      h('div', { class: 'settings__row-title', text: title }),
-      sub ? h('div', { class: 'settings__row-sub', text: sub }) : null
+      h('div', { class: 'settings__row-title' }, h('span', { text: title }), infoIcon(sub))
     ),
     control ? h('div', { class: 'settings__row-control' }, control) : null
     )
@@ -371,7 +412,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         sub: '后台一张一张地把封面读进缓存（界面正在加载封面时会自动让路），这样打开媒体墙基本是秒出',
         control: switchControl(settings.prewarmArtwork !== false, (value) => actions.setSetting({ prewarmArtwork: value }))
       })
-    ]))
+    ], { collapsible: true, collapsed: true }))
 
     scroll.appendChild(group('在线功能', [
       row({
@@ -603,7 +644,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         }, '用默认'))
       }),
       sourcesHost
-    ], {
+    ], { collapsible: true, collapsed: true }, {
       collapsible: true,
       collapsed: settings.onlineSources !== true,
       sub: settings.onlineSources === true ? '已开启' : '默认关闭'
@@ -623,7 +664,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         sub: point.description,
         control: h('span', { class: 'settings__row-value', text: `${host.list(pointId).length} 项` })
       }))
-    ]))
+    ], { collapsible: true, collapsed: true }))
 
     /* ---------- 快捷键 ---------- */
     scroll.appendChild(group('快捷键', SHORTCUTS.map(([key, description]) => row({

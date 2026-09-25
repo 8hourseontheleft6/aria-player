@@ -3,7 +3,8 @@
    ========================================================================== */
 
 .tracklist {
-  --col-check: 30px;
+  /* 勾选框那一列：平时宽度 0（列表左边缘不会莫名空一块 +「#」不会偏），进多选才让出来 */
+  --col-check: 0px;
   --col-index: 46px;
   --col-album: minmax(120px, 1fr);
   --col-duration: 68px;
@@ -11,6 +12,10 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
+}
+
+.tracklist.is-selecting {
+  --col-check: 30px;
 }
 
 .tracklist__head {
@@ -25,6 +30,8 @@
   color: var(--label-3);
   border-bottom: 0.5px solid var(--separator);
   flex: none;
+  /* 进出多选时这一列平滑让出 / 收回（两端轨道数一致，可以插值） */
+  transition: grid-template-columns var(--dur) var(--ease-ios);
 }
 
 /* ------------------------------ 复选框 ------------------------------ */

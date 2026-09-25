@@ -8,7 +8,7 @@ import { selectVisibleTracks, selectTitle, describeMatch } from '../../core/sele
 import { EVENTS } from '../../core/bus.js'
 import { createTrackList } from '../widgets/track-list.js'
 import { createListMenuButton } from '../menus/list-menu.js'
-import { openPopover, popoverRows } from '../widgets/overlay.js'
+import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
 
 const SORT_OPTIONS = [
   { key: 'default', label: '默认（艺人 / 专辑 / 音轨）' },
@@ -266,33 +266,42 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
 
   const searchSlot = h('div', { class: 'search-slot' }, searchToggle, searchBox)
 
-  const scanButton = h('button', {
-    class: 'btn btn--icon',
-    type: 'button',
-    title: '重新扫描音乐目录',
-    onClick: () => actions.rescan()
-  }, icon('refresh', { className: 'icon icon--stroke' }))
-
-  const locateButton = h('button', {
-    class: 'btn btn--icon',
-    type: 'button',
-    title: '定位到正在播放',
-    onClick: () => {
-      const id = store.get().playback.trackId
-      if (id) trackList.scrollToTrack(id)
-    }
-  }, icon('target', { className: 'icon icon--stroke' }))
-
+  /*
+   * 工具栏只留三个按钮：搜索 / 排序 / ⋯。
+   * 「定位到正在播放」「重新扫描音乐目录」是低频操作，收进 ⋯ 里 ——
+   * 五个图标按钮排在一起既挤又难扫（用户反馈过界面不协调）。
+   */
   const toolbar = h('div', { class: 'view-toolbar' },
     compactTitle,
     h('div', { class: 'view-toolbar__spacer' }),
     metaLabel,
     searchSlot,
-    locateButton,
     sortButton,
-    scanButton,
-    // 批量选择的入口（另一个入口是歌曲右键菜单里的「开始多选」）
-    createListMenuButton({ actions, getTracks: () => trackList.tracks })
+    // 批量选择 + 低频操作的入口
+    createListMenuButton({
+      actions,
+      getTracks: () => trackList.tracks,
+      items: [
+        { separator: true },
+        {
+          label: '定位到正在播放',
+          value: '',
+          onClick: () => {
+            closeAllLayers()
+            const id = store.get().playback.trackId
+            if (id) trackList.scrollToTrack(id)
+          }
+        },
+        {
+          label: '重新扫描音乐目录',
+          value: '',
+          onClick: () => {
+            closeAllLayers()
+            actions.rescan()
+          }
+        }
+      ]
+    })
   )
 
   /* ---------------- 大标题 ---------------- */

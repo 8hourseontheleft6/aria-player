@@ -17,8 +17,9 @@ import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
  * @param {object} options
  * @param {object} options.actions
  * @param {() => object[]} [options.getTracks] 当前列表的曲目（「全选」用）
+ * @param {Array<object>} [options.items] 追加项（{ label, value, onClick, danger } | { separator: true }）
  */
-export function createListMenuButton ({ actions, getTracks = null }) {
+export function createListMenuButton ({ actions, getTracks = null, items = [] }) {
   const button = h('button', {
     class: 'btn btn--icon',
     type: 'button',
@@ -50,7 +51,8 @@ export function createListMenuButton ({ actions, getTracks = null }) {
             actions.startSelection()
             actions.setSelection(tracks.map((track) => track.id))
           }
-        }
+        },
+        ...items
       ])
     })
   }

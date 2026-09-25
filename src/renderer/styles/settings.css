@@ -31,8 +31,8 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 46px;
-  padding: 10px 14px;
+  min-height: 44px;
+  padding: 8px 14px;
   position: relative;
 }
 
@@ -55,6 +55,9 @@
 }
 
 .settings__row-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-body);
   color: var(--label);
 }
@@ -64,6 +67,56 @@
   color: var(--label-3);
   line-height: 1.5;
   user-select: text;
+}
+
+/* ---------------------- 说明的 ⓘ（悬浮才展开） ---------------------- */
+/*
+ * 说明不再常驻在每行下面（整页又长又碎），改成一个小圆标：
+ * 鼠标悬停 / Tab 聚焦时才在它上方弹出气泡。
+ */
+
+.settings__info {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--label-4);
+  color: var(--label-3);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  transition: color var(--dur-fast) var(--ease-ios), border-color var(--dur-fast) var(--ease-ios);
+}
+
+.settings__info:hover,
+.settings__info:focus-visible {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: none;
+}
+
+.setting-tip {
+  position: fixed;
+  z-index: 90;
+  max-width: 300px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-popover);
+  box-shadow: var(--elev-3), 0 0 0 0.5px var(--separator);
+  color: var(--label-2);
+  font-size: var(--text-footnote);
+  line-height: 1.5;
+  pointer-events: none;
+  animation: tip-in var(--dur-fast) var(--ease-ios);
+}
+
+@keyframes tip-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
 }
 
 .settings__row-value {
