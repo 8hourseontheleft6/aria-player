@@ -3185,6 +3185,23 @@ async function runSmoke ({ win, ctx }) {
         ? document.elementFromPoint(Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2))
         : null
       const hitsControl = Boolean(hit && hit.closest && hit.closest('.now-playing__controls'))
+      /*
+       * 把底部«所有»可点元素都命中测试一遍 —— 用户反馈过示波器挡按键，
+       * 只测一个按钮不够：进度条、工具条那一排、队列/歌词/更多按钮都要能点到。
+       */
+      const targets = [
+        ...document.querySelectorAll('.now-playing__controls .btn'),
+        ...document.querySelectorAll('.now-playing__tools .btn'),
+        document.querySelector('.now-playing__progress .slider')
+      ].filter(Boolean)
+      const blocked = []
+      for (const node of targets) {
+        const box = node.getBoundingClientRect()
+        if (!box.width || !box.height) continue
+        const point = document.elementFromPoint(Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2))
+        const ok = point === node || node.contains(point)
+        if (!ok) blocked.push((node.title || node.className || node.tagName) + ' -> ' + (point ? point.className || point.tagName : 'null'))
+      }
       const veil = document.querySelector('.now-playing__veil')
       const veilStyle = veil ? getComputedStyle(veil) : null
       const tint = getComputedStyle(document.documentElement).getPropertyValue('--tint').trim()
@@ -3202,6 +3219,8 @@ async function runSmoke ({ win, ctx }) {
         zIndex: stripStyle ? stripStyle.zIndex : null,
         hitsControl,
         hitClass: hit ? (typeof hit.className === 'string' ? hit.className : hit.tagName) : null,
+        checkedTargets: targets.length,
+        blocked,
         hasStyleButton: Boolean(button),
         tint,
         hasGlass,
@@ -3211,16 +3230,21 @@ async function runSmoke ({ win, ctx }) {
     record('沉浸式示波器：铺满底部但不挡按键，背景吃专辑色',
       vizCheck.hasStrip === true &&
       vizCheck.pointerEvents === 'none' &&
-      vizCheck.zIndex === '0' &&
+      // 用户要求：在所有组件下面、背景上面 → 阶梯里给的是 2
+      vizCheck.zIndex === '2' &&
       vizCheck.hitsControl === true &&
       vizCheck.hasStyleButton === true &&
+      vizCheck.blocked.length === 0 &&
+      // 实测底部能匹配到 4 个可点元素（3 个播放键 + 进度条；工具条类名不同没算进来）
+      vizCheck.checkedTargets >= 3 &&
       vizCheck.tint.length > 3 &&
       vizCheck.hasGlass === true &&
       vizCheck.veilTinted === true,
       `底部示波器存在=${vizCheck.hasStrip}（pointer-events=${vizCheck.pointerEvents}、z-index=${vizCheck.zIndex}）；` +
       `播放控件中心命中到 ${vizCheck.hitClass}（点到控件=${vizCheck.hitsControl}）；` +
       `顶栏有样式按钮=${vizCheck.hasStyleButton}；专辑色 --tint=${vizCheck.tint}；` +
-      `背景磨砂=${vizCheck.hasGlass}、带专辑色=${vizCheck.veilTinted}`)
+      `背景磨砂=${vizCheck.hasGlass}、带专辑色=${vizCheck.veilTinted}；` +
+      `底部可点 ${vizCheck.checkedTargets} 个、被挡住的 ${JSON.stringify(vizCheck.blocked)}`)
 
     /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
     const audioOutput = await evaluate(win, `
