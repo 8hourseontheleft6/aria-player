@@ -7,7 +7,6 @@ import { formatDuration, formatRate } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { createArtworkView } from '../widgets/artwork-node.js'
 import { createLyricsView } from '../widgets/lyrics-view.js'
-import { createVisualizer } from '../widgets/visualizer.js'
 import { openPillMenu } from '../widgets/pill-menu.js'
 import { presetOptions, matchPreset, PRESETS } from '../../core/equalizer-presets.js'
 
@@ -103,20 +102,12 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
       items
     })
   }
-  const visualizer = createVisualizer({
-    engine,
-    store,
-    bus,
-    getStyle: () => store.get().settings.visualizerStyle || 'bars',
-    onPickStyle: (style) => actions.setSetting({ visualizerStyle: style })
-  })
   const topbar = h('div', { class: 'now-playing__topbar' },
     closeButton,
     h('div', { class: 'now-playing__caption', text: '正在播放' }),
     h('div', { class: 'now-playing__spacer' }),
     revealButton,
     // 示波器样式切换（底部那条只是装饰，不接收鼠标）
-    visualizer.button,
     eqButton,
     lyricsToggle,
     queueToggle
@@ -383,7 +374,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
   /* ---------------- 主结构 ---------------- */
   const body = h('div', { class: 'now-playing__body' }, left, right)
   const element = h('section', { class: 'now-playing', id: 'now-playing', hidden: true },
-    artBackground, veil, glow, topbar, body, visualizer.element)
+    artBackground, veil, glow, topbar, body)
 
   /* ---------------- 时间显示 ---------------- */
   function updateTimes (time, duration) {
@@ -448,9 +439,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
       updateTimes(player.getTime(), player.getDuration())
       requestAnimationFrame(() => lyricsView.alignToActive({ animated: false }))
       // 可视化只在面板打开时绘帧，关掉就停（别在后台空转烧 CPU）
-      visualizer.start()
     } else if (!element.hidden) {
-      visualizer.stop()
       element.classList.add('is-closing')
       setTimeout(() => {
         if (!store.get().ui.nowPlayingOpen) element.hidden = true

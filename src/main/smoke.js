@@ -3232,8 +3232,8 @@ async function runSmoke ({ win, ctx }) {
         veilTinted
       }
     `)
-    record('沉浸式示波器：铺满底部但不挡按键，背景吃专辑色',
-      vizCheck.hasStrip === true &&
+    record('播放页已无示波器（该特性移到了分支 wip/visualizer-immersive）',
+      vizCheck.hasStrip === false &&
       vizCheck.pointerEvents === 'none' &&
       // 用户要求：在所有组件下面、背景上面 → 阶梯里给的是 2
       vizCheck.zIndex === '2' &&
