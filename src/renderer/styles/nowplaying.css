@@ -52,6 +52,16 @@
   pointer-events: none;
 }
 
+.now-playing__body {
+  position: relative;
+  z-index: 3;
+}
+
+.now-playing__topbar {
+  position: relative;
+  z-index: 4;
+}
+
 .now-playing__veil {
   position: absolute;
   inset: 0;
@@ -61,7 +71,17 @@
   pointer-events: none;
 }
 
-html[data-theme="light"] .now-playing__veil {
+html[data-theme="light"] .now-playing__body {
+  position: relative;
+  z-index: 3;
+}
+
+.now-playing__topbar {
+  position: relative;
+  z-index: 4;
+}
+
+.now-playing__veil {
   background: color-mix(in srgb, var(--bg-window) 72%, transparent);
 }
 
@@ -646,12 +666,31 @@ html[data-platform="darwin"] .now-playing__topbar {
 }
 
 /* 玻璃感的一层：压在封面之上，颜色跟着专辑走 */
+.now-playing__body {
+  position: relative;
+  z-index: 3;
+}
+
+.now-playing__topbar {
+  position: relative;
+  z-index: 4;
+}
+
 .now-playing__veil {
+  /*
+   * 底色由专辑色与窗口底色混合 —— 之前混了太多窗口白（38%），
+   * 浅色主题下几乎被冲掉，用户反馈「背景没有变色」。
+   * 现在：两团专辑色径向渐变（一上一下）+ 40% 专辑色打底，
+   * 再交给 backdrop-filter 做磨砂。浅色下也能明显看出是这张专辑的颜色。
+   */
   background:
-    linear-gradient(160deg,
-      color-mix(in srgb, var(--tint) 30%, transparent),
-      transparent 58%),
-    color-mix(in srgb, var(--bg-window) 38%, transparent);
+    radial-gradient(120% 90% at 15% 0%,
+      color-mix(in srgb, var(--tint) 58%, transparent),
+      transparent 62%),
+    radial-gradient(100% 80% at 88% 108%,
+      color-mix(in srgb, var(--tint-2, var(--tint)) 52%, transparent),
+      transparent 66%),
+    color-mix(in srgb, var(--tint) 40%, var(--bg-window));
   backdrop-filter: blur(64px) saturate(190%);
   -webkit-backdrop-filter: blur(64px) saturate(190%);
 }

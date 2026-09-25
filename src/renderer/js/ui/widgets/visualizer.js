@@ -10,23 +10,31 @@
  */
 
 import { h, on } from '../../core/dom.js'
+import { icon } from '../../core/icons.js'
 
 const STYLES = ['bars', 'wave', 'ring']
 export const VISUALIZER_STYLES = STYLES
 
 export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars', onPickStyle = null }) {
   const canvas = h('canvas', { class: 'visualizer__canvas' })
+  /*
+   * 两条元素：
+   *   · strip —— 铺在底部**只做装饰**，必须 pointer-events: none，
+   *     否则它会盖住播放控件（用户反馈「示波器阻挡 UI 按键」）；
+   *   · button —— 顶栏上的小按钮，切样式用它。
+   */
+  const strip = h('div', { class: 'visualizer', 'aria-hidden': 'true' }, canvas)
   const button = h('button', {
-    class: 'visualizer',
+    class: 'btn btn--icon',
     type: 'button',
-    title: '音频可视化（点击切换样式）',
+    title: '音频可视化样式',
     onClick: () => {
       const current = getStyle()
       const next = STYLES[(STYLES.indexOf(current) + 1) % STYLES.length]
       onPickStyle?.(next)
       bus.emit('visualizer:style', next)
     }
-  }, canvas)
+  }, icon('waveform', { className: 'icon icon--stroke' }))
   const context = canvas.getContext('2d')
 
   let analyser = null
@@ -142,7 +150,7 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     const style = getStyle()
     if (style !== lastStyle) {
       lastStyle = style
-      button.dataset.style = style
+      strip.dataset.style = style
     }
 
     const width = canvas.clientWidth
@@ -187,7 +195,8 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
   button.dataset.style = lastStyle
 
   return {
-    element: button,
+    element: strip,
+    button,
     start,
     stop,
     resize,

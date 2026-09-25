@@ -103,11 +103,20 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
       items
     })
   }
+  const visualizer = createVisualizer({
+    engine,
+    store,
+    bus,
+    getStyle: () => store.get().settings.visualizerStyle || 'bars',
+    onPickStyle: (style) => actions.setSetting({ visualizerStyle: style })
+  })
   const topbar = h('div', { class: 'now-playing__topbar' },
     closeButton,
     h('div', { class: 'now-playing__caption', text: '正在播放' }),
     h('div', { class: 'now-playing__spacer' }),
     revealButton,
+    // 示波器样式切换（底部那条只是装饰，不接收鼠标）
+    visualizer.button,
     eqButton,
     lyricsToggle,
     queueToggle
@@ -120,13 +129,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
   const artistNode = h('div', { class: 'now-playing__artist truncate', text: '' })
   const albumNode = h('div', { class: 'now-playing__album truncate', text: '' })
 
-  const visualizer = createVisualizer({
-    engine,
-    store,
-    bus,
-    getStyle: () => store.get().settings.visualizerStyle || 'bars',
-    onPickStyle: (style) => actions.setSetting({ visualizerStyle: style })
-  })
+
 
   const info = h('div', { class: 'now-playing__info' }, titleNode, artistNode, albumNode)
 

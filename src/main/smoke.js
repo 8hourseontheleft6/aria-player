@@ -3170,6 +3170,58 @@ async function runSmoke ({ win, ctx }) {
       await new Promise((resolve) => fakeAi.close(resolve))
     }
 
+    /* ---------- 沉浸式示波器：铺底部但不挡按键，背景吃专辑色 ---------- */
+    const vizCheck = await evaluate(win, `
+      const { actions } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      actions.openNowPlaying()
+      await settle(1000)
+      const strip = document.querySelector('.visualizer')
+      const stripStyle = strip ? getComputedStyle(strip) : null
+      // 关键：播放控件中心做命中测试，不能被底部那条示波器抢走（用户反馈过它挡按键）
+      const control = document.querySelector('.now-playing__controls .btn')
+      const rect = control ? control.getBoundingClientRect() : null
+      const hit = rect
+        ? document.elementFromPoint(Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2))
+        : null
+      const hitsControl = Boolean(hit && hit.closest && hit.closest('.now-playing__controls'))
+      const veil = document.querySelector('.now-playing__veil')
+      const veilStyle = veil ? getComputedStyle(veil) : null
+      const tint = getComputedStyle(document.documentElement).getPropertyValue('--tint').trim()
+      const hasGlass = veilStyle ? String(veilStyle.backdropFilter).includes('blur') : false
+      const veilTinted = veilStyle
+        ? (String(veilStyle.backgroundImage).includes('rgb') || String(veilStyle.backgroundColor).includes('rgb'))
+        : false
+      const button = [...document.querySelectorAll('.now-playing__topbar .btn')]
+        .find((node) => String(node.title || '').includes('可视化'))
+      actions.closeNowPlaying()
+      await settle(600)
+      return {
+        hasStrip: Boolean(strip),
+        pointerEvents: stripStyle ? stripStyle.pointerEvents : null,
+        zIndex: stripStyle ? stripStyle.zIndex : null,
+        hitsControl,
+        hitClass: hit ? String(hit.className || hit.tagName).slice(0, 40) : null,
+        hasStyleButton: Boolean(button),
+        tint,
+        hasGlass,
+        veilTinted
+      }
+    `)
+    record('沉浸式示波器：铺满底部但不挡按键，背景吃专辑色',
+      vizCheck.hasStrip === true &&
+      vizCheck.pointerEvents === 'none' &&
+      vizCheck.zIndex === '0' &&
+      vizCheck.hitsControl === true &&
+      vizCheck.hasStyleButton === true &&
+      vizCheck.tint.length > 3 &&
+      vizCheck.hasGlass === true &&
+      vizCheck.veilTinted === true,
+      `底部示波器存在=${vizCheck.hasStrip}（pointer-events=${vizCheck.pointerEvents}、z-index=${vizCheck.zIndex}）；` +
+      `播放控件中心命中到 ${vizCheck.hitClass}（点到控件=${vizCheck.hitsControl}）；` +
+      `顶栏有样式按钮=${vizCheck.hasStyleButton}；专辑色 --tint=${vizCheck.tint}；` +
+      `背景磨砂=${vizCheck.hasGlass}、带专辑色=${vizCheck.veilTinted}`)
+
     /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
     const audioOutput = await evaluate(win, `
       const { actions, store, engine } = window.__aria
