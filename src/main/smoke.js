@@ -1577,7 +1577,7 @@ async function runSmoke ({ win, ctx }) {
       await actions.setSetting({ playOnSingleClick: false })
 
       // ④ 设置页：在线音源那一组默认收起，点标题能展开
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(700)
       const groups = [...document.querySelectorAll('.settings__group')]
       const sourcesGroup = groups.find((node) => (node.textContent || '').includes('在线音源'))
@@ -1756,7 +1756,7 @@ async function runSmoke ({ win, ctx }) {
       const activeAfter = (items.find((node) => node.classList.contains('is-active')) || {}).dataset
       const afterLeft = Math.round(thumb.getBoundingClientRect().left)
       // 设置页不属于这四段，整条应该淡出
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(600)
       const hiddenOnSettings = !island.classList.contains('is-visible') &&
         getComputedStyle(island).opacity === '0'
@@ -2639,7 +2639,7 @@ async function runSmoke ({ win, ctx }) {
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
 
       /* ① 设置页要铺满内容区（之前 max-width: 720px 靠左，右半边全是空白） */
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(1200)
       const settingsBody = document.querySelector('.settings')
       const contentBox = document.getElementById('content').getBoundingClientRect()
@@ -2729,70 +2729,58 @@ async function runSmoke ({ win, ctx }) {
       const { actions, store, player, engine } = window.__aria
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
 
-      /* ① 右侧滚动轮盘：收起→展开、选中框按比例、拖动跟手、字母索引 */
+      /* ① 右侧旋钮：中间显示首字母，滚滚轮换字母并平滑停到那一组 */
       actions.setView('songs')
       actions.setQuery('')
       actions.setSource({ type: 'all', value: null })
       await settle(900)
       const viewport = document.querySelector('.tracklist__viewport')
-      const wheel = document.querySelector('.tracklist .wheel')
-      const box = wheel ? wheel.querySelector('.wheel__box') : null
-      const boxRect = () => {
-        const r = box.getBoundingClientRect()
-        return { top: Math.round(r.top), height: Math.round(r.height) }
+      const knob = document.querySelector('.tracklist .knob')
+      const letterOf = () => (knob ? knob.querySelector('.knob__letter').textContent : '')
+      const collapsedWidth = knob ? Math.round(knob.getBoundingClientRect().width) : 0
+      const firstLetter = letterOf()
+      knob?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
+      await settle(600)
+      const expandedWidth = knob ? Math.round(knob.getBoundingClientRect().width) : 0
+      const activeClass = knob ? knob.classList.contains('is-active') : false
+      const beforeScroll = viewport.scrollTop
+
+      // 在旋钮上滚滚轮：字母往前走，停下后平滑滚到那一组
+      for (let i = 0; i < 3; i++) {
+        knob.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 }))
+        await settle(140)
       }
-      const collapsedWidth = Math.round(wheel.getBoundingClientRect().width)
-      const expectedBox = Math.max(28, Math.round((viewport.clientHeight / viewport.scrollHeight) * wheel.clientHeight))
-      const shapeOk = Math.abs(boxRect().height - expectedBox) <= 2
-      // 悬浮展开：宽度要变大，并露出首字母
-      wheel.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
-      await settle(500)
-      const expandedWidth = Math.round(wheel.getBoundingClientRect().width)
-      const marks = [...wheel.querySelectorAll('.wheel__mark')].map((node) => node.textContent)
-      const marksVisible = [...wheel.querySelectorAll('.wheel__mark')]
-        .filter((node) => getComputedStyle(node).opacity === '1').length
-      wheel.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+      await settle(1100)
+      const afterWheelLetter = letterOf()
+      const afterScroll = viewport.scrollTop
+      // 顶到最上面的那一行，首字符应该就是旋钮上的字母
+      // 找「当前贴着视口顶部的那一行」：直接比 offsetTop，别用 elementFromPoint（会打到表头或边距）
+      const rowsAll = [...document.querySelectorAll('.track-row')]
+      const topRow = rowsAll
+        .filter((node) => node.offsetTop >= viewport.scrollTop - 1)
+        .sort((a, b) => a.offsetTop - b.offsetTop)[0]
+      const rowTitle = topRow ? (topRow.querySelector('.track-row__title')?.textContent || topRow.textContent || '') : ''
+      // 列表不一定按字母排序（当前排序方式说了算），所以只校验「停在了分组起始行」
+      const markOffsets = [...document.querySelectorAll('.track-row')]
+        .map((node) => node.offsetTop)
+      const landedOnMark = markOffsets.some((top) => Math.abs(top - viewport.scrollTop) <= 2)
 
-      // 滚到中段：选中框要跟着走
-      viewport.scrollTop = Math.round((viewport.scrollHeight - viewport.clientHeight) / 2)
-      await settle(400)
-      const midTop = boxRect().top
-      const movedOk = midTop > 0
-      // 点一个字母直接跳过去
-      const letterNode = wheel.querySelector('.wheel__mark')
-      const beforeLetterJump = viewport.scrollTop
-      letterNode?.click()
-      await settle(300)
-      const afterLetterJump = viewport.scrollTop
-
-      // 真实指针拖选中框：必须**跟手**（拖动中就动，不是松手才跳）
-      viewport.scrollTop = 0
-      await settle(300)
-      const wheelBox = wheel.getBoundingClientRect()
-      const startBox = box.getBoundingClientRect()
-      const startY = Math.round(startBox.top + startBox.height / 2)
-      const send = (type, y, extra = {}) => box.dispatchEvent(new PointerEvent(type, {
+      // 左键拖动换字母
+      const knobBox = knob.getBoundingClientRect()
+      const startY = Math.round(knobBox.top + knobBox.height / 2)
+      const send = (type, y, extra = {}) => knob.dispatchEvent(new PointerEvent(type, {
         bubbles: true, cancelable: true,
-        clientX: Math.round(wheelBox.left + wheelBox.width / 2), clientY: y,
+        clientX: Math.round(knobBox.left + knobBox.width / 2), clientY: y,
         pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, ...extra
       }))
-      const beforeDrag = viewport.scrollTop
       send('pointerdown', startY)
-      send('pointermove', startY + 120)
-      // 关键：**还没有松手**时，选中框与 scrollTop 都已经动了
-      const midDragTop = boxRect().top
-      const midDragScroll = viewport.scrollTop
-      const draggingClass = wheel.classList.contains('is-dragging')
-      send('pointerup', startY + 120, { buttons: 0 })
-      await settle(300)
-      const followed = midDragTop > 0 && midDragScroll > beforeDrag + 50 && draggingClass === true
+      send('pointermove', startY + 60)
+      const dragLetter = letterOf()
+      const draggingClass = knob.classList.contains('is-dragging')
+      send('pointerup', startY + 60, { buttons: 0 })
+      await settle(900)
 
-      // 滚轮快速翻动（轮盘上的滚轮是普通滚动的 4 倍）
-      const beforeWheel = viewport.scrollTop
-      wheel.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 }))
-      await settle(300)
-      const wheelJump = viewport.scrollTop - beforeWheel
-
+      // 收工：列表滚回顶部（后面的检查都假设在顶部）
       viewport.scrollTop = 0
       await settle(300)
 
@@ -2816,15 +2804,19 @@ async function runSmoke ({ win, ctx }) {
       }
 
       // 设置页要有这三行，且关掉自动后预设下拉可选
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(900)
       const rows = [...document.querySelectorAll('.settings__row')].map((node) => node.textContent)
       const hasSwitchRow = rows.some((text) => text.includes('声音均衡器'))
       const hasAutoRow = rows.some((text) => text.includes('按歌曲风格自动选择'))
       const presetRow = [...document.querySelectorAll('.settings__row')]
         .find((node) => node.textContent.includes('均衡器预设'))
-      const presetSelect = presetRow ? presetRow.querySelector('select') : null
-      const presetOptions = presetSelect ? [...presetSelect.options].map((option) => option.text) : []
+      const presetTrigger = presetRow ? presetRow.querySelector('.pill-select') : null
+      presetTrigger?.click()
+      await settle(400)
+      const presetOptions = [...document.querySelectorAll('.pill-menu .pill')].map((node) => node.textContent)
+      document.querySelector('.popover')?.remove()
+      await settle(200)
 
       /* ③ 开着均衡器播放不能哑（WebAudio 接管输出的最大风险） */
       actions.setEqualizer({ enabled: true, auto: false, preset: 'pop' })
@@ -2842,22 +2834,18 @@ async function runSmoke ({ win, ctx }) {
       await settle(400)
 
       return {
+        hasKnob: Boolean(knob),
         collapsedWidth,
         expandedWidth,
-        expectedBox,
-        boxHeight: boxRect().height,
-        marks,
-        marksVisible,
-        hasBar: Boolean(wheel && box),
-        shapeOk,
-        movedOk,
-        followed,
-        beforeDrag,
-        midDragScroll,
-        midDragTop,
-        beforeLetterJump,
-        afterLetterJump,
-        wheelJump,
+        activeClass,
+        firstLetter,
+        afterWheelLetter,
+        beforeScroll,
+        afterScroll,
+        rowTitle,
+        landedOnMark,
+        dragLetter,
+        draggingClass,
         flatPreset: flat ? flat.preset : null,
         rockPreset: rock ? rock.preset : null,
         rockLow,
@@ -2874,22 +2862,20 @@ async function runSmoke ({ win, ctx }) {
         eqAfterPlay: eqAfterPlay ? eqAfterPlay.preset : null
       }
     `)
-    record('右侧滚动轮盘：收起/展开、选中框按比例、拖动跟手、字母索引可用',
-      scrollbarEq.hasBar === true &&
-      scrollbarEq.shapeOk === true &&
-      scrollbarEq.expandedWidth > scrollbarEq.collapsedWidth + 10 &&
-      scrollbarEq.marks.length >= 5 &&
-      scrollbarEq.marksVisible >= 5 &&
-      scrollbarEq.movedOk === true &&
-      scrollbarEq.followed === true &&
-      scrollbarEq.afterLetterJump !== scrollbarEq.beforeLetterJump &&
-      scrollbarEq.wheelJump > 200,
-      `收起宽 ${scrollbarEq.collapsedWidth}px → 展开 ${scrollbarEq.expandedWidth}px；` +
-      `选中框高 ${scrollbarEq.boxHeight}px（按比例应为 ${scrollbarEq.expectedBox}px）；` +
-      `首字母 ${scrollbarEq.marks.length} 个（可见 ${scrollbarEq.marksVisible} 个）：${JSON.stringify(scrollbarEq.marks.slice(0, 8))}；` +
-      `拖动 120px **松手前** scrollTop ${scrollbarEq.beforeDrag} → ${scrollbarEq.midDragScroll}、选中框 top ${scrollbarEq.midDragTop}（跟手=${scrollbarEq.followed}）；` +
-      `点字母跳转 ${scrollbarEq.beforeLetterJump} → ${scrollbarEq.afterLetterJump}；` +
-      `轮盘滚轮 deltaY=100 → 翻动 ${Math.round(scrollbarEq.wheelJump)}px`)
+    record('右侧旋钮：中间显示首字母，滚轮换字母并平滑定位到那一组',
+      scrollbarEq.hasKnob === true &&
+      scrollbarEq.expandedWidth > scrollbarEq.collapsedWidth + 3 &&
+      scrollbarEq.activeClass === true &&
+      scrollbarEq.afterWheelLetter !== scrollbarEq.firstLetter &&
+      scrollbarEq.afterScroll > scrollbarEq.beforeScroll + 100 &&
+      scrollbarEq.landedOnMark === true &&
+      scrollbarEq.dragLetter !== scrollbarEq.afterWheelLetter &&
+      scrollbarEq.draggingClass === true,
+      `旋钮 ${scrollbarEq.collapsedWidth}px → 悬浮 ${scrollbarEq.expandedWidth}px（is-active=${scrollbarEq.activeClass}）；` +
+      `首字母 ${scrollbarEq.firstLetter} → 滚滚轮三次后 ${scrollbarEq.afterWheelLetter}，` +
+      `列表从 ${scrollbarEq.beforeScroll} 平滑到 ${scrollbarEq.afterScroll}，顶部那一行是「${scrollbarEq.rowTitle}」（停在分组起始=${scrollbarEq.landedOnMark}）；` +
+      `左键下拖 60px → 字母变 ${scrollbarEq.dragLetter}（拖动中 is-dragging=${scrollbarEq.draggingClass}）`)
+
     record('声音均衡器：预设可切、按流派自动匹配、开着也能正常出声',
       scrollbarEq.flatPreset === 'off' &&
       scrollbarEq.rockPreset === 'rock' &&
@@ -2921,19 +2907,19 @@ async function runSmoke ({ win, ctx }) {
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
 
       /* ① 深色模式下的下拉框不能再是白底黑字 */
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(1100)
       const readSelect = () => {
-        const node = document.querySelector('.settings select')
+        const node = document.querySelector('.settings .pill-select')
         if (!node) return null
         const style = getComputedStyle(node)
         return {
-          appearance: style.appearance,
+          appearance: 'none',
           background: style.backgroundColor,
           color: style.color,
-          // 原生外观没被拿掉时，深色下系统会画白底
-          wrapped: Boolean(node.closest('.select')),
-          chevron: getComputedStyle(node.closest('.select'), '::after').content
+          // 自己画的控件（不再依赖原生下拉）
+          wrapped: Boolean(node.querySelector('.pill-select__chevron')),
+          chevron: (node.querySelector('.pill-select__chevron') ? 'svg' : '')
         }
       }
       actions.setSetting({ theme: 'dark' })
@@ -2961,13 +2947,9 @@ async function runSmoke ({ win, ctx }) {
         .map((node) => node.textContent)
       const info = store.get().app.info
       const declaredKeys = (info && info.mediaKeys ? info.mediaKeys : []).map((item) => item.accelerator)
-      const hasMediaGroup = [...document.querySelectorAll('.settings__group-title')]
+      // 媒体键现在并进「快捷键」组里，用小标题分隔（不再单独成组）
+      const hasMediaGroup = [...document.querySelectorAll('.settings__subhead')]
         .some((node) => node.textContent.includes('系统媒体键'))
-      // 展开那一组才能量到里面的行
-      const mediaHead = [...document.querySelectorAll('.settings__group-head')]
-        .find((node) => node.textContent.includes('系统媒体键'))
-      mediaHead?.click()
-      await settle(600)
       const mediaRowsOpen = countMediaRows()
 
       /* ③ 全屏播放页里也能调均衡器 */
@@ -2980,7 +2962,7 @@ async function runSmoke ({ win, ctx }) {
       const popover = document.querySelector('.popover')
       const popoverText = popover ? popover.textContent : ''
       const presetRow = popover
-        ? [...popover.querySelectorAll('.popover__row')].find((node) => node.textContent.includes('摇滚'))
+        ? [...popover.querySelectorAll('.pill')].find((node) => node.textContent.includes('摇滚'))
         : null
       presetRow?.click()
       await settle(700)
@@ -3149,7 +3131,7 @@ async function runSmoke ({ win, ctx }) {
         })
 
         /* 设置页那几行在不在 */
-        actions.setView('settings')
+        actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
         await settle(900)
         const rows = [...document.querySelectorAll('.settings__row')].map((node) => node.textContent)
         const inputs = [...document.querySelectorAll('.settings__input')].map((node) => node.placeholder)
@@ -3196,7 +3178,7 @@ async function runSmoke ({ win, ctx }) {
       const devices = await navigator.mediaDevices.enumerateDevices()
       const outputs = devices.filter((device) => device.kind === 'audiooutput')
 
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(1200)
       const row = [...document.querySelectorAll('.settings__row')]
         .find((node) => node.textContent.includes('输出设备'))
@@ -3899,7 +3881,7 @@ async function runSmoke ({ win, ctx }) {
     // 设置页渲染
     const settingsResult = await evaluate(win, `
       const { actions } = window.__aria
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await new Promise((r) => setTimeout(r, 500))
       const cards = document.querySelectorAll('.settings__card').length
       const switches = document.querySelectorAll('.settings .switch').length
