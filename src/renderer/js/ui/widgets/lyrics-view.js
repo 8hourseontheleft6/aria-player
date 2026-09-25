@@ -24,13 +24,13 @@ import { EVENTS } from '../../core/bus.js'
 import { karaokeProgress } from '../../core/lrc.js'
 import { createSlider } from './slider.js'
 import { openPopover } from './overlay.js'
+import { remote } from '../../core/remote.js'
 
 const RESUME_DELAY = 4200
 /** 拖动超过这么多像素才算「在拖歌词」，否则仍然算点击某一行 */
 const DRAG_THRESHOLD = 3
 
-export function createLyricsView ({ className = 'lyrics-region', store, bus, player }) {
-  const inner = h('div', { class: 'lyrics__inner' })
+export function createLyricsView ({ className = 'lyrics-region', store, bus, player }) {  const inner = h('div', { class: 'lyrics__inner' })
   // tabindex：容器要能拿到焦点，方向键/PageDown 才有地方生效
   const scroller = h('div', { class: 'lyrics scroll', tabindex: '0' }, inner)
 
@@ -188,15 +188,39 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
 
     if (!lyrics.lines?.length) {
       const isEmptyTrack = lyrics.status === 'empty'
+      /*
+       * 没歌词时告诉用户「为什么没有」和「怎么办」。
+       * 总开关（onlineFeatures）默认是关的 —— 这是当初定的默认（不联网）。
+       * 但用户遇到的就是「没有 .lrc 的歌放不出歌词」，所以这里直接给一个开关：
+       * 点一下打开总开关 + 歌词源，再重拉一次。
+       */
+      const onlineOff = store.get().settings.onlineFeatures !== true
+      const enableOnline = h('button', {
+        class: 'btn btn--primary',
+        type: 'button',
+        onClick: async () => {
+          await remote.settings.set({ onlineFeatures: true, onlineLyrics: true })
+          // 等设置落到 store 再重拉：插件读的是 store 里的开关
+          setTimeout(() => player.reloadLyrics(), 400)
+        }
+      }, icon('search', { className: 'icon icon--stroke' }), '打开在线歌词')
       showEmpty({
         iconName: 'lyrics',
         title: isEmptyTrack ? '这首歌没有歌词' : '未找到歌词',
-        text: '把同名 .lrc 文件放在歌曲旁边即可自动加载；也支持「歌名 - 歌手.lrc」这类命名。',
-        action: h('button', {
-          class: 'btn',
+        text: onlineOff
+          ? '本地没有找到 .lrc 文件。「在线歌词」打开后会自动联网匹配（也可在设置 → 在线功能里切换）。'
+          : '把同名 .lrc 文件放在歌曲旁边即可自动加载；也支持「歌名 - 歌手.lrc」这类命名。',
+        action: h('div', {
+          class: 'lyrics-empty__actions',
+          style: { display: 'flex', gap: '8px', justifyContent: 'center' }
+        },
+        onlineOff ? enableOnline : null,
+        h('button', {
+          class: onlineOff ? 'btn' : 'btn btn--primary',
           type: 'button',
           onClick: () => player.reloadLyrics()
         }, icon('refresh', { className: 'icon icon--stroke' }), '重新载入')
+        )
       })
       return
     }
