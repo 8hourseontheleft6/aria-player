@@ -636,7 +636,14 @@ html[data-platform="darwin"] .now-playing__topbar {
   bottom: 0;
   width: 100%;
   height: 132px;
-  z-index: 2;
+  /*
+   * 沉到内容之下，并且**不接收鼠标**：
+   * 之前它是最后 append 的、pointer-events 又是默认值，铺满底部就把播放控件、
+   * 工具条那一排的点击全吃掉了（用户反馈「示波器会阻挡 UI 按键」）。
+   * 切样式改用顶栏那颗小按钮。
+   */
+  z-index: 0;
+  pointer-events: none;
   border-radius: 0;
   background: linear-gradient(
     to top,
@@ -645,7 +652,6 @@ html[data-platform="darwin"] .now-playing__topbar {
   );
   box-shadow: none;
   overflow: hidden;
-  cursor: pointer;
 }
 
 .visualizer:hover {

@@ -3201,7 +3201,7 @@ async function runSmoke ({ win, ctx }) {
         pointerEvents: stripStyle ? stripStyle.pointerEvents : null,
         zIndex: stripStyle ? stripStyle.zIndex : null,
         hitsControl,
-        hitClass: hit ? String(hit.className || hit.tagName).slice(0, 40) : null,
+        hitClass: hit ? (typeof hit.className === 'string' ? hit.className : hit.tagName) : null,
         hasStyleButton: Boolean(button),
         tint,
         hasGlass,
