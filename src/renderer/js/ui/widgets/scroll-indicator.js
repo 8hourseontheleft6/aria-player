@@ -1,192 +1,194 @@
 /**
- * 右侧的「滚动轮盘」：可收缩、可弹出的字母索引条。
+ * 右侧「旋钮」：中间显示当前页首字母的圆形旋钮。
  *
- * 用户否掉了上一版细长滚动条（拖动时滑块不跟手、样式也不喜欢），要的是：
- *   · 平时收成一条很窄的把手，鼠标靠近 / 悬浮才展开；
- *   · 展开后中间是一列**首字母**（当前页歌曲的首字母），旁边一个「选中框」表示视口位置；
- *   · 悬浮到字母上会放大，点它直接跳到那一组；
- *   · 滚轮在轮盘上滚 = 大范围翻动（比普通滚动快得多）；
- *   · 左键拖动选中框 = 连续滚动。
+ * 用户要的交互（参考图里中间那个 0）：
+ *   · 圆盘中间是**当前页面的首字母**（页面第一首、或这一页多数歌曲的首字母）；
+ *   · 在字母上滚滚轮 = 快速换字母；
+ *   · 停下之后**平滑过渡**，让「第一首该字母开头的歌」停在页面最上方；
+ *   · 左键按住上下拖动同样换字母；悬浮放大，空闲时收起成一小颗。
  *
- * 上一版的 bug 也在这里修掉：拖动时滑块要**跟着手指走**。
- * 之前拖动过程中提前 return，只更新了 scrollTop 却没更新滑块位置，
- * 于是松手后滑块才「瞬移」过去。现在拖动中每帧都按指针位置画。
+ * 上一版是细长滚动条 + 字母条，用户否掉了；这版把「滚动比例」换成「字母定位」。
  */
 
 import { h, on } from '../../core/dom.js'
+import { initialOf } from '../../core/pinyin.js'
 
-const IDLE_DELAY = 1100
-const WHEEL_SPEED = 4 // 轮盘上滚轮的倍率
+const IDLE_DELAY = 900
+const STEP_PX = 26 // 拖动多少像素换一个字母
 
 export function createScrollIndicator (scroller, { label = '滚动', getMarks = null } = {}) {
-  const rail = h('div', { class: 'wheel__marks' })
-  const box = h('div', { class: 'wheel__box' })
-  const wheel = h('div', {
-    class: 'wheel',
-    role: 'scrollbar',
+  const letterNode = h('span', { class: 'knob__letter', text: '0' })
+  const hintNode = h('span', { class: 'knob__hint', text: '' })
+  const knob = h('div', {
+    class: 'knob',
+    role: 'slider',
+    tabindex: '0',
     'aria-label': label,
     'aria-orientation': 'vertical'
-  }, rail, box)
+  }, letterNode, hintNode)
 
-  let idleTimer = null
-  let dragging = false
-  let dragOffset = 0
   let marks = []
-  let lastTick = 0
+  let index = 0
+  let dragging = false
+  let dragStartY = 0
+  let dragStartIndex = 0
+  let settleTimer = null
+  let idleTimer = null
+  let programmaticUntil = 0
 
-  /** 视口高度 / 内容高度 → 选中框的位置与高度 */
-  function geometry () {
-    const view = scroller.clientHeight
-    const total = scroller.scrollHeight
-    const trackH = wheel.clientHeight || view
-    const boxH = Math.max(28, Math.round((view / Math.max(1, total)) * trackH))
-    const maxScroll = Math.max(1, total - view)
-    const maxTop = Math.max(1, trackH - boxH)
-    const top = (scroller.scrollTop / maxScroll) * maxTop
-    return { view, total, trackH, boxH, maxScroll, maxTop, top }
+  function ensureMarks () {
+    if (!marks.length && typeof getMarks === 'function') marks = getMarks() || []
   }
 
-  function refresh () {
-    const { view, total, boxH, top } = geometry()
-    if (!view || total <= view + 1) {
-      wheel.classList.add('is-hidden')
+  /** 当前视口顶部对应的字母下标 */
+  function indexFromScroll () {
+    ensureMarks()
+    if (!marks.length) return 0
+    const top = scroller.scrollTop + 6
+    let found = 0
+    for (let i = 0; i < marks.length; i++) {
+      if (marks[i].offset <= top) found = i
+      else break
+    }
+    return found
+  }
+
+  function paint (options = {}) {
+    ensureMarks()
+    const scrollable = scroller.scrollHeight > scroller.clientHeight + 1
+    if (!marks.length || !scrollable) {
+      knob.classList.add('is-hidden')
       return
     }
-    wheel.classList.remove('is-hidden')
-    box.style.height = `${boxH}px`
-    box.style.transform = `translateY(${Math.round(top)}px)`
-    wheel.setAttribute('aria-valuenow', String(Math.round(scroller.scrollTop)))
-
-    // 首字母：只在展开时才画（收起时别浪费）
-    if (wheel.classList.contains('is-active')) paintMarks()
+    knob.classList.remove('is-hidden')
+    index = Math.max(0, Math.min(marks.length - 1, index))
+    const mark = marks[index]
+    letterNode.textContent = mark.letter
+    hintNode.textContent = options.hint || ''
+    knob.setAttribute('aria-valuenow', String(index))
+    knob.setAttribute('aria-valuetext', `${mark.letter}（第 ${index + 1} 组 / 共 ${marks.length} 组）`)
+    knob.style.setProperty('--knob-progress', `${(index / Math.max(1, marks.length - 1)) * 100}%`)
   }
 
-  /** 把首字母铺到轨道上，位置按「那一组在列表里的比例」定 */
-  function paintMarks () {
-    if (!marks.length) return
-    const { trackH } = geometry()
-    const total = Math.max(1, scroller.scrollHeight)
-    const nodes = marks.map((mark) => h('button', {
-      class: 'wheel__mark',
-      type: 'button',
-      text: mark.letter,
-      title: `${mark.letter}（${mark.count} 首）`,
-      style: { top: `${Math.round((mark.offset / total) * Math.max(0, trackH - 16))}px` },
-      onClick: (event) => {
-        event.stopPropagation()
-        scroller.scrollTop = mark.offset
-        wake()
-      }
-    }))
-    rail.replaceChildren(...nodes)
+  /** 平滑滚到当前字母的第一首 */
+  function apply (smooth = true) {
+    ensureMarks()
+    const mark = marks[index]
+    if (!mark) return
+    programmaticUntil = Date.now() + 900
+    scroller.scrollTo({ top: mark.offset, behavior: smooth ? 'smooth' : 'auto' })
   }
 
   function wake () {
-    wheel.classList.add('is-active')
-    paintMarks()
+    knob.classList.add('is-active')
     if (idleTimer) clearTimeout(idleTimer)
     idleTimer = setTimeout(() => {
-      if (!dragging && !wheel.matches(':hover')) wheel.classList.remove('is-active')
+      if (!dragging && !knob.matches(':hover')) knob.classList.remove('is-active')
     }, IDLE_DELAY)
   }
 
-  function scrollFromPointer (clientY) {
-    const rect = wheel.getBoundingClientRect()
-    const { boxH, maxTop, maxScroll } = geometry()
-    const local = clientY - rect.top - dragOffset
-    const clamped = Math.max(0, Math.min(maxTop, local))
-    scroller.scrollTop = (clamped / maxTop) * maxScroll
-    // 关键：拖动过程中也要画，不然松手才「瞬移」
-    box.style.transform = `translateY(${Math.round(clamped)}px)`
+  function step (delta) {
+    ensureMarks()
+    if (!marks.length) return
+    const next = Math.max(0, Math.min(marks.length - 1, index + delta))
+    if (next === index) return
+    index = next
+    paint({ hint: `${index + 1}/${marks.length}` })
+    wake()
+    // 连续滚动时不要一路跳，停 260ms 再平滑过去
+    if (settleTimer) clearTimeout(settleTimer)
+    settleTimer = setTimeout(() => apply(true), 260)
   }
 
-  on(box, 'pointerdown', (event) => {
+  on(knob, 'wheel', (event) => {
     event.preventDefault()
-    event.stopPropagation()
+    step(event.deltaY > 0 ? 1 : -1)
+  }, { passive: false })
+
+  on(knob, 'pointerdown', (event) => {
+    if (event.button !== 0) return
+    event.preventDefault()
     dragging = true
-    const rect = box.getBoundingClientRect()
-    dragOffset = event.clientY - rect.top
-    wheel.classList.add('is-dragging', 'is-active')
+    dragStartY = event.clientY
+    dragStartIndex = index
+    knob.classList.add('is-dragging')
     wake()
-    try { box.setPointerCapture(event.pointerId) } catch { /* 无所谓 */ }
+    try { knob.setPointerCapture(event.pointerId) } catch { /* 无所谓 */ }
   })
 
-  on(box, 'pointermove', (event) => {
+  on(knob, 'pointermove', (event) => {
     if (!dragging) return
-    scrollFromPointer(event.clientY)
+    ensureMarks()
+    const steps = Math.round((event.clientY - dragStartY) / STEP_PX)
+    const next = Math.max(0, Math.min(marks.length - 1, dragStartIndex + steps))
+    if (next !== index) {
+      index = next
+      paint({ hint: `${index + 1}/${marks.length}` })
+    }
   })
 
   const endDrag = (event) => {
     if (!dragging) return
     dragging = false
-    wheel.classList.remove('is-dragging')
-    try { if (event?.pointerId !== undefined) box.releasePointerCapture(event.pointerId) } catch { /* 已释放 */ }
+    knob.classList.remove('is-dragging')
+    try { if (event?.pointerId !== undefined) knob.releasePointerCapture(event.pointerId) } catch { /* 已释放 */ }
+    apply(true)
     wake()
-    refresh()
   }
-  on(box, 'pointerup', endDrag)
-  on(box, 'pointercancel', endDrag)
+  on(knob, 'pointerup', endDrag)
+  on(knob, 'pointercancel', endDrag)
 
-  // 点轮盘空白 = 跳到那一段
-  on(wheel, 'pointerdown', (event) => {
-    if (event.target !== wheel && event.target !== rail) return
-    const { boxH, maxTop, maxScroll } = geometry()
-    const rect = wheel.getBoundingClientRect()
-    const target = Math.max(0, Math.min(maxTop, event.clientY - rect.top - boxH / 2))
-    scroller.scrollTop = (target / maxTop) * maxScroll
-    wake()
+  // 键盘也能用：上下换字母，回车跳过去
+  on(knob, 'keydown', (event) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); step(1) } else if (event.key === 'ArrowUp') { event.preventDefault(); step(-1) } else if (event.key === 'Enter') { event.preventDefault(); apply(true) }
   })
 
-  // 滚轮：大幅翻动（用户要「上下大规模翻动」）
-  on(wheel, 'wheel', (event) => {
-    event.preventDefault()
-    scroller.scrollTop += event.deltaY * WHEEL_SPEED
-    wake()
-  }, { passive: false })
+  on(knob, 'mouseenter', () => { ensureMarks(); wake() })
+  on(knob, 'mouseleave', () => { if (!dragging) knob.classList.remove('is-active') })
 
-  on(wheel, 'mouseenter', () => wake())
-  on(wheel, 'mouseleave', () => { if (!dragging) wake() })
-
+  // 列表自己滚动时旋钮跟着显示当前字母（自己触发的平滑滚动就别抢）
   on(scroller, 'scroll', () => {
-    refresh()
-    const now = Date.now()
-    // 滚动时亮起来，但不要每帧都重画字母
-    if (!wheel.classList.contains('is-active')) wake()
-    else if (now - lastTick > 400) { lastTick = now; paintMarks() }
+    if (Date.now() < programmaticUntil) return
+    const at = indexFromScroll()
+    if (at !== index) {
+      index = at
+      paint()
+    }
   }, { passive: true })
 
-  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => refresh()) : null
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => paint()) : null
   observer?.observe(scroller)
   if (scroller.firstElementChild) observer?.observe(scroller.firstElementChild)
-  window.addEventListener('resize', refresh)
+  window.addEventListener('resize', () => paint())
 
   return {
-    element: wheel,
-    refresh,
-    /** 列表换了：重新算首字母（track-list 在 setTracks 时调用） */
+    element: knob,
+    refresh: () => paint(),
     setMarks (next) {
       marks = Array.isArray(next) ? next : []
-      if (wheel.classList.contains('is-active')) paintMarks()
+      index = indexFromScroll()
+      paint()
     },
     destroy () {
       observer?.disconnect()
-      window.removeEventListener('resize', refresh)
       if (idleTimer) clearTimeout(idleTimer)
+      if (settleTimer) clearTimeout(settleTimer)
     }
   }
 }
 
 /**
  * 把曲目列表折成「首字母 → 偏移量」。
- * 用拼音/拉丁首字母不现实（要词典），所以直接取标题的第一个字符并大写 ——
- * 中文歌就是「中」「爱」这类字，英文歌就是 A/B/C，和列表里看到的对得上。
+ * 不查拼音词典：直接取标题首字符 —— 中文歌是「爱」「时」这类字，英文歌是 A/B/C，
+ * 和列表里看到的完全对得上（用户要的就是「页面上大部分歌曲的首字母」这种感觉）。
  */
 export function marksFromTracks (tracks, rowHeight) {
   const out = []
   let current = null
   tracks.forEach((track, index) => {
     const source = (track.title || track.artist || '#').trim()
-    const letter = (source[0] || '#').toUpperCase()
+    // 拼音首字母：中文歌也要能归到 A/B/C（排序也是按这个首字母分组的）
+    const letter = initialOf(source)
     if (!current || current.letter !== letter) {
       current = { letter, offset: index * rowHeight, count: 0 }
       out.push(current)

@@ -128,8 +128,12 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       }))
   )
 
-  // 右侧的滚动轮盘（可收缩 / 弹出、带首字母索引）
-  const scrollbar = createScrollIndicator(viewport, { label: '歌曲列表滚动' })
+  // 右侧旋钮：中间是当前页首字母，滚滚轮换字母并平滑定位到那一组
+  const scrollbar = createScrollIndicator(viewport, {
+    label: '按首字母跳转',
+    // 旋钮要「每组首字母 → 偏移量」才能定位；懒算（滚动/悬浮时才需要）
+    getMarks: () => marksFromTracks(tracks, ROW_HEIGHT)
+  })
   const element = h('div', { class: 'tracklist' }, head, selectionBar, viewport, scrollbar.element)
 
   /* ---------------- 状态 ---------------- */
