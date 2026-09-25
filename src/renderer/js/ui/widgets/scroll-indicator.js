@@ -11,6 +11,7 @@
  */
 
 import { h, on } from '../../core/dom.js'
+import { initialOf } from '../../core/pinyin.js'
 
 const IDLE_DELAY = 900
 const STEP_PX = 26 // 拖动多少像素换一个字母
