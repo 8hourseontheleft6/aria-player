@@ -46,12 +46,27 @@ export function createArtworkService ({ bus, host = null }) {
   const onlineInFlight = new Map()
   const onlineFailed = new Set()
 
-  /** 由 HSL 三元组生成 { tint, tint2, tintSoft } */
-  const makeColor = (h, s, l) => ({
-    tint: `hsl(${Math.round(h)} ${Math.round(s)}% ${Math.round(l)}%)`,
-    tint2: `hsl(${Math.round((h + 44) % 360)} ${Math.round(Math.max(38, s - 8))}% ${Math.round(Math.max(38, l - 6))}%)`,
-    tintSoft: `hsl(${Math.round(h)} ${Math.round(s)}% ${Math.round(l)}% / 0.18)`
-  })
+  /**
+   * 由 HSL 三元组生成 { tint, tint2, tintSoft }，**按当前主题夹一次范围**。
+   *
+   * 为什么按主题夹：同一个色相在深色底上要偏亮才看得清，在浅色（近白）底上
+   * 反而要偏暗、偏饱和才不像"发灰的土色"—— 之前两套主题共用一套亮度，
+   * 浅色下背景几乎看不出专辑色（用户反馈过）。
+   */
+  const themeNow = () => (typeof document !== 'undefined' && document.documentElement?.dataset?.theme === 'light' ? 'light' : 'dark')
+
+  const makeColor = (h, s, l, theme = themeNow()) => {
+    const range = theme === 'light'
+      ? { sMin: 46, sMax: 78, lMin: 38, lMax: 56 }
+      : { sMin: 52, sMax: 86, lMin: 48, lMax: 66 }
+    const sat = Math.min(range.sMax, Math.max(range.sMin, s))
+    const lit = Math.min(range.lMax, Math.max(range.lMin, l))
+    return {
+      tint: `hsl(${Math.round(h)} ${Math.round(sat)}% ${Math.round(lit)}%)`,
+      tint2: `hsl(${Math.round((h + 44) % 360)} ${Math.round(Math.max(range.sMin - 6, sat - 8))}% ${Math.round(Math.max(range.lMin - 4, lit - 6))}%)`,
+      tintSoft: `hsl(${Math.round(h)} ${Math.round(sat)}% ${Math.round(lit)}% / 0.18)`
+    }
+  }
 
   const fallbackColor = (track) => {
     const seed = `${track?.albumArtist || track?.artist || ''}|${track?.album || track?.title || ''}`
@@ -151,7 +166,11 @@ export function createArtworkService ({ bus, host = null }) {
   async function resolveColor (track) {
     const url = await resolveUrl(track)
     if (!url) return fallbackColor(track)
-    if (colorCache.has(url)) return colorCache.get(url)
+    // 缓存里存的是原始 HSL：命中时按**当前主题**重新格式化（切主题后颜色立刻跟上）
+    if (colorCache.has(url)) {
+      const cached = colorCache.get(url)
+      return makeColor(cached.h, cached.s, cached.l)
+    }
 
     try {
       const image = new Image()
@@ -163,7 +182,7 @@ export function createArtworkService ({ bus, host = null }) {
         setTimeout(() => reject(new Error('封面加载超时')), 8000)
       })
 
-      const size = 18
+      const size = 24
       const canvas = document.createElement('canvas')
       canvas.width = size
       canvas.height = size
@@ -171,45 +190,61 @@ export function createArtworkService ({ bus, host = null }) {
       ctx.drawImage(image, 0, 0, size, size)
       const { data } = ctx.getImageData(0, 0, size, size)
 
-      let rSum = 0
-      let gSum = 0
-      let bSum = 0
-      let weight = 0
-      let hueX = 0
-      let hueY = 0
+      /*
+       * 主色聚类，而不是整图平均。
+       *
+       * 平均法的问题：封面大面积是白/灰/黑时，平均出来就是灰调；一张很艳的封面
+       * 只要配一块大白底，饱和度也会被拉平（用户反馈「有些曲子取色不好」）。
+       * 这里按色相分 24 个桶，权重用 s²（偏爱鲜艳像素）再乘一个「别太亮也别太暗」的
+       * 中间调系数，取权重最高的桶，并在桶内算饱和度/亮度的加权平均 ——
+       * 得到的是「这张封面上最显眼的那一色」，而不是所有像素的混合。
+       */
+      const BUCKETS = 24
+      const bucketWeight = new Float64Array(BUCKETS)
+      const bucketS = new Float64Array(BUCKETS)
+      const bucketL = new Float64Array(BUCKETS)
+      const bucketPixels = new Float64Array(BUCKETS)
 
       for (let i = 0; i < data.length; i += 4) {
         if (data[i + 3] < 128) continue
         const { h, s, l } = rgbToHsl(data[i], data[i + 1], data[i + 2])
-        if (l < 0.14 || l > 0.92) continue
-        const w = 0.25 + s * s
-        const rad = (h * Math.PI) / 180
-        hueX += Math.cos(rad) * w
-        hueY += Math.sin(rad) * w
-        weight += w
-        rSum += data[i] * w
-        gSum += data[i + 1] * w
-        bSum += data[i + 2] * w
+        // 近乎纯黑/纯白/灰的像素不参与投票（它们本来就不是「颜色」）
+        if (l < 0.12 || l > 0.94 || s < 0.08) continue
+        const midTone = 1 - Math.min(1, Math.abs(l - 0.55) * 1.6)
+        const w = 0.15 + s * s * (0.4 + midTone)
+        const bucket = Math.min(BUCKETS - 1, Math.floor((h / 360) * BUCKETS))
+        bucketWeight[bucket] += w
+        bucketS[bucket] += s * w
+        bucketL[bucket] += l * w
+        bucketPixels[bucket] += 1
       }
 
-      if (!weight) throw new Error('封面缺少可用像素')
-      const hue = ((Math.atan2(hueY, hueX) * 180) / Math.PI + 360) % 360
-      const r = Math.round(rSum / weight)
-      const g = Math.round(gSum / weight)
-      const b = Math.round(bSum / weight)
-      const hsl = rgbToHsl(r, g, b)
+      let best = -1
+      let bestWeight = 0
+      for (let b = 0; b < BUCKETS; b++) {
+        if (bucketWeight[b] > bestWeight) {
+          bestWeight = bucketWeight[b]
+          best = b
+        }
+      }
+      if (best < 0 || !bucketPixels[best]) throw new Error('封面缺少可用像素')
 
-      const color = makeColor(
-        hue,
-        Math.min(88, Math.max(48, hsl.s * 118)),
-        Math.min(72, Math.max(46, hsl.l * 92))
-      )
-      colorCache.set(url, color)
+      const sAvg = bucketS[best] / bestWeight
+      const lAvg = bucketL[best] / bestWeight
+      // 桶中心角作为色相（桶内色相本来就很接近，不需要再做圆周平均）
+      const hue = ((best + 0.5) * 360) / BUCKETS
+
+      /*
+       * 缓存的是「原始 HSL」，不是格式化后的字符串 ——
+       * 这样切换亮/暗主题时，下一次 resolveColor 会按新主题重新夹范围，
+       * 不需要清缓存也能立刻正确（之前缓存字符串，切主题后颜色会停在旧主题上）。
+       */
+      const raw = { h: hue, s: Math.min(92, Math.max(40, sAvg * 118)), l: Math.min(76, Math.max(34, lAvg * 100)) }
+      colorCache.set(url, raw)
       if (colorCache.size > 64) colorCache.delete(colorCache.keys().next().value)
-      return color
+      return makeColor(raw.h, raw.s, raw.l)
     } catch {
       const fallback = fallbackColor(track)
-      colorCache.set(url, fallback)
       return fallback
     }
   }

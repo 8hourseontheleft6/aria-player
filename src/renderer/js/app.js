@@ -880,6 +880,14 @@ async function main () {
     engine.setVolume(settings.volume)
     engine.setMuted(settings.muted)
     engine.setRate(settings.playbackRate)
+    /*
+     * 主题变了要重算专辑色：色相不变，但深/浅主题各自夹的饱和度与亮度不同，
+     * 不重算的话浅色下会一直停在深色主题那套偏亮的值（用户反馈过浅色不明显）。
+     */
+    {
+      const track = player.currentTrack?.()
+      if (track) artwork.resolveColor(track).then((color) => { if (color) artwork.applyTint(color) }).catch(() => {})
+    }
     engine.setPreservesPitch(settings.preservesPitch)
     // 均衡器设置变了就落到引擎（自动模式下按当前曲目挑预设）
     actions.applyEqualizer()

@@ -3785,13 +3785,15 @@ async function runSmoke ({ win, ctx }) {
       const { actions, store, player } = window.__aria
       const settle = async (ms = 300) => { await new Promise((r) => setTimeout(r, ms)) }
       const hasLyrics = () => store.get().lyrics.lines.length > 0
+      // 后面那两项要测「能不能滚动」：至少得够长，只有一两行的曲子不算数
+      const hasEnoughLyrics = () => store.get().lyrics.lines.length >= 8
       let tried = 0
-      if (!hasLyrics()) {
+      if (!hasEnoughLyrics()) {
         for (const track of store.get().library.tracks.slice(0, 40)) {
           tried++
           await player.playTrack(track.id)
-          for (let i = 0; i < 10 && !hasLyrics(); i++) await settle(150)
-          if (hasLyrics()) break
+          for (let i = 0; i < 10 && !hasEnoughLyrics(); i++) await settle(150)
+          if (hasEnoughLyrics()) break
         }
       }
       actions.openNowPlaying({ lyrics: true })
@@ -3799,7 +3801,7 @@ async function runSmoke ({ win, ctx }) {
       return { lines: store.get().lyrics.lines.length, tried, rendered: document.querySelectorAll('.lyrics__line').length }
     `)
     record('歌词数据就绪（后面几项歌词检查的前提）',
-      lyricsReady.lines > 0 && lyricsReady.rendered > 0,
+      lyricsReady.lines >= 8 && lyricsReady.rendered > 0,
       `当前曲目歌词 ${lyricsReady.lines} 行、渲染 ${lyricsReady.rendered} 行（试了 ${lyricsReady.tried} 首）`)
 
     // 点击歌词行要能跳转
