@@ -201,8 +201,9 @@ export function createArtworkService ({ bus, host = null }) {
 
       const color = makeColor(
         hue,
-        Math.min(88, Math.max(48, hsl.s * 118)),
-        Math.min(72, Math.max(46, hsl.l * 92))
+        // 比之前更深、更实一点：用户反馈取出来的颜色偏浅、发灰
+        Math.min(90, Math.max(54, hsl.s * 122)),
+        Math.min(60, Math.max(38, hsl.l * 86))
       )
       colorCache.set(url, color)
       if (colorCache.size > 64) colorCache.delete(colorCache.keys().next().value)

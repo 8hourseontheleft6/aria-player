@@ -397,7 +397,27 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
       const track = tracks[index]
       if (!track) continue
       const existing = rendered.get(index)
-      if (existing && existing.dataset.id === track.id) continue
+      if (existing && existing.dataset.id === track.id) {
+        /*
+         * 行还在，内容不用重建 —— 但**状态**必须同步。
+         *
+         * 之前这里是无条件 continue，于是 already-rendered 的行永远不重画：
+         * 换歌之后「正在播放」的蓝框、序号格里的暂停键都停在上一首
+         * （用户反馈：播放另一首时，全部歌曲页上蓝色框还在旧歌上，而歌确实换了）。
+         * 现在只在状态真的变了时才重画这一行，滚动时不会多花开销。
+         */
+        const state = store.get()
+        const current = state.playback.trackId === track.id
+        const playing = state.playback.status === 'playing' || state.playback.status === 'loading'
+        const cell = existing.__index
+        const hasPlayKey = Boolean(cell && cell.querySelector('.track-row__play'))
+        const showsBarsPlaying = Boolean(cell && cell.querySelector('.bars:not(.is-paused)'))
+        const stale = existing.classList.contains('is-current') !== current ||
+          existing.classList.contains('is-selected') !== selection.has(track.id) ||
+          (current ? (!hasPlayKey || showsBarsPlaying !== playing) : hasPlayKey)
+        if (stale) paintRow(existing, track, index)
+        continue
+      }
       if (existing) {
         existing.remove()
         rendered.delete(index)
