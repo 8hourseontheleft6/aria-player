@@ -55,6 +55,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
   const tiles = new Map()
   let featuredKey = null
   let enteringTimer = null
+  /** 是否已经建过一次墙：第一次建才允许把视角放在左上角，之后一律保住当前视角 */
+  let hadFirstBuild = false
   /** 平面尺寸与列数（由 computeLayout 决定） */
   let columns = 6
   let tileSize = 148
@@ -928,7 +930,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
     return tile
   }
 
-  function rebuild (list, { animateIn, focus = false }) {
+  function rebuild (list, { animateIn, focus = false, preservePan = false }) {
+    // 重建会换掉所有格子，但**不该动用户当前的视角**
+    const previous = preservePan ? { x: pan.x, y: pan.y } : null
+
     clear(grid)
     tiles.clear()
     const fragment = document.createDocumentFragment()
@@ -938,7 +943,17 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
     applyLayout()
     featuredKey = null
     applyFeatured(currentAlbumKey())
-    settlePan({ reset: true })
+    if (previous) {
+      pan.x = previous.x
+      pan.y = previous.y
+      target.x = previous.x
+      target.y = previous.y
+      // 只做边界钳制，不回左上角
+      settlePan()
+      writePan()
+    } else {
+      settlePan({ reset: true })
+    }
     // 重建后直接定位到正在播放的专辑，而不是停在平面左上角
     if (focus) focusFeatured({ animate: false })
 
@@ -1063,11 +1078,23 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
 
     const state = store.get()
     const list = actions.albums()
-    const rebuilt = list !== albumList
+    /*
+     * 只在「专辑集合真的变了」时才重建。
+     *
+     * list 是索引派生出来的数组，播放、改设置这些操作都会让 store 走一遍，
+     * 万一索引重建就会换一个新数组 —— 只要里面的专辑没变，重建就是纯浪费：
+     * 474 个格子全换一遍 DOM，而且会把平移重置回左上角
+     * （用户反馈的「播放歌曲时突然跳回最左上角」就是这么来的）。
+     */
+    const sameContent = list.length === albumList.length &&
+      list.every((album, index) => album.key === albumList[index]?.key)
+    const rebuilt = list !== albumList && !sameContent
     albumList = list
 
     if (rebuilt) {
-      rebuild(list, { animateIn: true, focus })
+      // 用户正在看这面墙：重建也要保住他的视角（首次构建没有 previous，才回左上角）
+      rebuild(list, { animateIn: true, focus, preservePan: hadFirstBuild })
+      hadFirstBuild = true
     } else {
       const key = currentAlbumKey()
       flip(() => {

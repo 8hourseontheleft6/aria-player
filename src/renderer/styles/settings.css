@@ -4,11 +4,26 @@
 
 .settings {
   padding: 0 20px 40px;
-  max-width: 720px;
+  /*
+   * 宽屏两列、窄屏一列。
+   * 之前是「max-width: 720px 靠左」—— 窗口 1180px 时整页只占左半边，
+   * 右半边一大片空白（用户反馈）。两列既填满宽度，单行也不会被拉得太长。
+   */
+  columns: 2;
+  column-gap: 22px;
+}
+
+@media (max-width: 900px) {
+  .settings {
+    columns: 1;
+  }
 }
 
 .settings__group {
   margin-bottom: 26px;
+  /* 一个分组不要被拆到两列里 */
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
 }
 
 .settings__group-title {

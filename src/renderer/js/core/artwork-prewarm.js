@@ -106,6 +106,20 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
     }
   }
 
+  /**
+   * 封面缓存被清空之后必须重来一遍。
+   *
+   * `warmed` 是「这个专辑我预热过」的记账，清空缓存并不会让它失效 ——
+   * 于是清空之后预热器认为无事可做，缓存一直是空的，直到重启。
+   * 设置页清空缓存时会发这个事件（自检里也用它来验证预热真的会重做）。
+   */
+  function reset () {
+    warmed.clear()
+    if (!stopped && enabled()) schedule(IDLE_INTERVAL)
+  }
+
+  bus.on('artwork:cache-cleared', reset)
+
   // 资料库变化后继续把新增的专辑补上（已预热过的不会重复）
   bus.on('library:updated', () => {
     if (!stopped && enabled()) schedule(IDLE_RETRY)
@@ -115,6 +129,7 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
     start,
     suspend,
     resume,
+    reset,
     stop,
     get state () {
       return {

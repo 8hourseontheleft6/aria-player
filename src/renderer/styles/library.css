@@ -158,6 +158,28 @@
   min-height: 0;
   position: relative;
   padding-bottom: 24px;
+  /*
+   * 歌曲列表要有一条**看得见、拖得动**的滚动条。
+   * 全局的 .scroll 是 iOS 悬浮样式（thumb 平时透明、只在悬停容器时露出来，
+   * 而且只有 4px 宽）—— 在长列表里既找不到也拖不住（用户反馈「加上拖动条」）。
+   * 这里让它常显、加粗到 6px，悬停再加深。
+   */
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.tracklist__viewport::-webkit-scrollbar {
+  width: 14px;
+}
+
+.tracklist__viewport::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 4px solid transparent;
+  border-radius: var(--radius-pill);
+  background-clip: content-box;
+}
+
+.tracklist__viewport::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--scrollbar-thumb) 170%, transparent);
 }
 
 /* ------------------------------ 多选工具条 ------------------------------ */

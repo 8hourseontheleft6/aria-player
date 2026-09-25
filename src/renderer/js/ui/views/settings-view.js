@@ -129,6 +129,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     const node = h(onClick ? 'button' : 'div', {
       class: `settings__row ${className}`.trim(),
       type: onClick ? 'button' : undefined,
+      // 整页重建后按它找回焦点（见 render 的开头）
+      dataset: { settingId: title },
       onClick
     },
     h('div', { class: 'settings__row-text' },
@@ -205,6 +207,14 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     const state = store.get()
     const settings = state.settings
     const library = state.library
+    /*
+     * 记住滚动位置。
+     * 每改一条设置都会 store 变化 → 整页重建，而重建后的新节点从 scrollTop 0 开始 ——
+     * 用户在下面调完一项就被弹回顶部（用户反馈的「调好了之后会直接跳到最上面」）。
+     * 重建前存、重建后还原，顺便把「正在交互的元素」也恢复焦点。
+     */
+    const previousScroll = scroll.scrollTop
+    const activeId = document.activeElement?.dataset?.settingId || null
     clear(scroll)
 
     /* ---------- 音乐文件夹 ---------- */
@@ -442,6 +452,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
               type: result?.ok ? 'success' : 'error'
             })
             artworkCacheLabel.textContent = '暂无缓存'
+            // 告诉预热器：记账作废，重新补一遍（否则它会以为缓存还在，一直不再预热）
+            if (result?.ok) bus.emit('artwork:cache-cleared')
           }
         }, '清空'))
       }),
@@ -728,6 +740,18 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         }, '在文件夹中显示')
       })
     ]))
+
+    /*
+     * 还原滚动位置与焦点（见函数开头）。
+     * 放在最后：此时新内容已经在 DOM 里，scrollTop 才设得住。
+     */
+    if (previousScroll) scroll.scrollTop = previousScroll
+    if (activeId) {
+      const restored = scroll.querySelector(`[data-setting-id="${activeId}"]`)
+      // 焦点原本在「控件」上（开关 / 下拉），恢复时也优先还给它
+      const target = restored?.querySelector('button, select, input, [tabindex]') || restored
+      target?.focus?.({ preventScroll: true })
+    }
   }
 
   store.subscribe((state, prev) => {

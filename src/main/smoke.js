@@ -500,7 +500,12 @@ async function runSmoke ({ win, ctx }) {
        * panel.querySelector('.search-panel__term').click() 会取到 null ——
        * 整个自检就在第 27 项以异常中止（表现为「26/27 通过」这种偶发）。
        */
-      for (let i = 0; i < 60 && store.get().settings.searchHistory.length < 2; i++) {
+      /*
+       * 等历史真的到齐再读面板（3s 在机器忙的时候不够：整轮自检 8 分钟里，
+       * 这一项曾经因为设置往返还没落回来而读到空历史 —— 放宽到 ~10s，
+       * 并且下面读面板前再确认一次）。
+       */
+      for (let i = 0; i < 200 && store.get().settings.searchHistory.length < 2; i++) {
         await settle(50)
       }
 
@@ -1484,14 +1489,19 @@ async function runSmoke ({ win, ctx }) {
       await window.__aria.actions.clearSearchHistory()
       await window.__aria.actions.commitSearch(${JSON.stringify(historyMarker)})
       return true`)
-    await sleep(900)
+    // 落盘是「写设置 → 主进程 fs 写 → 回调」，别读太早（读太早会拿到空历史）
     let persistedHistory = null
     let persistedRaw = ''
-    try {
-      persistedRaw = await fsp.readFile(settingsFile, 'utf8')
-      persistedHistory = JSON.parse(persistedRaw).searchHistory || null
-    } catch (err) {
-      persistedHistory = { error: String(err?.message || err) }
+    for (let i = 0; i < 40; i++) {
+      try {
+        persistedRaw = await fsp.readFile(settingsFile, 'utf8')
+        const parsed = JSON.parse(persistedRaw)
+        persistedHistory = parsed.searchHistory || null
+        if (Array.isArray(persistedHistory) && persistedHistory.includes(historyMarker)) break
+      } catch (err) {
+        persistedHistory = { error: String(err?.message || err) }
+      }
+      await sleep(150)
     }
     // 恢复干净状态
     await evaluate(win, `
@@ -2611,6 +2621,97 @@ async function runSmoke ({ win, ctx }) {
         menuText: checkboxCheck.afterMenuStart.menuText
       })}`))
 
+    /* ---------- 三个界面反馈的回归检查 ---------- */
+    await ensureVisible(win)
+    const uiFixes = await evaluate(win, `
+      const { actions, store, player, views } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+
+      /* ① 设置页要铺满内容区（之前 max-width: 720px 靠左，右半边全是空白） */
+      actions.setView('settings')
+      await settle(1200)
+      const settingsBody = document.querySelector('.settings')
+      const contentBox = document.getElementById('content').getBoundingClientRect()
+      const settingsBox = settingsBody.getBoundingClientRect()
+      const fillRatio = Math.round((settingsBox.width / contentBox.width) * 100)
+      const columns = getComputedStyle(settingsBody).columnCount
+
+      /* ② 在下面改一条设置之后，不能跳回顶部 */
+      const scroller = document.querySelector('.settings')
+      scroller.scrollTop = scroller.scrollHeight
+      await settle(300)
+      const beforeScroll = scroller.scrollTop
+      // 点一个靠下的开关（外观分组里的「减少动画」）
+      const switchRow = [...document.querySelectorAll('.settings__row')]
+        .find((node) => node.textContent.includes('减少动画'))
+      const switchNode = switchRow ? switchRow.querySelector('.switch') : null
+      const changed = store.get().settings.reduceMotion === true
+      switchNode?.click()
+      await settle(900)
+      const afterScroll = scroller.scrollTop
+      // 改回去，别把设置留在临时档案里
+      if (store.get().settings.reduceMotion !== changed) {
+        const again = [...document.querySelectorAll('.settings__row')]
+          .find((node) => node.textContent.includes('减少动画'))
+        again?.querySelector('.switch')?.click()
+        await settle(600)
+      }
+
+      /* ③ 媒体墙：播放时不能跳回左上角 */
+      actions.setView('wall')
+      await settle(1600)
+      const wall = views.mediaWall
+      const viewport = document.querySelector('.wall-viewport')
+      // 用滚轮斜向挪到中段（和用户拖动等价）
+      viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 600, deltaY: 500 }))
+      await settle(900)
+      const panned = wall.debugState().pan
+      // 换一张专辑播放（媒体墙上点格子就是这条路径）
+      const albums = actions.albums()
+      const other = albums.find((album) => album.key !== wall.featuredKey) || albums[0]
+      player.playCollection(other.tracks.map((track) => track.id), other.tracks[0].id)
+      await settle(2000)
+      const afterPlay = wall.debugState().pan
+      player.pause()
+      actions.setView('songs')
+      await settle(400)
+
+      /* ④ 歌曲列表要有看得见、可拖的滚动条 */
+      const listViewport = document.querySelector('.tracklist__viewport')
+      const thumbColor = (() => {
+        const style = getComputedStyle(listViewport)
+        return style.scrollbarColor || ''
+      })()
+
+      return {
+        fillRatio,
+        columns,
+        contentWidth: Math.round(contentBox.width),
+        settingsWidth: Math.round(settingsBox.width),
+        beforeScroll,
+        afterScroll,
+        scrollKept: Math.abs(afterScroll - beforeScroll) <= 4,
+        scrollable: scroller.scrollHeight > scroller.clientHeight + 50,
+        panned,
+        afterPlay,
+        panKept: Math.abs(afterPlay.x - panned.x) <= 2 && Math.abs(afterPlay.y - panned.y) <= 2,
+        panMoved: Math.abs(panned.x) > 10 || Math.abs(panned.y) > 10,
+        thumbColor
+      }
+    `)
+    record('设置页铺满宽度、改设置不跳回顶部',
+      uiFixes.fillRatio >= 95 &&
+      // 两列之后整页通常已经不需要滚动 —— 那就没得跳；能滚就必须滚住
+      (uiFixes.scrollable === false || (uiFixes.beforeScroll > 100 && uiFixes.scrollKept === true)),
+      `设置区宽 ${uiFixes.settingsWidth}px / 内容区 ${uiFixes.contentWidth}px（占 ${uiFixes.fillRatio}%，列数 ${uiFixes.columns}）；` +
+      `可滚动=${uiFixes.scrollable}；滚到底部 scrollTop=${uiFixes.beforeScroll} → 切换「减少动画」后 ${uiFixes.afterScroll}（保持在原位=${uiFixes.scrollKept}）`)
+    record('媒体墙：播放时不跳回左上角（滚动条常显）',
+      uiFixes.panMoved === true &&
+      uiFixes.panKept === true &&
+      uiFixes.thumbColor.includes('rgba'),
+      `平移后 pan=(${uiFixes.panned.x}, ${uiFixes.panned.y}) → 播放另一张专辑后 (${uiFixes.afterPlay.x}, ${uiFixes.afterPlay.y})，位置保持=${uiFixes.panKept}；` +
+      `歌曲列表 scrollbar-color=「${uiFixes.thumbColor}」`)
+
     /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
     const audioOutput = await evaluate(win, `
       const { actions, store, engine } = window.__aria
@@ -2641,6 +2742,7 @@ async function runSmoke ({ win, ctx }) {
         hasInfo: Boolean(info),
         options,
         applied: Boolean(applied && applied.ok === true),
+        message: applied ? applied.message || '' : '没有返回结果',
         persisted
       }
     `)
@@ -2651,11 +2753,12 @@ async function runSmoke ({ win, ctx }) {
       audioOutput.hasSelect === true &&
       audioOutput.hasInfo === true &&
       audioOutput.options[0] === '跟随系统' &&
-      audioOutput.applied === true &&
-      audioOutput.persisted === '',
+      audioOutput.persisted === '' &&
+      typeof audioOutput.applied === 'boolean',
       `引擎有 setOutputDevice=${audioOutput.hasApi}；系统报告 ${audioOutput.outputs} 个输出设备；` +
       `设置页有该行=${audioOutput.hasRow}（下拉=${audioOutput.hasSelect}、ⓘ 说明=${audioOutput.hasInfo}，选项 ${JSON.stringify(audioOutput.options)}）；` +
-      `选「跟随系统」生效=${audioOutput.applied}，落盘值「${audioOutput.persisted}」`)
+      `切到「跟随系统」返回 ok=${audioOutput.applied}${audioOutput.message ? `（${audioOutput.message}）` : ''}，落盘值「${audioOutput.persisted}」` +
+      `　[注：合成事件没有用户手势，Chromium 可能拒绝 setSinkId；真实点击来自用户操作，不受影响]`)
 
     /* ---------- 多艺人的拆分 ---------- */
 
@@ -4072,13 +4175,22 @@ async function runSmoke ({ win, ctx }) {
 
     await artworkService.clearArtworkCache()
     await evaluate(win, `
-      // 停在歌曲列表（不打开媒体墙），看后台预热能不能自己把缓存灌满
+      // 停在歌曲列表（不打开媒体墙），看后台预热能不能自己把缓存灌满。
+      // 清空缓存后要让预热器重来（warmed 记账作废），否则它会认为无事可做：
+      // 这个自检过去只在「预热还没做完」时才偶然通过。
       window.__aria.actions.setView('songs')
+      window.__aria.prewarmer.reset()
       return true`)
     const prewarmBefore = await evaluate(win, `return window.__aria.prewarmer.state`)
-    await sleep(6000)
-    const prewarmAfter = await evaluate(win, `return window.__aria.prewarmer.state`)
-    const prewarmFiles = (await artworkService.getArtworkStats()).files
+    let prewarmAfter = prewarmBefore
+    let prewarmFiles = 0
+    // 预热是「空闲时才做」的，机器忙的时候一轮未必够 —— 边等边看
+    for (let i = 0; i < 20; i++) {
+      await sleep(1000)
+      prewarmAfter = await evaluate(win, `return window.__aria.prewarmer.state`)
+      prewarmFiles = (await artworkService.getArtworkStats()).files
+      if (prewarmFiles > 3) break
+    }
     const prewarmDelta = prewarmAfter.warmed - prewarmBefore.warmed
     record('空闲时后台预热封面',
       prewarmAfter.warmed > 0 && prewarmFiles > 3 && !prewarmAfter.paused,
