@@ -3234,20 +3234,17 @@ async function runSmoke ({ win, ctx }) {
     `)
     record('播放页已无示波器（该特性移到了分支 wip/visualizer-immersive）',
       vizCheck.hasStrip === false &&
-      vizCheck.pointerEvents === 'none' &&
       // 用户要求：在所有组件下面、背景上面 → 阶梯里给的是 2
-      vizCheck.zIndex === '2' &&
       vizCheck.hitsControl === true &&
-      vizCheck.hasStyleButton === true &&
       vizCheck.blocked.length === 0 &&
       // 实测底部能匹配到 4 个可点元素（3 个播放键 + 进度条；工具条类名不同没算进来）
       vizCheck.checkedTargets >= 3 &&
       vizCheck.tint.length > 3 &&
       vizCheck.hasGlass === true &&
       vizCheck.veilTinted === true,
-      `底部示波器存在=${vizCheck.hasStrip}（pointer-events=${vizCheck.pointerEvents}、z-index=${vizCheck.zIndex}）；` +
+      `底部示波器存在=${vizCheck.hasStrip}；` +
       `播放控件中心命中到 ${vizCheck.hitClass}（点到控件=${vizCheck.hitsControl}）；` +
-      `顶栏有样式按钮=${vizCheck.hasStyleButton}；专辑色 --tint=${vizCheck.tint}；` +
+      `专辑色 --tint=${vizCheck.tint}；` +
       `背景磨砂=${vizCheck.hasGlass}、带专辑色=${vizCheck.veilTinted}；` +
       `底部可点 ${vizCheck.checkedTargets} 个、被挡住的 ${JSON.stringify(vizCheck.blocked)}`)
 
