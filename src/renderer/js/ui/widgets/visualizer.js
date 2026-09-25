@@ -60,25 +60,47 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     context.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
+  /** 主色优先用专辑取色（--tint），没有就退回强调色 */
   function accent () {
-    return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#0a84ff'
+    const root = getComputedStyle(document.documentElement)
+    return root.getPropertyValue('--tint').trim() ||
+      root.getPropertyValue('--accent').trim() || '#0a84ff'
   }
 
+  /** 沉浸式：以中线为轴的镜像频谱 + 叠一层示波器波形 */
   function drawBars (width, height) {
-    const bars = 56
-    const gap = 1.5
+    const mid = height / 2
+    const bars = 96
+    const gap = 1.2
     const barWidth = Math.max(1, (width - gap * (bars - 1)) / bars)
+
     for (let i = 0; i < bars; i++) {
-      // 取对数分布，低频不至于挤成一团
-      const index = Math.floor(Math.pow(i / bars, 1.7) * (freqData.length * 0.7))
+      const index = Math.floor(Math.pow(i / bars, 1.6) * (freqData.length * 0.62))
       const value = freqData[index] / 255
-      const barHeight = Math.max(1, value * height)
-      context.globalAlpha = 0.35 + value * 0.65
-      context.fillRect(i * (barWidth + gap), height - barHeight, barWidth, barHeight)
+      const barHeight = Math.max(1, value * (height * 0.46))
+      context.globalAlpha = 0.22 + value * 0.78
+      // 上下镜像，像一条被声音推开的线
+      context.fillRect(i * (barWidth + gap), mid - barHeight, barWidth, barHeight)
+      context.fillRect(i * (barWidth + gap), mid, barWidth, barHeight * 0.72)
     }
     context.globalAlpha = 1
-  }
 
+    // 示波器波形：压在中线上，带一点辉光
+    context.save()
+    context.shadowBlur = 12
+    context.shadowColor = context.strokeStyle
+    context.lineWidth = 1.6
+    context.beginPath()
+    const step = Math.max(1, Math.floor(timeData.length / width))
+    for (let x = 0; x < width; x++) {
+      const value = (timeData[x * step] - 128) / 128
+      const y = mid + value * (height * 0.4)
+      if (x === 0) context.moveTo(x, y)
+      else context.lineTo(x, y)
+    }
+    context.stroke()
+    context.restore()
+  }
   function drawWave (width, height) {
     context.lineWidth = 1.5
     context.beginPath()

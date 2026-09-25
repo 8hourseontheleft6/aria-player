@@ -603,28 +603,72 @@ html[data-platform="darwin"] .now-playing__topbar {
   }
 }
 
-/* ---------------------- 音频可视化（点一下换样式） ---------------------- */
+/* ---------------------- 沉浸式示波器：铺在播放页底部 ---------------------- */
+/*
+ * 用户要的「沉浸感」：示波器不放在卡片里，而是横贯整页底部；
+ * 背景是专辑取色的磨砂玻璃（--tint 由 artwork.applyTint 写进 :root）。
+ */
+.now-playing__visualizer,
 .visualizer {
-  position: relative;
-  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   width: 100%;
-  height: 74px;
-  margin-top: 10px;
-  border-radius: var(--radius-md);
-  background: var(--fill-floating);
-  box-shadow: 0 0 0 0.5px var(--separator);
+  height: 132px;
+  z-index: 2;
+  border-radius: 0;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--tint) 34%, transparent),
+    transparent
+  );
+  box-shadow: none;
   overflow: hidden;
-  transition: background var(--dur-fast) var(--ease-ios), transform var(--dur-fast) var(--ease-ios);
+  cursor: pointer;
 }
 
 .visualizer:hover {
-  background: var(--fill-floating-strong);
-  transform: translateY(var(--lift));
+  transform: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--tint) 46%, transparent),
+    transparent
+  );
 }
 
 .visualizer__canvas {
   display: block;
   width: 100%;
   height: 100%;
-  padding: 6px;
+  padding: 0;
+  opacity: 0.92;
+}
+
+/* 玻璃感的一层：压在封面之上，颜色跟着专辑走 */
+.now-playing__veil {
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--tint) 30%, transparent),
+      transparent 58%),
+    color-mix(in srgb, var(--bg-window) 38%, transparent);
+  backdrop-filter: blur(64px) saturate(190%);
+  -webkit-backdrop-filter: blur(64px) saturate(190%);
+}
+
+/* 封面下方补一层专辑色光晕，让底部那条示波器「融」进背景 */
+.now-playing__glow {
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  bottom: -18%;
+  height: 62%;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    60% 70% at 50% 100%,
+    color-mix(in srgb, var(--tint) 42%, transparent),
+    transparent 72%
+  );
+  filter: blur(28px);
 }

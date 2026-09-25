@@ -17,6 +17,8 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
   /* ---------------- 背景 ---------------- */
   const artBackground = h('div', { class: 'now-playing__art-bg' })
   const veil = h('div', { class: 'now-playing__veil' })
+  // 专辑色光晕：让底部示波器和背景连成一片
+  const glow = h('div', { class: 'now-playing__glow' })
 
   /* ---------------- 顶栏 ---------------- */
   const closeButton = h('button', {
@@ -126,7 +128,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
     onPickStyle: (style) => actions.setSetting({ visualizerStyle: style })
   })
 
-  const info = h('div', { class: 'now-playing__info' }, titleNode, artistNode, albumNode, visualizer.element)
+  const info = h('div', { class: 'now-playing__info' }, titleNode, artistNode, albumNode)
 
   const progress = createSlider({
     className: 'slider--thin',
@@ -378,7 +380,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
   /* ---------------- 主结构 ---------------- */
   const body = h('div', { class: 'now-playing__body' }, left, right)
   const element = h('section', { class: 'now-playing', id: 'now-playing', hidden: true },
-    artBackground, veil, topbar, body)
+    artBackground, veil, glow, topbar, body, visualizer.element)
 
   /* ---------------- 时间显示 ---------------- */
   function updateTimes (time, duration) {
