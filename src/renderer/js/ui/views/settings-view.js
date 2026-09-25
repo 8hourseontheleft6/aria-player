@@ -1076,5 +1076,6 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   })
 
   render()
-  return { element, render }
+  // 一级视图是分类卡片，自检 / 调试需要能直接进某一类
+  return { element, render, open: openCategory, categories: CATEGORIES.map((item) => item.key) }
 }

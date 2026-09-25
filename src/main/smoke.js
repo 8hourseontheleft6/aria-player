@@ -1577,7 +1577,7 @@ async function runSmoke ({ win, ctx }) {
       await actions.setSetting({ playOnSingleClick: false })
 
       // ④ 设置页：在线音源那一组默认收起，点标题能展开
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(700)
       const groups = [...document.querySelectorAll('.settings__group')]
       const sourcesGroup = groups.find((node) => (node.textContent || '').includes('在线音源'))
@@ -1756,7 +1756,7 @@ async function runSmoke ({ win, ctx }) {
       const activeAfter = (items.find((node) => node.classList.contains('is-active')) || {}).dataset
       const afterLeft = Math.round(thumb.getBoundingClientRect().left)
       // 设置页不属于这四段，整条应该淡出
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(600)
       const hiddenOnSettings = !island.classList.contains('is-visible') &&
         getComputedStyle(island).opacity === '0'
@@ -2639,7 +2639,7 @@ async function runSmoke ({ win, ctx }) {
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
 
       /* ① 设置页要铺满内容区（之前 max-width: 720px 靠左，右半边全是空白） */
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(1200)
       const settingsBody = document.querySelector('.settings')
       const contentBox = document.getElementById('content').getBoundingClientRect()
@@ -2804,7 +2804,7 @@ async function runSmoke ({ win, ctx }) {
       }
 
       // 设置页要有这三行，且关掉自动后预设下拉可选
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(900)
       const rows = [...document.querySelectorAll('.settings__row')].map((node) => node.textContent)
       const hasSwitchRow = rows.some((text) => text.includes('声音均衡器'))
@@ -2907,7 +2907,7 @@ async function runSmoke ({ win, ctx }) {
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
 
       /* ① 深色模式下的下拉框不能再是白底黑字 */
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(1100)
       const readSelect = () => {
         const node = document.querySelector('.settings .pill-select')
@@ -3131,7 +3131,7 @@ async function runSmoke ({ win, ctx }) {
         })
 
         /* 设置页那几行在不在 */
-        actions.setView('settings')
+        actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
         await settle(900)
         const rows = [...document.querySelectorAll('.settings__row')].map((node) => node.textContent)
         const inputs = [...document.querySelectorAll('.settings__input')].map((node) => node.placeholder)
@@ -3178,7 +3178,7 @@ async function runSmoke ({ win, ctx }) {
       const devices = await navigator.mediaDevices.enumerateDevices()
       const outputs = devices.filter((device) => device.kind === 'audiooutput')
 
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await settle(1200)
       const row = [...document.querySelectorAll('.settings__row')]
         .find((node) => node.textContent.includes('输出设备'))
@@ -3881,7 +3881,7 @@ async function runSmoke ({ win, ctx }) {
     // 设置页渲染
     const settingsResult = await evaluate(win, `
       const { actions } = window.__aria
-      actions.setView('settings')
+      actions.setView('settings'); window.__aria.views.settingsView.open?.('audio')
       await new Promise((r) => setTimeout(r, 500))
       const cards = document.querySelectorAll('.settings__card').length
       const switches = document.querySelectorAll('.settings .switch').length
