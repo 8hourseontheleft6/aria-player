@@ -279,7 +279,45 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     ]))
 
     /* ---------- 播放 ---------- */
+    /*
+     * 输出设备列表要现取：插拔耳机、切蓝牙都会变。
+     * 名字需要 media 权限（主进程已放行），拿不到就退化成「输出设备 N」。
+     */
+    const outputSelect = h('select', { class: 'settings__select' })
+    let outputDevices = []
+    function paintOutputDevices () {
+      const current = store.get().settings.audioOutputDevice || ''
+      outputSelect.replaceChildren(
+        h('option', { value: '', text: '跟随系统' }),
+        ...outputDevices
+          .filter((device) => device.deviceId && device.deviceId !== 'default')
+          .map((device, index) => h('option', {
+            value: device.deviceId,
+            text: device.label || `输出设备 ${index + 1}`
+          }))
+      )
+      outputSelect.value = current
+    }
+    async function loadOutputDevices () {
+      try {
+        const list = await navigator.mediaDevices.enumerateDevices()
+        outputDevices = list.filter((device) => device.kind === 'audiooutput')
+      } catch {
+        outputDevices = []
+      }
+      paintOutputDevices()
+    }
+    on(outputSelect, 'change', () => actions.setOutputDevice(outputSelect.value))
+    paintOutputDevices()
+    loadOutputDevices()
+    navigator.mediaDevices?.addEventListener?.('devicechange', loadOutputDevices)
+
     scroll.appendChild(group('播放', [
+      row({
+        title: '输出设备',
+        sub: '通话 / 游戏语音时想让对方听不到音乐：把这里选成你的耳机（通话留在原设备）。音乐只进你的耳朵，麦克风拾不到它，对方就什么也听不到。留「跟随系统」则与其它应用共用默认输出。',
+        control: outputSelect
+      }),
       row({
         title: '单击歌曲直接播放',
         sub: '打开后，单击列表里的歌曲就直接播放（默认需要双击，单击只选中）。这个设置对歌曲列表、专辑详情、艺人详情都生效；多选请用行首的勾选框或 Ctrl / Shift 点击',

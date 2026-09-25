@@ -29,6 +29,9 @@ const DEFAULTS = {
   jumpToMatchedLyric: true,
   // 列表里单击歌曲就直接播放（默认关闭：单击只选中，双击才播放）
   playOnSingleClick: false,
+  // 输出设备 id（空 = 跟随系统）。通话 / 游戏语音时把音乐单独送到耳机，
+  // 麦克风就拾不到音乐，通话对方也就听不到
+  audioOutputDevice: '',
   // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
   sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
   // 默认侧栏与灵动岛不同时出现；打开后侧栏开着也显示灵动岛

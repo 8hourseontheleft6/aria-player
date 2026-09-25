@@ -133,6 +133,40 @@ export function createAudioEngine ({ bus }) {
     audio.muted = Boolean(value)
   }
 
+  /**
+   * 指定输出设备（Chromium 的 setSinkId）。
+   *
+   * 这是「一边通话 / 打游戏语音，一边放歌，而对方听不到」的关键：
+   * Windows / macOS 都允许按应用选择输出设备。把音乐送到**耳机**、把通话留在
+   * 原来的设备（往往是音箱或另一副耳机），麦克风就不会拾到音乐，
+   * 通话对端自然什么都听不到 —— 不需要虚拟声卡，也不需要把音乐调小。
+   *
+   * 传空字符串 = 跟随系统默认输出。设备被拔掉时浏览器会抛错，
+   * 这时回落到默认设备并如实返回失败，由调用方提示用户。
+   */
+  async function setOutputDevice (deviceId) {
+    if (typeof audio.setSinkId !== 'function') {
+      return { ok: false, message: '当前运行时不支持指定输出设备' }
+    }
+    try {
+      await audio.setSinkId(deviceId || '')
+      return { ok: true }
+    } catch (err) {
+      // 设备没了就退回默认，别让播放直接哑掉
+      try {
+        await audio.setSinkId('')
+        return { ok: false, message: `指定输出设备失败（${err.message}），已回退到系统默认` }
+      } catch {
+        return { ok: false, message: `指定输出设备失败：${err.message}` }
+      }
+    }
+  }
+
+  /** 当前实际生效的输出设备 id（空字符串 = 系统默认） */
+  function outputDevice () {
+    return typeof audio.sinkId === 'string' ? audio.sinkId : ''
+  }
+
   function setRate (value) {
     const rate = Math.max(0.25, Math.min(4, Number(value) || 1))
     audio.playbackRate = rate
@@ -230,6 +264,8 @@ export function createAudioEngine ({ bus }) {
     setVolume,
     getVolume,
     setMuted,
+    setOutputDevice,
+    outputDevice,
     setRate,
     setPreservesPitch,
     lastError,

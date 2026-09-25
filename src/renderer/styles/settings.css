@@ -125,6 +125,19 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 设置里的下拉（目前是输出设备） */
+.settings__select {
+  max-width: 220px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--bg-input);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-subhead);
+}
+
 /* ---------------------- 可收起分组 ---------------------- */
 
 .settings__group-head {

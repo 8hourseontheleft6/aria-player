@@ -2611,6 +2611,52 @@ async function runSmoke ({ win, ctx }) {
         menuText: checkboxCheck.afterMenuStart.menuText
       })}`))
 
+    /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
+    const audioOutput = await evaluate(win, `
+      const { actions, store, engine } = window.__aria
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      const hasApi = typeof engine.setOutputDevice === 'function'
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const outputs = devices.filter((device) => device.kind === 'audiooutput')
+
+      actions.setView('settings')
+      await settle(1200)
+      const row = [...document.querySelectorAll('.settings__row')]
+        .find((node) => node.textContent.includes('输出设备'))
+      const select = row ? row.querySelector('select.settings__select') : null
+      const options = select ? [...select.options].map((option) => option.text) : []
+      const info = row ? row.querySelector('.settings__info') : null
+
+      const applied = await actions.setOutputDevice('')
+      await settle(400)
+      const persisted = store.get().settings.audioOutputDevice
+
+      actions.setView('songs')
+      await settle(400)
+      return {
+        hasApi,
+        outputs: outputs.length,
+        hasRow: Boolean(row),
+        hasSelect: Boolean(select),
+        hasInfo: Boolean(info),
+        options,
+        applied: Boolean(applied && applied.ok === true),
+        persisted
+      }
+    `)
+    record('通话时放歌：可以指定独立输出设备',
+      audioOutput.hasApi === true &&
+      audioOutput.outputs > 0 &&
+      audioOutput.hasRow === true &&
+      audioOutput.hasSelect === true &&
+      audioOutput.hasInfo === true &&
+      audioOutput.options[0] === '跟随系统' &&
+      audioOutput.applied === true &&
+      audioOutput.persisted === '',
+      `引擎有 setOutputDevice=${audioOutput.hasApi}；系统报告 ${audioOutput.outputs} 个输出设备；` +
+      `设置页有该行=${audioOutput.hasRow}（下拉=${audioOutput.hasSelect}、ⓘ 说明=${audioOutput.hasInfo}，选项 ${JSON.stringify(audioOutput.options)}）；` +
+      `选「跟随系统」生效=${audioOutput.applied}，落盘值「${audioOutput.persisted}」`)
+
     /* ---------- 多艺人的拆分 ---------- */
 
     // 真实资料库里两种合作写法：顿号（Taylor Swift、Kendrick Lamar）和

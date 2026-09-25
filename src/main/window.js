@@ -113,6 +113,16 @@ function createMainWindow (ctx) {
 
   const win = new BrowserWindow(options)
 
+  /*
+   * 放行 media 权限：没有它时 enumerateDevices() 返回的设备**名字是空的**，
+   * 用户就没法在设置里认出「哪个是我的耳机」（输出设备那条设置要用）。
+   * 只放行 media，其它权限一律拒绝。
+   */
+  win.webContents.session.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(permission === 'media')
+  })
+  win.webContents.session.setPermissionCheckHandler((_contents, permission) => permission === 'media')
+
   if (!IS_MAC) Menu.setApplicationMenu(null)
 
   if (saved.maximized) win.maximize()

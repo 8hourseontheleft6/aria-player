@@ -678,6 +678,23 @@ async function main () {
       actions.setSetting({ theme })
     },
 
+    /**
+     * 切换音频输出设备（通话 / 游戏语音场景的关键）。
+     *
+     * 把音乐送到耳机、通话留在原设备：麦克风拾不到音乐，通话对方就听不到 ——
+     * 不需要虚拟声卡，也不用把音乐调小。设备被拔掉时 setSinkId 会失败，
+     * 引擎自己回退到系统默认，这里把设置也改回去并提示。
+     */
+    async setOutputDevice (deviceId) {
+      const id = deviceId || ''
+      const result = await engine.setOutputDevice(id)
+      await actions.setSetting({ audioOutputDevice: result.ok ? id : '' })
+      if (!result.ok) {
+        bus.emit(EVENTS.TOAST, { message: result.message, type: 'error', duration: 4200 })
+      }
+      return result
+    },
+
     async setSetting (patch) {
       const next = await remote.settings.set(patch)
       applySettings(next)
@@ -1376,6 +1393,12 @@ async function main () {
     const settings = await remote.settings.get()
 
     document.documentElement.dataset.platform = info.platform
+    // 输出设备是浏览器侧的设置，启动时自己应用一次（不经过 settings:changed）
+    if (settings.audioOutputDevice) {
+      engine.setOutputDevice(settings.audioOutputDevice).then((result) => {
+        if (!result.ok) console.warn('[app] 输出设备恢复失败：', result.message)
+      })
+    }
     store.set((state) => ({
       ...state,
       ready: true,
