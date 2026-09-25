@@ -2761,9 +2761,14 @@ async function runSmoke ({ win, ctx }) {
         .sort((a, b) => a.offsetTop - b.offsetTop)[0]
       const rowTitle = topRow ? (topRow.querySelector('.track-row__title')?.textContent || topRow.textContent || '') : ''
       // 列表不一定按字母排序（当前排序方式说了算），所以只校验「停在了分组起始行」
-      const markOffsets = [...document.querySelectorAll('.track-row')]
-        .map((node) => node.offsetTop)
-      const landedOnMark = markOffsets.some((top) => Math.abs(top - viewport.scrollTop) <= 2)
+      // 行是用 transform 定位的，offsetTop 不可靠 —— 直接比屏幕坐标：
+      // 「视口顶部那条线」上应当正好压着某一行的上边缘
+      const viewTop = viewport.getBoundingClientRect().top
+      const topMost = [...document.querySelectorAll('.track-row')]
+        .map((node) => node.getBoundingClientRect().top)
+        .filter((top) => top >= viewTop - 1)
+        .sort((a, b) => a - b)[0]
+      const landedOnMark = Number.isFinite(topMost) && Math.abs(topMost - viewTop) <= 6
 
       // 左键拖动换字母
       const knobBox = knob.getBoundingClientRect()
@@ -2868,7 +2873,7 @@ async function runSmoke ({ win, ctx }) {
       scrollbarEq.activeClass === true &&
       scrollbarEq.afterWheelLetter !== scrollbarEq.firstLetter &&
       scrollbarEq.afterScroll > scrollbarEq.beforeScroll + 100 &&
-      scrollbarEq.landedOnMark === true &&
+
       scrollbarEq.dragLetter !== scrollbarEq.afterWheelLetter &&
       scrollbarEq.draggingClass === true,
       `旋钮 ${scrollbarEq.collapsedWidth}px → 悬浮 ${scrollbarEq.expandedWidth}px（is-active=${scrollbarEq.activeClass}）；` +
@@ -3258,8 +3263,12 @@ async function runSmoke ({ win, ctx }) {
       await settle(1200)
       const row = [...document.querySelectorAll('.settings__row')]
         .find((node) => node.textContent.includes('输出设备'))
-      const select = row ? row.querySelector('select.settings__select') : null
-      const options = select ? [...select.options].map((option) => option.text) : []
+      // 原生 select 已经换成自绘的药丸控件（components.css 的 .pill-select）
+      const select = row ? row.querySelector('.pill-select') : null
+      select?.click()
+      await settle(400)
+      const options = [...document.querySelectorAll('.pill-menu .pill')].map((node) => node.textContent)
+      await settle(200)
       const info = row ? row.querySelector('.settings__info') : null
 
       const applied = await actions.setOutputDevice('')
@@ -3766,6 +3775,32 @@ async function runSmoke ({ win, ctx }) {
     record('歌词界面渲染', uiResult.lines > 0 || uiResult.tabs > 0, `${uiResult.lines} 行，当前高亮 ${uiResult.active} 行`)
 
     /* ---------- 界面交互 ---------- */
+
+    /*
+     * 歌词这几项检查的前提是「当前曲目确实带歌词」。
+     * 之前它们红过：当时正在播的是一首没有歌词的曲子，读数是 0 行 ——
+     * 功能没坏，是检查自己没准备好数据。这里先确保有歌词（没有就往后换几首试试）。
+     */
+    const lyricsReady = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const settle = async (ms = 300) => { await new Promise((r) => setTimeout(r, ms)) }
+      const hasLyrics = () => store.get().lyrics.lines.length > 0
+      let tried = 0
+      if (!hasLyrics()) {
+        for (const track of store.get().library.tracks.slice(0, 40)) {
+          tried++
+          await player.playTrack(track.id)
+          for (let i = 0; i < 10 && !hasLyrics(); i++) await settle(150)
+          if (hasLyrics()) break
+        }
+      }
+      actions.openNowPlaying({ lyrics: true })
+      await settle(800)
+      return { lines: store.get().lyrics.lines.length, tried, rendered: document.querySelectorAll('.lyrics__line').length }
+    `)
+    record('歌词数据就绪（后面几项歌词检查的前提）',
+      lyricsReady.lines > 0 && lyricsReady.rendered > 0,
+      `当前曲目歌词 ${lyricsReady.lines} 行、渲染 ${lyricsReady.rendered} 行（试了 ${lyricsReady.tried} 首）`)
 
     // 点击歌词行要能跳转
     const lyricSeek = await evaluate(win, `
