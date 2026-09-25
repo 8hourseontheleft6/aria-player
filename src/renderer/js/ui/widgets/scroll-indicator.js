@@ -187,7 +187,8 @@ export function marksFromTracks (tracks, rowHeight) {
   let current = null
   tracks.forEach((track, index) => {
     const source = (track.title || track.artist || '#').trim()
-    const letter = (source[0] || '#').toUpperCase()
+    // 拼音首字母：中文歌也要能归到 A/B/C（排序也是按这个首字母分组的）
+    const letter = initialOf(source)
     if (!current || current.letter !== letter) {
       current = { letter, offset: index * rowHeight, count: 0 }
       out.push(current)
