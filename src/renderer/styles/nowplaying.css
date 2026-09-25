@@ -782,3 +782,41 @@ html[data-platform="darwin"] .now-playing__topbar {
   backdrop-filter: blur(26px) saturate(160%);
   -webkit-backdrop-filter: blur(26px) saturate(160%);
 }
+
+/* ==========================================================================
+   底部控件自己的玻璃底（压在示波器之上）
+   ==========================================================================
+   之前按钮底色是半透明的，示波器的亮色会从按钮里透出来，视觉上像
+   「示波器夹在按钮底色和文字之间」。控件本来就在 body（z-index 3）里，
+   高于示波器（2），所以只要把底做「实」：
+     · 按钮：一层偏实的窗口色 + 轻微模糊（小面积，不会糊掉整条示波器）
+     · 进度块：同样给一层底，时间和滑块上的文字才不会浮在亮色上
+   ========================================================================== */
+
+.now-playing__controls .btn,
+.now-playing__tools .btn {
+  background: color-mix(in srgb, var(--bg-window) 74%, transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-1);
+}
+
+.now-playing__controls .btn:hover,
+.now-playing__tools .btn:hover {
+  background: color-mix(in srgb, var(--bg-window) 86%, transparent);
+  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-2);
+}
+
+.now-playing__controls .btn--transport,
+.now-playing__controls .btn--primary {
+  background: color-mix(in srgb, var(--bg-window) 82%, transparent);
+}
+
+.now-playing__progress {
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-window) 58%, transparent);
+  backdrop-filter: blur(16px) saturate(145%);
+  -webkit-backdrop-filter: blur(16px) saturate(145%);
+  box-shadow: 0 0 0 0.5px var(--separator);
+}
