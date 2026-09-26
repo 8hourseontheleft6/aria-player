@@ -535,6 +535,23 @@
   mask-repeat: no-repeat;
 }
 
+/* 悬停：整块轻轻浮起（与歌曲行、设置卡片的 hover 语言一致） */
+.wall-tile {
+  transition: transform var(--dur-fast) var(--ease-ios), box-shadow var(--dur-fast) var(--ease-ios);
+}
+
+.wall-tile:hover {
+  transform: translateY(var(--lift)) scale(1.015);
+  box-shadow: var(--elev-2);
+  z-index: 2;
+}
+
+/* 减少动画时静态位移与阴影要显式关掉：只把时长归零是挡不住 transform 的 */
+html[data-reduce-motion="true"] .wall-tile:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .wall-tile:hover .wall-tile__art img {
   transform: scale(1.09);
 }

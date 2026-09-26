@@ -930,7 +930,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     art,
     h('div', { class: 'wall-tile__info' },
       h('div', { class: 'wall-tile__name truncate', text: album.name }),
-      h('div', { class: 'wall-tile__artist truncate', text: `${album.albumArtist} · ${album.trackCount} 首` })
+      h('div', { class: 'wall-tile__artist truncate', text: `${album.albumArtist} · ${album.trackCount} 首${album.year ? ` · ${album.year}` : ""}` })
     ),
     h('span', {
       class: 'wall-tile__open',
