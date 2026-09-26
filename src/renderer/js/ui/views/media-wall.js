@@ -905,7 +905,11 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
           return
         }
         const ids = album.tracks.map((track) => track.id)
+        // 记下点击前的布局位置（不受 transform 影响），播放后重排再补偿回来
+        const before = { left: tile.offsetLeft, top: tile.offsetTop }
         player.playCollection(ids, ids[0])
+        // applyFeatured → measureGeometry 已经强制过一次重排，这里能直接量到新位置
+        keepTileInPlace(tile, before)
       },
       onDblclick: () => actions.openAlbum(album.key),
       onKeydown: (event) => {
@@ -1034,7 +1038,47 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
     } else {
       flip(() => applyFeatured(key))
     }
+    /*
+     * 换了聚焦块之后，把那块**平滑带到视口中央**。
+     *
+     * 为什么必须做：被点中的瓦片从 1×1（或 2×1 / 1×2）变成 2×2 时，网格会重排，
+     * 它的位置可能跑到视口外面 —— 用户看到的就是「点一下歌，墙跳到别处、专辑不见了」
+     * （反馈原话：点开会跳到屏幕外面打开）。这里只做一次位移动画，
+     * 让放大的那块停在视野里，观感上是「它长大并来到你面前」。
+     */
+    /*
+     * 注意：这里**不能**去 focusFeatured（把视图挪到聚焦块）。
+     * 那会让「换歌」也移动整面墙 —— 正是用户早先抱怨的「播放时跳回左上角」。
+     * 「点开的专辑要原地打开」由点击路径上的 keepTileInPlace() 负责补偿。
+     */
     miniLyrics.reflow()
+  }
+
+  /**
+   * 聚焦块从 1×1（或 2×1 / 1×2）变成 2×2 时网格会重排，这张瓦片可能挪位置。
+   * 这里按「重排前后的布局差值」反向补偿平移，让它停在**原来的屏幕位置**上 ——
+   * 用户看到的就是「原地放大」，而不是跳到屏幕外（反馈原话）。
+   * 用 offsetLeft/offsetTop（布局值）而不是 getBoundingClientRect：后者会把
+   * 正在跑的 FLIP transform 算进去，量到的位置是动画中间态。
+   */
+  function keepTileInPlace (tile, before) {
+    if (!tile || !before) return
+    const dx = tile.offsetLeft - before.left
+    const dy = tile.offsetTop - before.top
+    if (!dx && !dy) return
+    const limit = bounds()
+    const nextX = clamp(pan.x - dx, limit.minX, limit.maxX)
+    const nextY = clamp(pan.y - dy, limit.minY, limit.maxY)
+    if (reduceMotion()) {
+      cancelAnimation()
+      pan.x = nextX
+      pan.y = nextY
+      target.x = nextX
+      target.y = nextY
+      writePan()
+      return
+    }
+    animatePanTo(nextX, nextY, 300)
   }
 
   /**

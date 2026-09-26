@@ -400,6 +400,12 @@
   display: grid;
   grid-template-columns: repeat(var(--wall-columns, 6), var(--wall-size, 148px));
   /*
+   * dense：跨格瓦片（2×2 / 2×1 / 1×2）后面本来会留下填不满的空洞 ——
+   * 用户反馈「切换歌曲、改布局时会出现空白格子」就是这个。
+   * dense 会让后面的小瓦片回填这些洞，墙面才连成一片（代价是瓦片顺序略有重排）。
+   */
+  grid-auto-flow: dense;
+  /*
    * 行尺寸必须显式给：网格有确定高度时，auto 行会被压缩去填满容器 ——
    * 实测 17 行各被压成 32px，普通格子靠 aspect-ratio 仍高 148px 于是逐行重叠，
    * 聚焦块（跨 2 行、aspect-ratio:auto）高度塌成 67px，封面被裁成一条。
