@@ -1139,16 +1139,28 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     if (!artwork || !list.length) return
     const token = ++artScanToken
     const keys = new Set()
+    let failures = 0
     await Promise.all(list.map(async (album) => {
       const track = album.artworkTrack
       if (!track) return
       try {
         if (await artwork.resolveUrl(track)) keys.add(album.key)
       } catch {
-        // 取不到就当没有封面
+        /*
+         * 抛异常 ≠ 「这张专辑没有封面」：可能只是磁盘 / IPC 的偶发失败。
+         * 之前把它当成「没有封面」，于是扫描一旦大面积失败，整面墙几乎被清空
+         * （自检里出现过 plane 高度只剩 6px 的空墙）。现在单独计数：
+         * 只要出现过失败就判定本次扫描不可靠 —— 不筛，照常显示全部。
+         */
+        failures++
       }
     }))
     if (token !== artScanToken) return
+    if (failures > 0) {
+      artFiltered = null
+      refresh()
+      return
+    }
     artFiltered = keys.size ? keys : null
     refresh()
   }
