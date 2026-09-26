@@ -39,7 +39,11 @@
       "!docs/**",
       "!scripts/**",
       "!release/**",
-      "!tests/**"
+      "!tests/**",
+      "!src/main/smoke.js",
+      "!src/main/screenshot.js",
+      "!src/main/perf.js",
+      "!src/main/visual-audit.js"
     ],
     "directories": {
       "output": "release",
