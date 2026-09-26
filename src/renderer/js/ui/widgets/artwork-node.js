@@ -89,9 +89,8 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
     const key = artworkKey(track)
     node.dataset.artKey = key || ''
     if (!key) {
-      // 换成「没有封面」的条目前，要把上一位的图（或占位图标）清掉，
-      // 否则会留着上一张图 —— 见下面 replaceChildren 的注释
-      replaceArt(node, null)
+      // 换成「没有封面」的条目前，要把上一位的图清掉，否则会留着上一张图
+      replaceArt(node, null, '')
       return
     }
     const url = await artwork.resolveUrl(track)
@@ -104,19 +103,30 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
      * 用户看到的就是「换了歌手，照片还是上一位的」（实机反馈）。
      * 现在改成：只要这次解析出来的 key 与节点当前 key 一致，就把旧内容换成新图。
      */
-    replaceArt(node, url)
+    // 必须把 key 盖到图上：下次 observe 靠它判断「这张图是不是就是这个条目的」，
+    // 否则同一行每次重渲染都会被当成旧图重新加载（列表扫描期间就是持续闪烁）
+    replaceArt(node, url, key)
     pending.delete(node)
   }
 
-  /** 把节点内容换成新图；node 里原有的图/占位图标先清掉 */
-  function replaceArt (node, url) {
+  /**
+   * 把节点内容换成新图。
+   * `key` 会盖在新图元素上（dataset.artKey），这样下次 observe 能判断
+   * 「现在这张图是不是就是这个条目的」，而不是笼统地看到「有图就跳过」。
+   */
+  function replaceArt (node, url, key = '') {
     const current = node.querySelector('img')
-    if (current && current.getAttribute('src') === url) return
+    if (current && current.getAttribute('src') === url) {
+      current.dataset.artKey = key
+      return
+    }
     if (!url) {
       if (current) node.replaceChildren(icon(fallbackIcon))
       return
     }
-    node.replaceChildren(h('img', { src: url, alt: '', decoding: 'async', loading: 'lazy' }))
+    const image = h('img', { src: url, alt: '', decoding: 'async', loading: 'lazy' })
+    image.dataset.artKey = key
+    node.replaceChildren(image)
   }
 
   return {
@@ -126,11 +136,30 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
      * @param {string|null} iconName 占位图标；传 null 则不放（用 CSS 占位，省下大量 DOM 节点）
      */
     observe (node, track, iconName = fallbackIcon) {
-      if (iconName && !node.querySelector('img')) node.replaceChildren(icon(iconName))
+      const key = track ? (artworkKey(track) || '') : ''
+      /*
+       * 关键修复：这里以前是 `if (node.querySelector('img')) return`。
+       *
+       * 但这些节点是**被复用**的（艺人列表按索引复用行，搜索换一位歌手就把同一行
+       * 交给新的 artist），行里还留着上一位的 <img>，于是新头像永远排不进加载队列，
+       * 照片就停在泰勒·斯威夫特那儿 —— 实机反馈「换歌手照片不变」的真正原因。
+       *
+       * 现在的判断是「图对不对」而不是「有没有图」：
+       *   · 图就是这个条目的（artKey 相同）→ 什么都不做；
+       *   · 图是别人的 → 先换成占位图标（避免残留上一位的脸），再排队加载新的。
+       */
+      const current = node.querySelector('img')
+      if (current && current.dataset.artKey === key) return
+      if (iconName && current) node.replaceChildren(icon(iconName))
+      else if (iconName && !current) node.replaceChildren(icon(iconName))
       if (!track) return
+      // wanted 是「节点 → 该节点现在应该显示哪一首」的唯一出处：
+      // IntersectionObserver 的回调就是从这里取曲目塞进加载队列的。
+      // 少了这一行，节点复用后会按**旧曲目**去加载 —— 照片自然不换。
       wanted.set(node, track)
-      node.dataset.artKey = artworkKey(track) || ''
-      if (node.querySelector('img')) return
+      node.dataset.artKey = key
+      // 旧图必须清掉：不清的话 paint() 里 replaceChildren 之前它还在，观感就是「照片没换」
+      if (current) current.remove()
       pending.add(node)
       if (!suspended) observer.observe(node)
     },
