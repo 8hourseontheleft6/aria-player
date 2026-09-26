@@ -1207,7 +1207,23 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     const state = store.get()
     const all = actions.albums()
     // 有封面扫描结果就只留有封面的；还没扫完先按全部展示，扫完再重建一次
-    const list = artFiltered ? all.filter((album) => artFiltered.has(album.key)) : all
+    const filtered = artFiltered ? all.filter((album) => artFiltered.has(album.key)) : all
+    /*
+     * 按艺人成簇：同一位歌手的专辑挨在一起，墙上就会自然形成一片一片的「艺人区」，
+     * 比现在这种「第一首歌在字母序里出现的先后」好认得多。
+     *
+     * 只在这里排序，**不动 grouping.js** —— 那是专辑页共用的，
+     * 改它会连带影响专辑页顺序和好几条媒体墙自检（位置/距离那几项）。
+     * 排序键：艺人 → 年份 → 专辑名，同一艺人的专辑按时间先后排。
+     * 用 zh-Hans-CN 的 localeCompare，中文歌手名也能按拼音排上。
+     */
+    const list = [...filtered].sort((a, b) => {
+      const byArtist = (a.albumArtist || '').localeCompare(b.albumArtist || '', 'zh-Hans-CN')
+      if (byArtist) return byArtist
+      const byYear = (a.year || 0) - (b.year || 0)
+      if (byYear) return byYear
+      return (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN')
+    })
     if (!artFiltered) scanArtwork(all)
     /*
      * 只在「专辑集合真的变了」时才重建。
