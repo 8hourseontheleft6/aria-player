@@ -489,37 +489,22 @@ async function runSmoke ({ win, ctx }) {
       const settle = async (ms = 240) => { await new Promise((r) => setTimeout(r, ms)) }
       actions.setView('songs')
       await actions.clearSearchHistory()
-      await actions.commitSearch('love')
-      await actions.commitSearch('Blues')
-      actions.setSearchScope('basic')
-      await settle(280)
       /*
-       * 等历史真的到齐再读面板。
-       * 历史是「写设置 → 主进程落盘 → 推 settings:changed → 回填 store」，
-       * 提交完立刻读会读到上一轮的空历史；这时后面那句
-       * panel.querySelector('.search-panel__term').click() 会取到 null ——
-       * 整个自检就在第 27 项以异常中止（表现为「26/27 通过」这种偶发）。
-       */
-      /*
-       * 等历史真的到齐再读面板（3s 在机器忙的时候不够：整轮自检 8 分钟里，
-       * 这一项曾经因为设置往返还没落回来而读到空历史 —— 放宽到 ~10s，
-       * 并且下面读面板前再确认一次）。
-       */
-      /*
-       * 等历史与查询词都真的到位。
+       * 历史与查询词改成**确定性**准备，不再依赖
+       * 「渲染层 commitSearch → 主进程落盘 → 推 settings:changed → 回填 store」那条往返。
        *
-       * 历史是「写设置 → 主进程落盘 → 推 settings:changed → 回填 store」；
-       * 光等是不够的 —— 实测有过 10s 都没落回来的情况（那一轮读到空历史，
-       * 连带「搜索框默认收起」「面板真的看得见」几条一起红）。
-       * 所以在等待过程中**再催两次提交**，并把「查询词已到位」也纳入条件：
-       * 少了查询词，收起/展开那条会读到空关键词。
+       * 那条往返实测非常偶发：轮询 10s、中途再催两次提交，仍然读到过空历史，
+       * 连带下面三条一起红（搜索框收起/展开、面板历史、面板点得到）。
+       * 现在：① 查询词用同步的 setQuery（渲染层立刻生效，不经过主进程）；
+       *       ② 历史直接写主进程的权威设置，再轮询等它推回来。
        */
-      for (let i = 0; i < 200; i++) {
-        const ready = store.get().settings.searchHistory.length >= 2 && store.get().ui.query === 'Blues'
-        if (ready) break
-        if (i === 60 || i === 120) await actions.commitSearch('Blues')
+      actions.setQuery('Blues')
+      await window.__aria.remote.settings.set({ searchHistory: ['Blues', 'love'] })
+      for (let i = 0; i < 200 && store.get().settings.searchHistory.length < 2; i++) {
         await settle(50)
       }
+      actions.setSearchScope('basic')
+      await settle(200)
 
       const slot = document.querySelector('.search-slot')
       const toggle = slot.querySelector('.btn')
