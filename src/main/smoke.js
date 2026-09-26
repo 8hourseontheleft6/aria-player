@@ -5053,19 +5053,24 @@ async function runSmoke ({ win, ctx }) {
     }
 
     /*
-     * 新契约（用户要求「在线歌词直接加载，不要用户确认」）：
-     *   · 歌词不看总开关 —— 关着也照样去匹配，否则没有 .lrc 的歌永远没歌词；
-     *   · 封面仍归总开关管 —— 它会下载图片，默认不该联网。
+     * 联网契约（用户要求「歌词自动匹配，封面也自动匹配」）：
+     *   · 总开关默认**开着** → 歌词与封面都自动匹配，不需要用户确认；
+     *   · 关掉总开关 → 两者一起停（用户关它就是明确不要联网，不该有例外）；
+     *   · 分项开关（onlineLyrics / onlineCovers）用来只关其中一样。
      */
+    const defaultOnline = settingsService.get().onlineFeatures
     settingsService.set({ onlineFeatures: false, onlineLyrics: true, onlineCovers: true })
     await sleep(200)
     const lyricsWhenMasterOff = await online.fetchLyrics(sample)
     const coversWhenMasterOff = await online.fetchCover(sample)
-    record('在线歌词不看总开关（直接加载）；封面仍归总开关',
-      lyricsWhenMasterOff.skipped !== true &&
+    settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
+    await sleep(150)
+    record('联网总开关：默认开着（歌词与封面都自动匹配），关掉则两者一起停',
+      defaultOnline === true &&
+      lyricsWhenMasterOff.skipped === true &&
       coversWhenMasterOff.skipped === true,
-      `总开关关闭时：歌词 skipped=${lyricsWhenMasterOff.skipped}（应为 false/undefined = 仍会联网）、` +
-      `封面 skipped=${coversWhenMasterOff.skipped}（应为 true）`)
+      `默认 onlineFeatures=${defaultOnline}（应为 true）；关掉总开关时：歌词 skipped=${lyricsWhenMasterOff.skipped}、` +
+      `封面 skipped=${coversWhenMasterOff.skipped}（都应为 true）`)
 
     settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
     await sleep(300)

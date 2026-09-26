@@ -38,13 +38,13 @@ function createOnlineService (ctx) {
   function enabled (kind) {
     const current = settings.get()
     /*
-     * 歌词**不看总开关**：没找到本地 .lrc 就直接联网匹配，不要让用户先确认一遍
-     * （用户要求「在线歌词直接加载，不要用户确认」）。只有显式关掉歌词源才停。
-     * 封面仍然归总开关管 —— 它会下载图片，不适合默认联网。
+     * 总开关是**真正的总闸**（默认开着）：关掉它，歌词与封面一起停 ——
+     * 用户关它就是明确表示「不要联网」，不该有例外。
+     * 分项开关用来只关其中一样。
      */
-    if (kind === 'lyrics') return current.onlineLyrics !== false
     if (!current.onlineFeatures) return false
-    if (kind === 'covers' && current.onlineCovers === false) return false
+    if (kind === 'lyrics') return current.onlineLyrics !== false
+    if (kind === 'covers') return current.onlineCovers !== false
     return true
   }
 

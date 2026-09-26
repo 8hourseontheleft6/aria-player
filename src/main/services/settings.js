@@ -69,8 +69,12 @@ const DEFAULTS = {
   closeToTray: false,
   taskbarProgress: true,
   watchFolders: true,
-  // 在线补全默认关闭：这是本项目唯一的联网功能
-  onlineFeatures: false,
+  /*
+   * 联网总开关：默认**开着**，否则没有本地 .lrc 的歌没歌词、没有内嵌封面的歌没封面 ——
+   * 用户要的就是「像歌词那样自动匹配」。想彻底断网的把这里关掉，歌词与封面会一起停。
+   * 下面两个是分项开关，默认都开。
+   */
+  onlineFeatures: true,
   onlineLyrics: true,
   onlineCovers: true,
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
