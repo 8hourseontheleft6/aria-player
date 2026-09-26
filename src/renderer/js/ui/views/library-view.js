@@ -632,12 +632,48 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     toolbar.classList.toggle('is-stuck', collapsed)
   }, { passive: true })
 
-  bus.on(EVENTS.LIBRARY_UPDATED, refresh)
+  /*
+   * 扫描期间把连续的「资料库更新」合并成一次刷新 —— 这是实机反馈的频闪来源：
+   * 扫描按批次推进，每个批次都 refresh() 一次（整表重算 + setTracks），
+   * 而行是按索引做虚拟滚动的：列表一变长，行就会被拆掉重建、封面重新加载，
+   * 眼睛看到的就是一片闪烁（鼠标停在「全部歌曲」上时尤其明显）。
+   *
+   * 关键是**只对「扫描进行中的资料库变化」合并**：
+   * 上一版我把所有更新一起延迟 140ms，结果视图切换 / 排序 / 搜索也跟着变慢，
+   * 自检红了 28 条 —— 那些路径必须保持立即刷新。
+   * 扫描结束时 ui.scanning 变化会走 refreshNow()，把待处理的那次立刻补上，不会漏结果。
+   */
+  let pendingScanRefresh = null
+
+  function refreshNow () {
+    if (pendingScanRefresh) {
+      clearTimeout(pendingScanRefresh)
+      pendingScanRefresh = null
+    }
+    refresh()
+  }
+
+  function refreshForLibraryChange () {
+    if (store.get().ui.scanning !== true) {
+      refreshNow()
+      return
+    }
+    if (pendingScanRefresh) return
+    pendingScanRefresh = setTimeout(() => {
+      pendingScanRefresh = null
+      refresh()
+    }, 200)
+  }
+
+  bus.on(EVENTS.LIBRARY_UPDATED, refreshForLibraryChange)
   store.subscribe((state, prev) => {
     // 设置也要算进来：搜索范围（basic/deep）会影响占位符、范围按钮与提示文案，
     // 只盯 ui/library 的话，点了范围按钮界面不会有任何反应
     if (state.ui === prev.ui && state.library === prev.library && state.settings === prev.settings) return
-    refresh()
+    // 扫描中的「仅资料库变化」才合并；其余（视图、排序、搜索、设置）立即刷新
+    const onlyLibrary = state.ui === prev.ui && state.settings === prev.settings
+    if (onlyLibrary && state.ui.scanning === true) refreshForLibraryChange()
+    else refreshNow()
   })
 
   refresh()
