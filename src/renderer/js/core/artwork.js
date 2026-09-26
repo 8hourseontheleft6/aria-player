@@ -53,10 +53,19 @@ export function createArtworkService ({ bus, host = null }) {
     tintSoft: `hsl(${Math.round(h)} ${Math.round(s)}% ${Math.round(l)}% / 0.18)`
   })
 
+  /**
+   * 稳定的「随机色」：由「艺人|专辑」哈希出一个色相。
+   * 同一张专辑永远同一个颜色（不会每次刷新都变），但不同专辑彼此独立。
+   * 饱和度/亮度也从同一个种子派生一点变化 —— 否则所有专辑「鲜度」一样，
+   * 看起来像同一条色带。范围压在偏深偏实的区间，浅色主题下也看得清。
+   */
   const fallbackColor = (track) => {
     const seed = `${track?.albumArtist || track?.artist || ''}|${track?.album || track?.title || ''}`
     const { hue } = colorFromString(seed)
-    return makeColor(hue, 68, 56)
+    const { hue: salt } = colorFromString(`${seed}|salt`)
+    const saturation = 58 + (salt % 26)        // 58~83
+    const lightness = 44 + ((salt * 7) % 15)   // 44~58
+    return makeColor(hue, saturation, lightness)
   }
 
   function rememberBlob (key, url) {
@@ -149,6 +158,18 @@ export function createArtworkService ({ bus, host = null }) {
 
   /** 用 canvas 从封面图取主色调（受 CORS 限制失败时回退到由专辑名生成的稳定配色） */
   async function resolveColor (track) {
+    /*
+     * 默认就用「稳定的随机色」，**不再从封面取样**（用户偏好）：
+     * 封面取色常常发灰发白（大面积白底/灰摄影），不同专辑之间的观感也不稳定；
+     * 由「艺人|专辑」哈希出来的颜色反而更整齐，而且是稳定的（同一张专辑恒定）。
+     *
+     * 下面那段 canvas 取样的实现保留着，将来若要提供「按封面取色」可以直接接回来。
+     */
+    return fallbackColor(track)
+  }
+
+  /** 保留：按封面取主色（当前默认不走这里） */
+  async function resolveCoverColor (track) {
     const url = await resolveUrl(track)
     if (!url) return fallbackColor(track)
     if (colorCache.has(url)) return colorCache.get(url)
@@ -247,5 +268,6 @@ export function createArtworkService ({ bus, host = null }) {
     return { urls, revoked }
   }
 
-  return { resolveUrl, resolveColor, applyTint, fallbackColor, releaseMemory }
+  // resolveCoverColor：按封面取主色（当前默认不走这里，保留给将来需要时用）
+  return { resolveUrl, resolveColor, resolveCoverColor, applyTint, fallbackColor, releaseMemory }
 }
