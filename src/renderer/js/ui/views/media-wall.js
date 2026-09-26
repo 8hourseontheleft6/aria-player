@@ -47,7 +47,7 @@ const INERTIA_MIN = 0.06
 const INERTIA_MAX_VELOCITY = 58
 const ELASTIC = 0.35
 
-export function createMediaWall ({ store, bus, player, actions, lazy, isBackgroundReleased }) {
+export function createMediaWall ({ store, bus, player, actions, lazy, artwork, isBackgroundReleased }) {
   let density = 'm'
   let layout = 'canvas'  /** @type {Array<object>} */
   let albumList = []
@@ -1123,6 +1123,36 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
   /* 渲染                                                              */
   /* ================================================================ */
 
+  /*
+   * 只把**有封面**的专辑放上墙（用户要求：没封面的就别放了）。
+   *
+   * 「有没有封面」只能异步问出来（要读内嵌图片 / 缓存），所以：
+   * 先照常把墙建起来，同时在后台扫一遍；扫完若集合有变就重建一次。
+   * 扫描结果按 token 作废，避免期间列表又变了还在用旧结果。
+   * 兜底：如果一个都没扫到（例如整个库都没有封面），就退回显示全部 ——
+   * 一面空墙看起来更像坏了。
+   */
+  let artFiltered = null
+  let artScanToken = 0
+
+  async function scanArtwork (list) {
+    if (!artwork || !list.length) return
+    const token = ++artScanToken
+    const keys = new Set()
+    await Promise.all(list.map(async (album) => {
+      const track = album.artworkTrack
+      if (!track) return
+      try {
+        if (await artwork.resolveUrl(track)) keys.add(album.key)
+      } catch {
+        // 取不到就当没有封面
+      }
+    }))
+    if (token !== artScanToken) return
+    artFiltered = keys.size ? keys : null
+    refresh()
+  }
+
   function refresh ({ focus = false, focusAnimate = true } = {}) {
     /*
      * 最小化释放期间不要建墙。
@@ -1133,7 +1163,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
     if (typeof isBackgroundReleased === 'function' && isBackgroundReleased()) return
 
     const state = store.get()
-    const list = actions.albums()
+    const all = actions.albums()
+    // 有封面扫描结果就只留有封面的；还没扫完先按全部展示，扫完再重建一次
+    const list = artFiltered ? all.filter((album) => artFiltered.has(album.key)) : all
+    if (!artFiltered) scanArtwork(all)
     /*
      * 只在「专辑集合真的变了」时才重建。
      *

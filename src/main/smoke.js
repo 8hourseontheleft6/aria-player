@@ -4102,8 +4102,13 @@ async function runSmoke ({ win, ctx }) {
         afterSwitchOrder, afterSwitchPosition, distanceFromOrigin, progressWidth,
         openedAlbum
       }`)
-    record('媒体墙', wallView.tiles > 0 && wallView.tiles === groupResult.albums,
-      `${wallView.tiles} 张封面方块（= 专辑数），已加载 ${wallView.imgs} 张`)
+    /*
+     * 新契约：墙上只放**有封面**的专辑（用户要求「没封面的就不要放了」），
+     * 所以格子数会略少于专辑总数 —— 断言改成「有格子、且不超过专辑数」，
+     * 并在详情里把被筛掉的数量写出来，方便一眼看出过滤是否生效。
+     */
+    record('媒体墙', wallView.tiles > 0 && wallView.tiles <= groupResult.albums,
+      `${wallView.tiles} 张封面方块（专辑共 ${groupResult.albums} 张，无封面被筛掉 ${groupResult.albums - wallView.tiles} 张），已加载 ${wallView.imgs} 张`)
     record('媒体墙密度切换', wallView.sizeBefore !== wallView.sizeAfter,
       `格子 ${wallView.sizeBefore}→${wallView.sizeAfter}，列数 ${wallView.columnsBefore}→${wallView.columnsAfter}`)
     record('媒体墙聚焦块',

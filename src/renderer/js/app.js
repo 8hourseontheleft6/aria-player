@@ -778,6 +778,8 @@ async function main () {
     bus,
     player,
     actions,
+    // 传 artwork：媒体墙要用它筛掉没有封面的专辑
+    artwork,
     lazy: lazyArtwork,
     isBackgroundReleased: () => backgroundState.released
   })
