@@ -882,14 +882,16 @@ export function createMediaWall ({ store, bus, player, actions, lazy, isBackgrou
     lazy.observe(art, album.artworkTrack, null)
 
     /*
-     * 尺寸花样（确定性，不用随机数）：一堵墙全是同样大小的方块太平。
-     * 每 11 张一轮：第 4 张 2×2、第 7 张 2×1（宽）、第 10 张 1×2（高），其余 1×1。
-     * 用「索引取模」而不是随机，是为了让同一张专辑每次落在同一个形状上、自检也稳定。
-     * 正在播放那张由 .is-featured 覆盖成 2×2（CSS 里排在花样之后，优先级更高）。
-     * 跨格尺寸由 cacheSlots() 按实际 offsetWidth/Height 量出来，所以几何/裁剪/平移都不受影响。
+     * 尺寸花样（确定性）：只保留**偶发的 2×2**，不做 2×1 / 1×2 条状。
+     * 原因有二：
+     *   · 条状看着别扭（用户反馈去掉 1×2）；
+     *   · 媒体墙有两条硬不变量 —— 格子是正方形、封面铺满格子（自检里各有一条检查），
+     *     条状瓦片会同时破坏它们（2 列宽 1 行高 ≠ 正方形）。
+     * 2×2 是 2 列 × 2 行，本身仍是正方形，和「正在播放那张」用的是同一种形状。
+     * 每 9 张一轮，第 4 张放大；用索引取模而不是随机，保证同一张专辑形状稳定、自检可复现。
      */
-    const pattern = index % 11
-    const shapeClass = pattern === 3 ? 'is-big' : pattern === 6 ? 'is-wide' : pattern === 9 ? 'is-tall' : ''
+    const shortcutShapes = index % 9 === 3
+    const shapeClass = shortcutShapes ? 'is-big' : ''
 
     const tile = h('div', {
       class: `wall-tile${shapeClass ? ` ${shapeClass}` : ''}`,

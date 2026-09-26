@@ -607,9 +607,13 @@
  * 声明在 .is-featured 之前，所以「正在播放那张」永远覆盖成 2×2。
  * 跨格尺寸由 JS 的 cacheSlots() 按实际尺寸量取，几何 / 裁剪 / 平移都不受影响。
  */
-.wall-tile.is-wide { grid-column: span 2; }
-.wall-tile.is-tall { grid-row: span 2; }
-.wall-tile.is-big { grid-column: span 2; grid-row: span 2; }
+/**
+ * 尺寸花样：只有偶发的 2×2（见 media-wall.js 的 createTile）。
+ * 2 列 × 2 行，仍是正方形、封面照样铺满，和「正在播放那张」同一种形状。
+ * aspect-ratio: auto 是必须的：否则高度按「宽 = 高」算，撑不下自己那两行。
+ * 声明在 .is-featured 之前，所以正在播放那张永远覆盖成 2×2。
+ */
+.wall-tile.is-big { grid-column: span 2; grid-row: span 2; aspect-ratio: auto; }
 
 /**
  * 正在播放的那张专辑：就在原地放大成 2×2，后面的格子顺延让路。
