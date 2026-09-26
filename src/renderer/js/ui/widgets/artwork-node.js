@@ -88,13 +88,35 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
   async function paint (node, track) {
     const key = artworkKey(track)
     node.dataset.artKey = key || ''
-    if (!key) return
+    if (!key) {
+      // 换成「没有封面」的条目前，要把上一位的图（或占位图标）清掉，
+      // 否则会留着上一张图 —— 见下面 replaceChildren 的注释
+      replaceArt(node, null)
+      return
+    }
     const url = await artwork.resolveUrl(track)
     // 节点可能已经被回收给别的条目了
     if (!url || node.dataset.artKey !== key) return
-    if (node.querySelector('img')) return
-    node.replaceChildren(h('img', { src: url, alt: '', decoding: 'async', loading: 'lazy' }))
+    /*
+     * 这里以前是 `if (node.querySelector('img')) return` —— 也就是「节点里已经有图就不管」。
+     * 但同一个节点会被复用给不同的条目（最典型：搜索完 Taylor Swift 再看别的歌手，
+     * 艺人头像那个节点里还留着 Taylor 的图），于是新图永远插不进去，
+     * 用户看到的就是「换了歌手，照片还是上一位的」（实机反馈）。
+     * 现在改成：只要这次解析出来的 key 与节点当前 key 一致，就把旧内容换成新图。
+     */
+    replaceArt(node, url)
     pending.delete(node)
+  }
+
+  /** 把节点内容换成新图；node 里原有的图/占位图标先清掉 */
+  function replaceArt (node, url) {
+    const current = node.querySelector('img')
+    if (current && current.getAttribute('src') === url) return
+    if (!url) {
+      if (current) node.replaceChildren(icon(fallbackIcon))
+      return
+    }
+    node.replaceChildren(h('img', { src: url, alt: '', decoding: 'async', loading: 'lazy' }))
   }
 
   return {

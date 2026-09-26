@@ -224,9 +224,26 @@ async function bootstrap () {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  app.on('before-quit', async () => {
+  /*
+   * 退出前必须**等**设置落盘。
+   *
+   * 踩过的坑（用户在别人电脑上测试时反馈「关掉程序后曲库文件夹又要重新指定、
+   * 数据像被清空了」）：`app.on('before-quit', async () => { await flush() })`
+   * 这种写法 Electron 是**不等**的 —— 它不会等一个 async 监听器返回的 Promise，
+   * 于是 `flush()` 里的 fsp.writeFile 还没写完，进程就已经退出了。
+   *
+   * 正确做法：拦一次退出（preventDefault），flush 完成后再真正退出；
+   * `quitting` 标志保证第二次 before-quit 直接放行，不会自己拦自己成死循环。
+   */
+  let quitting = false
+  app.on('before-quit', (event) => {
     markQuitting()
-    await settings.flush()
+    if (quitting) return
+    quitting = true
+    event.preventDefault()
+    Promise.resolve(settings.flush())
+      .catch((error) => console.error('[main] 退出前保存设置失败：', error))
+      .finally(() => app.quit())
   })
 
   app.on('will-quit', async () => {
