@@ -7,4 +7,7 @@ Thumbs.db
 
 *.err
 
-# ÓÃ»§Ìá¹©µÄ¾ùºâÆ÷²Î¿¼Êý¾ÝÒÑÈë¿âÎª docs/equalizer-data.json
+# ï¿½Ã»ï¿½ï¿½á¹©ï¿½Ä¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª docs/equalizer-data.json
+
+# æ‰“åŒ…äº§ç‰©ï¼ˆnpm run distï¼‰
+release/

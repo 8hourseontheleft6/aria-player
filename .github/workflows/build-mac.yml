@@ -1,0 +1,27 @@
+name: build-mac
+
+# 手动触发；产出一个未签名的 dmg（测试者右键「打开」即可运行）
+on:
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 安装依赖
+        run: npm ci || npm install
+      - name: 打包 macOS
+        run: npx electron-builder --mac --publish never
+        env:
+          # 没有证书也能出包：electron-builder 会跳过签名
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aria-mac
+          path: |
+            release/*.dmg
+            release/*.zip

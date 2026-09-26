@@ -1,7 +1,7 @@
 {
   "name": "aria-player",
   "productName": "Aria",
-  "version": "0.0.0-dev",
+  "version": "0.1.0-beta.1",
   "private": true,
   "description": "Aria —— iOS 设计风格的本地音乐播放器（Electron）",
   "main": "src/main/main.js",
@@ -16,12 +16,84 @@
     "shots": "electron . --shots",
     "audit": "electron . --audit",
     "perf": "electron . --perf",
-    "probe": "node scripts/probes/probe-library.js"
+    "probe": "node scripts/probes/probe-library.js",
+    "dist": "electron-builder --win --x64",
+    "dist:portable": "electron-builder --win portable --x64",
+    "dist:mac": "electron-builder --mac --publish never"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"
   },
   "devDependencies": {
     "electron": "^42.0.0"
+  },
+  "build": {
+    "appId": "com.aria.player",
+    "productName": "Aria",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.md",
+      "!docs/**",
+      "!scripts/**",
+      "!release/**",
+      "!tests/**"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Aria-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Aria"
+    },
+    "portable": {
+      "artifactName": "Aria-${version}-portable.${ext}"
+    },
+    "mac": {
+      "category": "public.app-category.music",
+      "darkModeSupport": true,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Aria-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Aria ${version}"
+    }
   }
 }
