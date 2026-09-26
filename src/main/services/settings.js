@@ -70,13 +70,13 @@ const DEFAULTS = {
   taskbarProgress: true,
   watchFolders: true,
   /*
-   * 联网总开关：默认**开着**，否则没有本地 .lrc 的歌没歌词、没有内嵌封面的歌没封面 ——
-   * 用户要的就是「像歌词那样自动匹配」。想彻底断网的把这里关掉，歌词与封面会一起停。
-   * 下面两个是分项开关，默认都开。
+   * 联网总开关：默认开着 —— 没有本地 .lrc 的歌自动联网匹配歌词。
+   * 封面**默认不再自动匹配**（用户反馈匹配来的封面用处不大）。
+   * 想彻底断网：关掉总开关，歌词与封面一起停；想单独开封面：把下面 onlineCovers 设为 true。
    */
   onlineFeatures: true,
   onlineLyrics: true,
-  onlineCovers: true,
+  onlineCovers: false,
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
   lastTrackPath: null,
   lastView: 'songs'
