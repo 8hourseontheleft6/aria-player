@@ -535,14 +535,22 @@
   mask-repeat: no-repeat;
 }
 
-/* 悬停：整块轻轻浮起（与歌曲行、设置卡片的 hover 语言一致） */
+/*
+ * 悬停：整块明显抬起（用户希望更夸张一点）。
+ * 位移/放大都比全局的 --lift 更大，缓动拉长到 --dur 让「抬起」这个过程看得见；
+ * 阴影用 elev-3 才有离开墙面的感觉。减少动画时下面那条规则会把这些静态位移全部关掉。
+ */
 .wall-tile {
-  transition: transform var(--dur-fast) var(--ease-ios), box-shadow var(--dur-fast) var(--ease-ios);
+  transition:
+    transform var(--dur) var(--ease-ios),
+    box-shadow var(--dur) var(--ease-ios),
+    filter var(--dur) var(--ease-ios);
 }
 
 .wall-tile:hover {
-  transform: translateY(var(--lift)) scale(1.015);
-  box-shadow: var(--elev-2);
+  transform: translateY(-7px) scale(1.055) rotate(-0.4deg);
+  box-shadow: var(--elev-3);
+  filter: saturate(1.06) brightness(1.04);
   z-index: 2;
 }
 
@@ -553,7 +561,8 @@ html[data-reduce-motion="true"] .wall-tile:hover {
 }
 
 .wall-tile:hover .wall-tile__art img {
-  transform: scale(1.09);
+  /* 封面推得更近，配合整块的抬起 */
+  transform: scale(1.16);
 }
 
 .wall-tile__info {
