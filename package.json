@@ -25,7 +25,8 @@
     "music-metadata": "^11.9.0"
   },
   "devDependencies": {
-    "electron": "^42.0.0"
+    "electron": "^42.0.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.aria.player",
