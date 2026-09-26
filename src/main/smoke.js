@@ -505,7 +505,19 @@ async function runSmoke ({ win, ctx }) {
        * 这一项曾经因为设置往返还没落回来而读到空历史 —— 放宽到 ~10s，
        * 并且下面读面板前再确认一次）。
        */
-      for (let i = 0; i < 200 && store.get().settings.searchHistory.length < 2; i++) {
+      /*
+       * 等历史与查询词都真的到位。
+       *
+       * 历史是「写设置 → 主进程落盘 → 推 settings:changed → 回填 store」；
+       * 光等是不够的 —— 实测有过 10s 都没落回来的情况（那一轮读到空历史，
+       * 连带「搜索框默认收起」「面板真的看得见」几条一起红）。
+       * 所以在等待过程中**再催两次提交**，并把「查询词已到位」也纳入条件：
+       * 少了查询词，收起/展开那条会读到空关键词。
+       */
+      for (let i = 0; i < 200; i++) {
+        const ready = store.get().settings.searchHistory.length >= 2 && store.get().ui.query === 'Blues'
+        if (ready) break
+        if (i === 60 || i === 120) await actions.commitSearch('Blues')
         await settle(50)
       }
 
