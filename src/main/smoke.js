@@ -2737,6 +2737,15 @@ async function runSmoke ({ win, ctx }) {
       const viewport = document.querySelector('.tracklist__viewport')
       const knob = document.querySelector('.tracklist .knob')
       const letterOf = () => (knob ? knob.querySelector('.knob__letter').textContent : '')
+      /*
+       * 先把状态归零再测展开。
+       *
+       * 之前直接 mouseenter 就量，「收起宽度」时不时量到的是**上一次交互残留的展开态**
+       * （读数会反过来：46px → 40px、is-active=false）。这里先派一次 mouseleave
+       * 并等样式落定，再量收起宽度、再展开量一次 —— 与之前的残留状态无关。
+       */
+      knob?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+      await settle(320)
       const collapsedWidth = knob ? Math.round(knob.getBoundingClientRect().width) : 0
       const firstLetter = letterOf()
       knob?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }))
