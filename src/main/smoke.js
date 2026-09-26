@@ -3176,6 +3176,59 @@ async function runSmoke ({ win, ctx }) {
       await new Promise((resolve) => fakeAi.close(resolve))
     }
 
+    /* ---------- 每个标签页都能搜索（不必回全部歌曲再切回来） ---------- */
+    const perTabSearch = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 350) => { await new Promise((r) => setTimeout(r, ms)) }
+      actions.setQuery('')
+      actions.setView('artists')
+      await settle(600)
+
+      const box = document.querySelector('input[placeholder="搜索艺人…"]')
+      const before = actions.artists().length
+      const value = (node) => (node ? node.value : null)
+
+      // 就在艺人页输入（模拟真实键入）
+      if (box) {
+        box.value = 'taylor'
+        box.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+      await settle(700)
+      const afterTyping = { query: store.get().ui.query, artists: actions.artists().length, boxValue: value(box) }
+
+      // 搜索框右侧的清空按钮：查询词与列表一起还原
+      const clear = box ? box.parentElement.querySelector('.search__clear') : null
+      clear?.click()
+      await settle(600)
+      const afterClear = { query: store.get().ui.query, artists: actions.artists().length, boxValue: value(box) }
+
+      // 同一个词在歌曲页也生效（共用 ui.query，所以三个页面是同一次输入）
+      if (box) {
+        box.value = 'taylor'
+        box.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+      await settle(500)
+      actions.setView('songs')
+      await settle(500)
+      const shared = { query: store.get().ui.query, view: store.get().ui.view }
+      actions.setQuery('')
+      actions.setView('songs')
+      await settle(300)
+      return { hasBox: Boolean(box), before, afterTyping, afterClear, shared, clearExists: Boolean(clear) }
+    `)
+    record('每个标签页都能搜索（共用同一个搜索词）',
+      perTabSearch.hasBox === true &&
+      perTabSearch.afterTyping.query === 'taylor' &&
+      perTabSearch.afterTyping.artists < perTabSearch.before &&
+      perTabSearch.afterTyping.boxValue === 'taylor' &&
+      perTabSearch.clearExists === true &&
+      perTabSearch.afterClear.query === '' &&
+      perTabSearch.afterClear.artists === perTabSearch.before &&
+      perTabSearch.shared.query === 'taylor',
+      `艺人页搜索框存在=${perTabSearch.hasBox}；输入 taylor：艺人 ${perTabSearch.before} → ${perTabSearch.afterTyping.artists} 位（输入框「${perTabSearch.afterTyping.boxValue}」）；` +
+      `点清空：艺人回到 ${perTabSearch.afterClear.artists} 位、查询词归空=${perTabSearch.afterClear.query === ''}；` +
+      `同一个词切到歌曲页仍生效=${perTabSearch.shared.query === 'taylor'}`)
+
     /* ---------- 输出设备（通话 / 游戏语音时音乐只进自己的耳机） ---------- */
     const audioOutput = await evaluate(win, `
       const { actions, store, engine } = window.__aria

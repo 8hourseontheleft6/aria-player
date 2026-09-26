@@ -9,6 +9,7 @@ import { EVENTS } from '../../core/bus.js'
 import { formatDurationLong } from '../../core/format.js'
 import { createCoverGrid, createArtistRows } from '../widgets/cover-grid.js'
 import { createTrackList } from '../widgets/track-list.js'
+import { createSearchBox } from '../widgets/search-box.js'
 import { createListMenuButton } from '../menus/list-menu.js'
 import { createLazyArtwork } from '../widgets/artwork-node.js'
 
@@ -24,8 +25,11 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
 
   const albumsTitle = h('div', { class: 'view-toolbar__title', text: '专辑' })
   const albumsMeta = h('div', { class: 'view-toolbar__meta' })
+  // 专辑 / 艺人各挂一只搜索框，与「全部歌曲」共用同一个 ui.query
+  const albumsSearch = createSearchBox({ store, actions, placeholder: '搜索专辑或艺人…', width: 190 })
+  const artistsSearch = createSearchBox({ store, actions, placeholder: '搜索艺人…', width: 170 })
   const albumsToolbar = h('div', { class: 'view-toolbar' },
-    albumsTitle, h('div', { class: 'view-toolbar__spacer' }), albumsMeta)
+    albumsTitle, h('div', { class: 'view-toolbar__spacer' }), albumsMeta, albumsSearch.element)
   const albumsHeader = pageHeader('专辑', '按艺人 / 专辑名排列')
   const albumsScroll = h('div', { class: 'view-body scroll browse-scroll' }, albumGrid.element)
   const albumsPage = h('div', { class: 'browse-page' }, albumsToolbar, albumsHeader.element, albumsScroll)
@@ -35,7 +39,7 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   const artistsTitle = h('div', { class: 'view-toolbar__title', text: '艺人' })
   const artistsMeta = h('div', { class: 'view-toolbar__meta' })
   const artistsToolbar = h('div', { class: 'view-toolbar' },
-    artistsTitle, h('div', { class: 'view-toolbar__spacer' }), artistsMeta)
+    artistsTitle, h('div', { class: 'view-toolbar__spacer' }), artistsMeta, artistsSearch.element)
   const artistsHeader = pageHeader('艺人', '按名称排列')
   const artistsScroll = h('div', { class: 'view-body scroll browse-scroll' }, artistRows.element)
   const artistsPage = h('div', { class: 'browse-page' }, artistsToolbar, artistsHeader.element, artistsScroll)
