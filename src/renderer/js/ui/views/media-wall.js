@@ -788,6 +788,36 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     settlePan()
   }
 
+  /**
+   * Ctrl / ⌘ + 滚轮 = 缩放。
+   *
+   * 走的是现有密度档位（S / M / L）而不是连续缩放：
+   * 每档的列数与瓦片尺寸都由 computeLayout 统一算出来，跨格、裁剪、
+   * 平面尺寸、平移边界全都跟着它走 —— 自己另做一套比例缩放会把这些全绕过，
+   * 上次在瀑布墙上就吃过「改了尺寸但 slot 缓存没跟着刷」的亏。
+   * 滚轮向上放大（更少更大的瓦片），向下缩小；到档位尽头就停住。
+   */
+  function zoomByWheel (direction) {
+    const index = DENSITIES.findIndex((item) => item.id === density)
+    if (index < 0) return false
+    const next = DENSITIES[Math.min(DENSITIES.length - 1, Math.max(0, index + direction))]
+    if (!next || next.id === density) return false
+    setDensity(next.id)
+    return true
+  }
+
+  /*
+   * 挂到**捕获阶段**并 stopPropagation：这样按住 Ctrl/⌘ 滚轮时，
+   * 下面原有的「滚轮平移」处理器根本收不到这个事件，两者不会同时发生。
+   */
+  viewport.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    event.stopPropagation()
+    // 触控板的捏合会以 ctrlKey + 很小的 deltaY 出现，用符号判断方向即可
+    if (!zoomByWheel(event.deltaY > 0 ? -1 : 1)) return
+  }, { passive: false, capture: true })
+
   function setLayout (next) {
     if (next === layout) return
     layout = next
