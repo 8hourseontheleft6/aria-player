@@ -348,8 +348,15 @@ function createOnlineService (ctx) {
    * 名字对不上就不用（搜到的页面标题必须能和艺人名互相包含），宁缺勿错。
    */
   async function artistFromWikipedia (name) {
+    /*
+     * 注意 requestJson 的返回是 { data: <解析后的 JSON> }，外面包了一层 ——
+     * 这里曾经直接把它当 JSON 用（payload.query.pages），于是永远解析不到图，
+     * 表现为「头像两个人都没有」，而请求其实是 200 成功、响应里就有照片地址。
+     * pick/ask 都写成两种形状都兼容，免得以后再踩。
+     */
+    const raw = (payload) => (payload && payload.data !== undefined ? payload.data : payload)
     const pick = (payload) => {
-      const pages = payload?.query?.pages
+      const pages = raw(payload)?.query?.pages
       if (!pages) return null
       const first = Object.values(pages)[0]
       return first?.original?.source || first?.thumbnail?.source || null
@@ -361,7 +368,7 @@ function createOnlineService (ctx) {
       let url = pick(direct)
       if (!url) {
         const search = await ask(`list=search&srsearch=${encodeURIComponent(name)}&srlimit=1`)
-        const title = search?.query?.search?.[0]?.title
+        const title = raw(search)?.query?.search?.[0]?.title
         if (!title) return null
         const want = normalize(name)
         const got = normalize(title)
