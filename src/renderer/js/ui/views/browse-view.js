@@ -34,6 +34,31 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   const albumsScroll = h('div', { class: 'view-body scroll browse-scroll' }, albumGrid.element)
   const albumsPage = h('div', { class: 'browse-page' }, albumsToolbar, albumsHeader.element, albumsScroll)
 
+  /**
+   * 详情页头部的「滚动收起」联动。
+   *
+   * 实机反馈：「短列表滚不动，无论拖右边的条还是滚轮，一操作就上下鬼畜」。
+   * 根因是反馈环：头部是 max-height 折叠 —— 它一收起，列表可用高度就变大、
+   * 滚动位置被浏览器夹回（短列表直接归零），scroll 事件随即把头部展开，
+   * 展开后内容又溢出……如此振荡。6 行这种「刚好装不满又刚好多一点」的列表最明显。
+   *
+   * 两个约束把环切断：
+   *   ① 只有内容比视口高出 80px 以上（真的滚得动）时才允许收起 —— 短列表永不收起；
+   *   ② 滞回：scrollTop > 24 才收起、< 8 才展开，不在阈值附近反复横跳。
+   */
+  function bindDetailCollapse (list, header) {
+    on(list.viewport, 'scroll', () => {
+      const viewport = list.viewport
+      const overflow = viewport.scrollHeight - viewport.clientHeight
+      if (overflow < 80) {
+        header.classList.remove('is-collapsed')
+        return
+      }
+      const top = viewport.scrollTop
+      if (top > 24) header.classList.add('is-collapsed')
+      else if (top < 8) header.classList.remove('is-collapsed')
+    })
+  }
   /* ================= 艺人列表 ================= */
   const artistRows = createArtistRows({ lazy, onOpen: (item) => actions.openArtist(item.key) })
   const artistsTitle = h('div', { class: 'view-toolbar__title', text: '艺人' })
@@ -111,10 +136,7 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
     albumTrackList.element
   )
 
-  on(albumTrackList.viewport, 'scroll', () => {
-    const stuck = albumTrackList.viewport.scrollTop > 18
-    albumDetailHeader.classList.toggle('is-collapsed', stuck)
-  }, { passive: true })
+  bindDetailCollapse(albumTrackList, albumDetailHeader)
 
   /* ================= 艺人详情 ================= */
   const artistAvatar = h('div', { class: 'browse-detail__avatar' })
@@ -172,10 +194,7 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
     artistTrackList.element
   )
 
-  on(artistTrackList.viewport, 'scroll', () => {
-    const stuck = artistTrackList.viewport.scrollTop > 18
-    artistDetailHeader.classList.toggle('is-collapsed', stuck)
-  }, { passive: true })
+  bindDetailCollapse(artistTrackList, artistDetailHeader)
 
   /* ================= 页面容器 ================= */
   const pages = {
