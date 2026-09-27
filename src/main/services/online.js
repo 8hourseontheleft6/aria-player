@@ -341,6 +341,40 @@ function createOnlineService (ctx) {
     return { url, provider: 'Deezer', matched: best.name }
   }
 
+  /**
+   * 维基百科的页面主图当艺人头像：免密钥，返回的一般就是本人照片。
+   * 为什么是主图源：Deezer 在部分网络下完全不可达（见文件头说明），
+   * 而 iTunes 的艺人接口不提供头像 —— 实测那条路取不到图时这里能兜住。
+   * 名字对不上就不用（搜到的页面标题必须能和艺人名互相包含），宁缺勿错。
+   */
+  async function artistFromWikipedia (name) {
+    const pick = (payload) => {
+      const pages = payload?.query?.pages
+      if (!pages) return null
+      const first = Object.values(pages)[0]
+      return first?.original?.source || first?.thumbnail?.source || null
+    }
+    const ask = (params) => schedule(() => requestJson(
+      `https://en.wikipedia.org/w/api.php?format=json&redirects=1&${params}`, { timeout: 8000 }))
+    try {
+      const direct = await ask(`action=query&prop=pageimages&piprop=original|thumbnail&pithumbsize=600&titles=${encodeURIComponent(name)}`)
+      let url = pick(direct)
+      if (!url) {
+        const search = await ask(`list=search&srsearch=${encodeURIComponent(name)}&srlimit=1`)
+        const title = search?.query?.search?.[0]?.title
+        if (!title) return null
+        const want = normalize(name)
+        const got = normalize(title)
+        if (!want || !got || !(got.includes(want) || want.includes(got))) return null
+        url = pick(await ask(`action=query&prop=pageimages&piprop=original|thumbnail&pithumbsize=600&titles=${encodeURIComponent(title)}`))
+      }
+      if (!url) return null
+      return { url, provider: 'Wikipedia', matched: name }
+    } catch (err) {
+      console.warn('[online] 维基百科艺人头像失败:', err.message)
+      return null
+    }
+  }
   /** 取艺人头像字节（带磁盘缓存；未命中缓存 24 小时） */
   async function fetchArtist (payload) {
     const name = String(payload?.name || '').trim()
@@ -355,7 +389,8 @@ function createOnlineService (ctx) {
         return cached
       }
       stats.artists.miss++
-      const source = await artistFromDeezer(name)
+      // 先用维基百科（免密钥、有本人照片），取不到再试 Deezer
+      const source = (await artistFromWikipedia(name)) || (await artistFromDeezer(name))
       if (!source) {
         await writeJson('artists', key, { notFound: true, at: Date.now() })
         return { data: null }

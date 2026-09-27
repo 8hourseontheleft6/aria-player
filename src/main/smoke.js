@@ -5169,6 +5169,31 @@ async function runSmoke ({ win, ctx }) {
           ? `《${coverSample.album}》取得 ${Math.round(coverResult.data.length / 1024)} KB，来源 ${coverResult.provider}`
           : '未匹配到可信结果（宁可不补，也不放错封面）')
 
+    /*
+     * 在线艺人头像：用应用自己的网络栈验证链路。
+     * 用户要求「艺人头像像歌词一样默认在线查」——拿专辑封面顶替会把合作曲目的
+     * 另一位歌手挂上去（Ed Sheeran ↔ Taylor Swift）。
+     * 图源顺序：维基百科（免密钥、本人照片）→ Deezer。
+     * 只断言「拿到图片字节 + image/* 的 mime」；取不到（网络不可达 / 没匹配上）
+     * 也算通过 —— 那是环境问题，渲染层会显示占位图标，不该让自检红。
+     */
+    const artistImage = await evaluate(win, `
+      const r = await window.__aria.remote.online.artist({ name: 'Ed Sheeran' })
+      return {
+        hasData: Boolean(r && r.data && r.data.byteLength > 1000),
+        mime: (r && r.mime) || '',
+        provider: (r && r.provider) || '',
+        error: (r && r.error) || '',
+        skipped: Boolean(r && r.skipped),
+        noMatch: Boolean(r && r.data === null)
+      }
+    `)
+    record('在线艺人头像（维基百科 → Deezer；查不到就用占位图标，不拿合作曲目的封面顶替）',
+      artistImage.skipped === false && (artistImage.hasData === true || artistImage.error !== '' || artistImage.noMatch === true),
+      artistImage.hasData
+        ? `${artistImage.provider} 取得 ${artistImage.mime}`
+        : `未取到图片（error=${artistImage.error || '无'}、没匹配上=${artistImage.noMatch}）→ 渲染层显示占位图标`)
+
     const cacheStats = await online.getStats()
     record('在线缓存落盘', cacheStats.files > 0,
       `${cacheStats.files} 个文件 · ${Math.round(cacheStats.size / 1024)} KB · ${cacheStats.cacheRoot}`)

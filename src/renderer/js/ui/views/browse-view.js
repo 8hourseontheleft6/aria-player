@@ -160,6 +160,8 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   )
 
   const artistTrackList = createTrackList({ store, bus, player, artwork, actions })
+  // 艺人详情里的列表要自己吃满剩余高度并内部滚动（见 browse.css 的 .browse-detail__tracks）
+  artistTrackList.element.classList.add('browse-detail__tracks')
   const artistDetailPage = h('div', { class: 'browse-page' },
     h('div', { class: 'view-toolbar' },
       h('div', { class: 'view-toolbar__title', text: '艺人' }),
