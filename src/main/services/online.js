@@ -31,6 +31,15 @@ function createOnlineService (ctx) {
 
   let queue = Promise.resolve()
   let lastRequestAt = 0
+  /*
+   * 艺人头像的缓存目录特意带版本号。
+   *
+   * 原因：beta.5 那版维基解析写错（漏了 requestJson 的 { data: ... } 包装层），
+   * 于是每个艺人都被写进一条 notFound，而 notFound 在 TTL 内会被原样返回 ——
+   * 升级到修好的版本后，头像依然取不到（用户反馈「还是没有照片」）。
+   * 换目录名就能让这些被污染的负缓存彻底失效；以后这个接口再改语义，同样换个后缀。
+   */
+  const ARTIST_CACHE = 'artists2'
   /** Deezer 在部分网络下完全不可达：首次连接失败就整场会话不再尝试 */
   let deezerDisabled = false
   const stats = { lyrics: { hit: 0, miss: 0, error: 0 }, covers: { hit: 0, miss: 0, error: 0 }, artists: { hit: 0, miss: 0, error: 0 } }
@@ -390,7 +399,7 @@ function createOnlineService (ctx) {
     const key = normalize(name)
     if (!key) return { error: 'empty key' }
     try {
-      const cached = await readBinary('artists', key)
+      const cached = await readBinary(ARTIST_CACHE, key)
       if (cached) {
         stats.artists.hit++
         return cached
@@ -399,11 +408,11 @@ function createOnlineService (ctx) {
       // 先用维基百科（免密钥、有本人照片），取不到再试 Deezer
       const source = (await artistFromWikipedia(name)) || (await artistFromDeezer(name))
       if (!source) {
-        await writeJson('artists', key, { notFound: true, at: Date.now() })
+        await writeJson(ARTIST_CACHE, key, { notFound: true, at: Date.now() })
         return { data: null }
       }
       const image = await schedule(() => requestBinary(source.url))
-      await writeBinary('artists', key, image.buffer, image.mime)
+      await writeBinary(ARTIST_CACHE, key, image.buffer, image.mime)
       return { mime: image.mime, data: image.buffer, provider: source.provider, matched: source.matched }
     } catch (err) {
       stats.artists.error++

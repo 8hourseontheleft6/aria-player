@@ -88,7 +88,14 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
   async function paint (node, track) {
     const key = artworkKey(track)
     node.dataset.artKey = key || ''
-    if (!key) {
+    /*
+     * 没有本地封面 key 有两种情况，必须分开：
+     *   · 普通曲目确实没有封面 → 显示占位图标即可，不用请求；
+     *   · **伪曲目**（艺人头像 artistOnly：只有艺人名、没有 id）→ 恰恰要走去在线图源。
+     * 之前两种都直接 return，于是艺人头像永远插不进 <img> ——
+     * 端到端自检复现过「主进程能取到图，界面上却一直没有」（用户反馈「还是没有照片」）。
+     */
+    if (!key && !track?.artistOnly) {
       // 换成「没有封面」的条目前，要把上一位的图清掉，否则会留着上一张图
       replaceArt(node, null, '')
       return
