@@ -1,7 +1,7 @@
 'use strict'
 
 const path = require('node:path')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, session, ipcMain } = require('electron')
 
 const { createContext } = require('./registry')
 const { registerSchemes, registerProtocols } = require('./protocols')
@@ -54,6 +54,33 @@ registerSchemes()
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  /*
+   * 把「网络代理」设置应用到默认会话（在线歌词 / 封面 / 艺人头像都走它）。
+   * net.fetch 用的是默认 session，所以 setProxy 之后所有在线请求都会走代理。
+   */
+  // 设置页改了「网络代理」后立刻应用（在线请求走默认 session）
+  ipcMain.handle('app:set-proxy', async () => {
+    await applyProxySettings()
+    return { ok: true }
+  })
+
+  async function applyProxySettings () {
+    const current = settings.get()
+    const mode = current.proxyMode || 'system'
+    const url = String(current.proxyUrl || '').trim()
+    const config = mode === 'direct'
+      ? { mode: 'direct' }
+      : (mode === 'manual' && url)
+        ? { proxyRules: url, proxyBypassRules: '<local>' }
+        : { mode: 'system' }
+    try {
+      await session.defaultSession.setProxy(config)
+      console.log('[main] 网络代理：' + (config.proxyRules || config.mode))
+    } catch (err) {
+      console.warn('[main] 设置网络代理失败：', err.message)
+    }
+  }
+
   app.on('second-instance', () => {
     const [win] = BrowserWindow.getAllWindows()
     if (win) {
@@ -250,6 +277,7 @@ async function bootstrap () {
     await ctx.disposeAll()
   })
 
+  await applyProxySettings()
   console.log(`[main] Aria 已启动 (Electron ${process.versions.electron}, 用户数据目录: ${app.getPath('userData')})`)
   if (watchResult.watching) {
     console.log(`[main] 目录监听已开启（${watchResult.watching} 个根目录）`)

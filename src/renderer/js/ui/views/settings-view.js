@@ -583,10 +583,15 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       })
     ], { collapsible: true }))
 
+    const proxySub = (settings.proxyMode || 'system') === 'direct'
+      ? '直连：不经过任何代理。加速器没设系统代理时，在线歌词/头像会取不到。'
+      : (settings.proxyMode === 'manual')
+        ? `手动：所有在线请求走 ${settings.proxyUrl || '（还没填地址）'}`
+        : '跟随系统代理（默认）。若你开了加速器但仍取不到头像，多半是它没设系统代理 —— 切成「手动」并填它的地址。'
     scroll.appendChild(group('在线功能', [
       row({
         title: '在线补全歌词与封面',
-        sub: '开启后会向 LRCLIB（歌词）与 Deezer / iTunes（封面）发起请求。这是本项目唯一的联网功能，**默认开启**（歌词自动匹配；封面默认不匹配，需要时可在下面单独打开）；想彻底断网就把这里关掉，两者一起停。请求全部由主进程发出，页面本身仍然不能联网。',
+        sub: '开启后会向 LRCLIB（歌词）与 Deezer / iTunes（封面）发起请求。这是本项目唯一的联网功能，**默认开启**（歌词与艺人头像自动匹配；封面默认不匹配，需要时可在下面单独打开）；想彻底断网就把这里关掉，两者一起停。请求全部由主进程发出，页面本身仍然不能联网。',
         control: switchControl(onlineOn, (value) => actions.setSetting({ onlineFeatures: value }))
       }),
       row({
@@ -598,6 +603,39 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         title: '在线封面',
         sub: onlineOn ? '歌曲没有内嵌封面、目录里也没有图片时，按「专辑 + 艺人」补齐 600×600 封面' : '需要先打开总开关',
         control: switchControl(settings.onlineCovers !== false, (value) => actions.setSetting({ onlineCovers: value }))
+      }),
+      row({
+        title: '艺人头像',
+        sub: '艺人详情页的头像按**艺人名**单独在线查（维基百科 → Deezer），不再拿合作曲目的专辑封面顶替；查不到就显示占位图标',
+        control: switchControl(settings.onlineArtists !== false, (value) => actions.setSetting({ onlineArtists: value }))
+      }),
+      row({
+        title: '网络代理',
+        sub: proxySub,
+        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+          ...['system', 'direct', 'manual'].map((mode) => h('button', {
+            class: `btn btn--sm${(settings.proxyMode || 'system') === mode ? ' btn--primary' : ''}`,
+            type: 'button',
+            text: mode === 'system' ? '跟随系统' : mode === 'direct' ? '直连' : '手动',
+            onClick: () => {
+              actions.setSetting({ proxyMode: mode })
+              remote.app.setProxy?.()
+            }
+          })),
+          (settings.proxyMode === 'manual')
+            ? h('input', {
+                class: 'input input--sm',
+                type: 'text',
+                value: settings.proxyUrl || '',
+                placeholder: 'http://127.0.0.1:7890',
+                style: { width: '190px' },
+                onChange: (event) => {
+                  actions.setSetting({ proxyUrl: event.target.value.trim() })
+                  remote.app.setProxy?.()
+                }
+              })
+            : null
+        )
       }),
       row({
         title: '在线缓存',

@@ -79,6 +79,13 @@ const DEFAULTS = {
   onlineCovers: false,
   // 艺人头像：默认**在线查**（不再拿专辑封面顶替，合作曲目会挂错人）
   onlineArtists: true,
+  /*
+   * 网络代理：'system' 跟随系统（默认）、'direct' 直连、'manual' 用下面的地址。
+   * 用户反馈「开了加速器还是取不到图」——不少加速器不设系统代理，
+   * 应用就绕过了它，所以这里给一个显式入口。
+   */
+  proxyMode: 'system',
+  proxyUrl: '',
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
   lastTrackPath: null,
   lastView: 'songs'

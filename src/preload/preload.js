@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('aria', {
 
   app: {
     info: () => ipcRenderer.invoke('app:info'),
+    setProxy: () => ipcRenderer.invoke('app:set-proxy'),
     /** 最小化 / 收进托盘的释放与恢复通知（payload: { phase: 'release' | 'resume' }） */
     onBackgroundChange: (handler) => on('app:background', handler)
   },
