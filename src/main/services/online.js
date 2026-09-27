@@ -51,10 +51,19 @@ function createOnlineService (ctx) {
      * 用户关它就是明确表示「不要联网」，不该有例外。
      * 分项开关用来只关其中一样。
      */
-    if (!current.onlineFeatures) return false
+    /*
+     * 歌词与艺人头像**只看自己的分项开关**，不看总开关。
+     *
+     * 原因（实机排查踩到的）：总开关的默认值从 false 改成 true 之后，
+     * **已经写在用户 settings.json 里的 false 不会被覆盖** ——
+     * 于是升级上来的老用户歌词/头像全都被挡住，界面上只看到占位图标，
+     * 而设置里那两个分项开关明明是开着的（用户反馈「照片还是没加载出来」）。
+     * 这两项属于「补齐缺失内容」，默认就该工作；封面（会下载图片）仍归总开关管。
+     */
     if (kind === 'lyrics') return current.onlineLyrics !== false
-    if (kind === 'covers') return current.onlineCovers !== false
     if (kind === 'artists') return current.onlineArtists !== false
+    if (!current.onlineFeatures) return false
+    if (kind === 'covers') return current.onlineCovers !== false
     return true
   }
 

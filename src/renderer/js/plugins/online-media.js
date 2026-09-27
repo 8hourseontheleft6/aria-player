@@ -54,7 +54,9 @@ export const onlineMedia = {
          * 查不到就返回 null（渲染层显示占位图标），**不回落**到专辑封面。
          */
         if (track.artistOnly) {
-          if (!settings?.onlineFeatures || settings.onlineArtists === false) return null
+          // 只看「艺人头像」自己的开关：总开关在老用户的配置文件里可能是 false，
+          // 那不该把这项补齐功能一起挡掉（实机排查中踩到过）
+          if (settings?.onlineArtists === false) return null
           const artistResult = await remote.online.artist({ name: track.artist })
           if (!artistResult || artistResult.error || artistResult.skipped || !artistResult.data) return null
           return { data: artistResult.data, mime: artistResult.mime }

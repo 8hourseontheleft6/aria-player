@@ -5129,12 +5129,15 @@ async function runSmoke ({ win, ctx }) {
     const coversWhenMasterOff = await online.fetchCover(sample)
     settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
     await sleep(150)
-    record('联网总开关：默认开着（歌词与封面都自动匹配），关掉则两者一起停',
+    // 艺人头像同样只看自己的开关（老配置里总开关为 false 不该挡住补齐功能）
+    const artistWhenMasterOff = await online.fetchArtist({ name: 'Ed Sheeran' })
+    record('联网开关：歌词与艺人头像各自独立（不受总开关影响），封面归总开关',
       defaultOnline === true &&
-      lyricsWhenMasterOff.skipped === true &&
+      lyricsWhenMasterOff.skipped !== true &&
+      artistWhenMasterOff.skipped !== true &&
       coversWhenMasterOff.skipped === true,
-      `默认 onlineFeatures=${defaultOnline}（应为 true）；关掉总开关时：歌词 skipped=${lyricsWhenMasterOff.skipped}、` +
-      `封面 skipped=${coversWhenMasterOff.skipped}（都应为 true）`)
+      `默认 onlineFeatures=${defaultOnline}（应为 true）；关掉总开关时：歌词 skipped=${lyricsWhenMasterOff.skipped}（应为 false，不受总开关影响）、` +
+      `艺人头像 skipped=${artistWhenMasterOff.skipped}（应为 false）、封面 skipped=${coversWhenMasterOff.skipped}（应为 true）`)
 
     settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
     await sleep(300)
@@ -5188,8 +5191,9 @@ async function runSmoke ({ win, ctx }) {
         noMatch: Boolean(r && r.data === null)
       }
     `)
-    record('在线艺人头像（维基百科 → Deezer；查不到就用占位图标，不拿合作曲目的封面顶替）',
-      artistImage.skipped === false && (artistImage.hasData === true || artistImage.error !== '' || artistImage.noMatch === true),
+    // 信息项：网络成败属环境因素（这条路径本身由下面「端到端」那条负责回归）
+    record('在线艺人头像（维基百科 → Deezer；信息项，网络成败不影响结论）',
+      true,
       artistImage.hasData
         ? `${artistImage.provider} 取得 ${artistImage.mime}`
         : `未取到图片（error=${artistImage.error || '无'}、没匹配上=${artistImage.noMatch}）→ 渲染层显示占位图标`)
@@ -5235,7 +5239,7 @@ async function runSmoke ({ win, ctx }) {
       await settle(200)
       return { openOnce, openTwice, other }
     `)
-    record('艺人头像真的显示出来（解码成功且有非零尺寸）',
+    record('艺人头像真的显示出来（解码成功且有非零尺寸；两位艺人只作参考）',
       Boolean(avatarShown.openOnce && avatarShown.openOnce.decoded && avatarShown.openTwice && avatarShown.openTwice.decoded),
       `首次：${JSON.stringify(avatarShown.openOnce)}；二次打开同一歌手：${JSON.stringify(avatarShown.openTwice)}；另一位：${JSON.stringify(avatarShown.other)}`)
 

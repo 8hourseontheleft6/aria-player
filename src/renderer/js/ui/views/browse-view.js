@@ -324,16 +324,36 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
        * 这里改成最直白的方式：拿 URL → 插 <img>；失败就放占位图标。
        * 用 token 防串台：连着快速点几位艺人时，只有最后一次的响应能落到界面上。
        */
-      const avatarToken = (avatarTokenSeed += 1)
-      artistAvatar.replaceChildren(icon('artist'))
+      /*
+       * 防串台用「当前详情是否还是这位艺人」判断，**不要用自增计数器**。
+       *
+       * 踩过的坑（自检复现了用户现象：Taylor Swift 没有头像、另一位却有）：
+       * 详情会重渲染多次，计数器方案里只要有一次重渲染递增了 token 却没发起新请求，
+       * 先前那个 in-flight 的 promise 就被丢弃 —— 结果**谁也不插图**，头像永远空着。
+       * 换成读 store 里的当前 detail.key，就不会被这种"空转的重渲染"误伤。
+       */
+      /* 取不到时把原因写到占位图标上（悬停可见）：分清「开关关着」「网络不通」两种情况 */
+      const avatarWhy = () => {
+        const settings = store.get().settings
+        if (settings.onlineArtists === false) return '设置里「艺人头像」开关已关闭'
+        return '在线未匹配到（网络不通，或这位艺人在维基百科没有页面图）'
+      }
+      const stillThisArtist = () => store.get().ui.detail?.key === artist.key
       artwork.resolveUrl({ artistOnly: true, artist: artist.name })
         .then((url) => {
-          if (avatarToken !== avatarTokenSeed) return
-          if (url) artistAvatar.replaceChildren(h('img', { src: url, alt: '', decoding: 'async' }))
+          if (!stillThisArtist()) return
+          if (url) {
+            artistAvatar.replaceChildren(h('img', { src: url, alt: '', decoding: 'async' }))
+            artistAvatar.removeAttribute('title')
+          } else {
+            artistAvatar.replaceChildren(icon('artist'))
+            artistAvatar.title = `未取到艺人头像：${avatarWhy()}`
+          }
         })
         .catch(() => {
-          if (avatarToken !== avatarTokenSeed) return
+          if (!stillThisArtist()) return
           artistAvatar.replaceChildren(icon('artist'))
+          artistAvatar.title = `未取到艺人头像：${avatarWhy()}`
         })
       return
     }
