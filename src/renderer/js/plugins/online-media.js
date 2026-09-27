@@ -45,6 +45,20 @@ export const onlineMedia = {
       priority: 50,
       async resolve (track, { remote }) {
         const settings = api.store.get().settings
+        /*
+         * 艺人头像：伪曲目（只带 artistOnly + 艺人名）。
+         *
+         * 以前艺人头像是拿「该艺人某首歌的专辑封面」顶替的 —— 碰到合作曲目就会
+         * 把 A 的脸挂到 B 身上（用户举例：Ed Sheeran 与 Taylor Swift 合作，
+         * 于是 Ed Sheeran 显示成 Taylor 的封面）。现在按**艺人名**单独在线查，
+         * 查不到就返回 null（渲染层显示占位图标），**不回落**到专辑封面。
+         */
+        if (track.artistOnly) {
+          if (!settings?.onlineFeatures || settings.onlineArtists === false) return null
+          const artistResult = await remote.online.artist({ name: track.artist })
+          if (!artistResult || artistResult.error || artistResult.skipped || !artistResult.data) return null
+          return { data: artistResult.data, mime: artistResult.mime }
+        }
         if (!settings?.onlineFeatures || settings.onlineCovers === false) return null
         const result = await remote.online.cover({
           title: track.title,

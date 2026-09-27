@@ -33,7 +33,7 @@ function createOnlineService (ctx) {
   let lastRequestAt = 0
   /** Deezer 在部分网络下完全不可达：首次连接失败就整场会话不再尝试 */
   let deezerDisabled = false
-  const stats = { lyrics: { hit: 0, miss: 0, error: 0 }, covers: { hit: 0, miss: 0, error: 0 } }
+  const stats = { lyrics: { hit: 0, miss: 0, error: 0 }, covers: { hit: 0, miss: 0, error: 0 }, artists: { hit: 0, miss: 0, error: 0 } }
 
   function enabled (kind) {
     const current = settings.get()
@@ -45,6 +45,7 @@ function createOnlineService (ctx) {
     if (!current.onlineFeatures) return false
     if (kind === 'lyrics') return current.onlineLyrics !== false
     if (kind === 'covers') return current.onlineCovers !== false
+    if (kind === 'artists') return current.onlineArtists !== false
     return true
   }
 
@@ -307,6 +308,68 @@ function createOnlineService (ctx) {
     }
   }
 
+
+  /**
+   * 在线艺人头像（Deezer 艺人搜索）。
+   *
+   * 为什么要单独查：艺人头像以前是拿「该艺人的某一首歌的专辑封面」顶替的，
+   * 遇到合作曲目就会把 A 的脸挂到 B 身上（用户举例：Ed Sheeran 与 Taylor Swift 合作，
+   * 于是 Ed Sheeran 显示成 Taylor 的封面）。所以这里按**艺人名**直接查，
+   * 并且要求返回的名字能和查询名对上，对不上就当作没找到（宁可不显示，也不挂错人）。
+   */
+  async function artistFromDeezer (name) {
+    if (deezerDisabled) return null
+    let result
+    try {
+      result = await schedule(() => requestJson(
+        `https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=5`, { timeout: 6000 }))
+    } catch (err) {
+      deezerDisabled = true
+      console.warn('[online] Deezer 不可达，本次会话不再尝试:', err.message)
+      return null
+    }
+    const list = result.data?.data
+    if (!Array.isArray(list) || !list.length) return null
+    const want = normalize(name)
+    if (!want) return null
+    // 完全同名优先，其次互相包含（例如 "Ed Sheeran" vs "Ed Sheeran "）
+    const best = list.find((item) => normalize(item.name) === want) ||
+      list.find((item) => normalize(item.name).includes(want) || want.includes(normalize(item.name)))
+    if (!best) return null
+    const url = best.picture_xl || best.picture_big
+    if (!url) return null
+    return { url, provider: 'Deezer', matched: best.name }
+  }
+
+  /** 取艺人头像字节（带磁盘缓存；未命中缓存 24 小时） */
+  async function fetchArtist (payload) {
+    const name = String(payload?.name || '').trim()
+    if (!name) return { error: 'missing name' }
+    if (!enabled('artists')) return { skipped: true }
+    const key = normalize(name)
+    if (!key) return { error: 'empty key' }
+    try {
+      const cached = await readBinary('artists', key)
+      if (cached) {
+        stats.artists.hit++
+        return cached
+      }
+      stats.artists.miss++
+      const source = await artistFromDeezer(name)
+      if (!source) {
+        await writeJson('artists', key, { notFound: true, at: Date.now() })
+        return { data: null }
+      }
+      const image = await schedule(() => requestBinary(source.url))
+      await writeBinary('artists', key, image.buffer, image.mime)
+      return { mime: image.mime, data: image.buffer, provider: source.provider, matched: source.matched }
+    } catch (err) {
+      stats.artists.error++
+      console.warn('[online] 艺人头像请求失败:', err.message)
+      return { error: err.message }
+    }
+  }
+
   /* ---------------- 维护接口 ---------------- */
 
   async function clearCache () {
@@ -340,7 +403,7 @@ function createOnlineService (ctx) {
     return result
   }
 
-  return { fetchLyrics, fetchCover, clearCache, getStats }
+  return { fetchLyrics, fetchArtist, fetchCover, clearCache, getStats }
 }
 
 module.exports = { createOnlineService }

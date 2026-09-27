@@ -279,7 +279,9 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         artistName.textContent = artist.name
         artistName.title = artist.name
         artistStats.textContent = `${artist.albumCount} 张专辑 · ${artist.trackCount} 首 · ${formatDurationLong(artist.duration)}`
-        lazy.observe(artistAvatar, artist.artworkTrack, 'artist')
+        // 艺人头像走**在线按名查**（伪曲目 artistOnly）：不再拿合作曲目的专辑封面顶替，
+        // 查不到就显示占位图标（见 plugins/online-media.js 的 artworkProvider）
+        lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
         artistGrid.setItems(artist.albumList.map((album) => ({
           key: album.key,
           title: album.name,

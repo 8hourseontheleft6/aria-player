@@ -100,6 +100,7 @@ function registerIpc (ctx) {
     /* ---------- 在线补全 ---------- */
     'online:lyrics': (_event, track) => online.fetchLyrics(track || {}),
     'online:cover': (_event, track) => online.fetchCover(track || {}),
+      'online:artist': (_event, payload) => online.fetchArtist(payload || {}),
     'online:clear-cache': () => online.clearCache(),
     'online:stats': () => online.getStats(),
 

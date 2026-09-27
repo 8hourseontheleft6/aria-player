@@ -77,6 +77,8 @@ const DEFAULTS = {
   onlineFeatures: true,
   onlineLyrics: true,
   onlineCovers: false,
+  // 艺人头像：默认**在线查**（不再拿专辑封面顶替，合作曲目会挂错人）
+  onlineArtists: true,
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
   lastTrackPath: null,
   lastView: 'songs'

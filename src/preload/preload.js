@@ -85,6 +85,7 @@ contextBridge.exposeInMainWorld('aria', {
   online: {
     lyrics: (track) => ipcRenderer.invoke('online:lyrics', track),
     cover: (track) => ipcRenderer.invoke('online:cover', track),
+    artist: (payload) => ipcRenderer.invoke('online:artist', payload),
     clearCache: () => ipcRenderer.invoke('online:clear-cache'),
     stats: () => ipcRenderer.invoke('online:stats')
   },
