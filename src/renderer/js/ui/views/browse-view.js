@@ -139,6 +139,8 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   bindDetailCollapse(albumTrackList, albumDetailHeader)
 
   /* ================= 艺人详情 ================= */
+  // 艺人头像的防串台 token：连着快速点几位艺人时，只有最后一次的响应能落到界面上
+  let avatarTokenSeed = 0
   const artistAvatar = h('div', { class: 'browse-detail__avatar' })
   const artistName = h('h1', { class: 'browse-detail__title', text: '' })
   const artistStats = h('div', { class: 'browse-detail__stats', text: '' })
@@ -314,15 +316,25 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
       }
 
       /*
-       * 头像放在**上面的 if 之外**：每次显示这位艺人的详情都重新观察一次。
+       * 艺人头像：**直接解析并插图**，不走懒加载队列。
        *
-       * 踩过的坑（实机「点进详情还是没有照片」）：头像加载原本写在
-       * `if (currentDetailKey !== 'artist:...')` 里面 —— 同一个歌手第二次点进来时
-       * key 没变，这一行根本不执行；于是旧版本里失败过一次的歌手，
-       * 升级到修好的版本后**永远不会重试**，用户看到的就是「还是没有图」。
-       * observe() 自带 artKey 去重（图对了就直接返回），所以重复调用没有额外开销。
+       * 为什么不用 lazy.observe：艺人头像是「伪曲目」（只有艺人名、没有本地封面 key），
+       * 懒加载那条路对它的处理一直不顺（observe 早退 / paint 早退 / 队列里可能还压着
+       * 上一首歌的旧任务），排查了多轮仍然出现「主进程能取到图、界面上就是不显示」。
+       * 这里改成最直白的方式：拿 URL → 插 <img>；失败就放占位图标。
+       * 用 token 防串台：连着快速点几位艺人时，只有最后一次的响应能落到界面上。
        */
-      lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
+      const avatarToken = (avatarTokenSeed += 1)
+      artistAvatar.replaceChildren(icon('artist'))
+      artwork.resolveUrl({ artistOnly: true, artist: artist.name })
+        .then((url) => {
+          if (avatarToken !== avatarTokenSeed) return
+          if (url) artistAvatar.replaceChildren(h('img', { src: url, alt: '', decoding: 'async' }))
+        })
+        .catch(() => {
+          if (avatarToken !== avatarTokenSeed) return
+          artistAvatar.replaceChildren(icon('artist'))
+        })
       return
     }
 
