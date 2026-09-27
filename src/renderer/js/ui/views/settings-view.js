@@ -981,6 +981,17 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
     /* ---------- 关于 ---------- */
     const info = state.app.info
+    /*
+     * 版本号**挂到页面最顶部**。
+     * 原来只有最底部的「关于」里显示，用户反馈「根本看不到，没有版本号」——
+     * 排查问题第一件事就是确认在跑哪一版。
+     * 这段必须放在 info 已声明之后（放在前面就是「声明前使用」，TDZ 会直接崩）。
+     */
+    scroll.prepend(h('div', { class: 'settings__version' },
+      h('b', { text: 'Aria' }),
+      ` ${info?.version || '0.0.0-dev'} · Electron ${info?.electron || '-'}`
+    ))
+
     scroll.appendChild(group('关于', [
       h('div', { class: 'settings__about' },
         h('div', {}, h('b', { text: 'Aria' }), ` ${info?.version || '0.0.0-dev'} — iOS 设计风格的本地音乐播放器（开发中，尚未发布正式版）`),

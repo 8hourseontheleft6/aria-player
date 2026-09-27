@@ -5202,7 +5202,8 @@ async function runSmoke ({ win, ctx }) {
         actions.openArtist(artist.key)
         const avatar = document.querySelector('.browse-detail__avatar')
         let img = null
-        for (let i = 0; i < 40; i++) {
+        // 最多等 20 秒：首次要联网取维基图，机器忙的时候 10 秒不够（实测会红）
+        for (let i = 0; i < 80; i++) {
           await settle(250)
           img = avatar ? avatar.querySelector('img') : null
           if (img && img.complete && img.naturalWidth > 0) break
