@@ -302,7 +302,6 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         artistStats.textContent = `${artist.albumCount} 张专辑 · ${artist.trackCount} 首 · ${formatDurationLong(artist.duration)}`
         // 艺人头像走**在线按名查**（伪曲目 artistOnly）：不再拿合作曲目的专辑封面顶替，
         // 查不到就显示占位图标（见 plugins/online-media.js 的 artworkProvider）
-        lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
         artistGrid.setItems(artist.albumList.map((album) => ({
           key: album.key,
           title: album.name,
@@ -313,6 +312,17 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         artistAlbumStrip.style.display = artist.albumList.length > 1 ? '' : 'none'
         artistTrackList.setTracks(artist.tracks)
       }
+
+      /*
+       * 头像放在**上面的 if 之外**：每次显示这位艺人的详情都重新观察一次。
+       *
+       * 踩过的坑（实机「点进详情还是没有照片」）：头像加载原本写在
+       * `if (currentDetailKey !== 'artist:...')` 里面 —— 同一个歌手第二次点进来时
+       * key 没变，这一行根本不执行；于是旧版本里失败过一次的歌手，
+       * 升级到修好的版本后**永远不会重试**，用户看到的就是「还是没有图」。
+       * observe() 自带 artKey 去重（图对了就直接返回），所以重复调用没有额外开销。
+       */
+      lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
       return
     }
 
