@@ -294,6 +294,10 @@
   place-items: center;
   color: var(--label-4);
   box-shadow: var(--shadow-artwork);
+  /* 让里面的 img 能用绝对定位铺满（见下面的规则）：单靠 height:100% 在
+     grid 容器里有时不生效，实测出现 140×199 —— 头像被裁成一条，
+     看起来就像"照片没显示出来" */
+  position: relative;
 }
 
 .browse-detail__cover img,
@@ -302,6 +306,12 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+/* 头像：绝对定位铺满整个圆，确保任何长宽比的照片都被正确裁成正方形 */
+.browse-detail__avatar img {
+  position: absolute;
+  inset: 0;
 }
 
 .browse-detail__cover .icon,

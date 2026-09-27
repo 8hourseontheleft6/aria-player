@@ -5194,6 +5194,50 @@ async function runSmoke ({ win, ctx }) {
         ? `${artistImage.provider} 取得 ${artistImage.mime}`
         : `未取到图片（error=${artistImage.error || '无'}、没匹配上=${artistImage.noMatch}）→ 渲染层显示占位图标`)
 
+    /* 艺人头像端到端：解码成功 + 有非零尺寸才算过 */
+    const avatarShown = await evaluate(win, `
+      const settle = async (ms = 250) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      const probe = async (artist) => {
+        actions.openArtist(artist.key)
+        const avatar = document.querySelector('.browse-detail__avatar')
+        let img = null
+        for (let i = 0; i < 40; i++) {
+          await settle(250)
+          img = avatar ? avatar.querySelector('img') : null
+          if (img && img.complete && img.naturalWidth > 0) break
+        }
+        let decoded = false
+        if (img && typeof img.decode === 'function') {
+          try { await img.decode(); decoded = img.naturalWidth > 0 } catch { decoded = false }
+        }
+        const box = img ? img.getBoundingClientRect() : null
+        return {
+          name: artist.name,
+          hasImg: Boolean(img),
+          natural: img ? img.naturalWidth : 0,
+          rendered: box ? Math.round(box.width) + 'x' + Math.round(box.height) : '',
+          decoded
+        }
+      }
+      actions.setView('artists')
+      await settle(500)
+      const list = actions.artists()
+      const sorted = list.slice().sort((a, b) => (b.trackCount || 0) - (a.trackCount || 0))
+      const first = sorted[0]
+      const second = sorted[1] || sorted[0]
+      if (!first) return { noArtist: true }
+      const openOnce = await probe(first)
+      const openTwice = await probe(first)     // 同一个歌手二次打开：曾经永不重试
+      const other = await probe(second)
+      actions.closeDetail()
+      await settle(200)
+      return { openOnce, openTwice, other }
+    `)
+    record('艺人头像真的显示出来（解码成功且有非零尺寸）',
+      Boolean(avatarShown.openOnce && avatarShown.openOnce.decoded && avatarShown.openTwice && avatarShown.openTwice.decoded),
+      `首次：${JSON.stringify(avatarShown.openOnce)}；二次打开同一歌手：${JSON.stringify(avatarShown.openTwice)}；另一位：${JSON.stringify(avatarShown.other)}`)
+
     const cacheStats = await online.getStats()
     record('在线缓存落盘', cacheStats.files > 0,
       `${cacheStats.files} 个文件 · ${Math.round(cacheStats.size / 1024)} KB · ${cacheStats.cacheRoot}`)
