@@ -5007,6 +5007,30 @@ async function runSmoke ({ win, ctx }) {
       `点「关于」→ ${JSON.stringify(settingsSections.afterAbout)}；点「音乐库」→ ${JSON.stringify(settingsSections.afterLibrary)}；` +
       `标签完整可见=${settingsSections.navFullyVisible}（navTop=${settingsSections.navTop} / 工具栏底=${settingsSections.titleBottom}）`)
 
+    /* 子标题高亮必须跟随点击（逐个点五个，断言亮的就是刚点的那个） */
+    const navActiveFollow = await evaluate(win, `
+      const settle = async (ms = 250) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      actions.setView('settings')
+      await settle(500)
+      const wants = ['音乐库', '播放与音效', '外观与系统', '在线与扩展', '关于']
+      const picked = []
+      for (const want of wants) {
+        const items = [...document.querySelectorAll('.settings-nav__item')]
+        const item = items.find((node) => node.textContent === want)
+        item?.click()
+        await settle(900)
+        const active = items.find((node) => node.classList.contains('is-active'))
+        picked.push({ want, active: active ? active.textContent : '(无)' })
+      }
+      actions.setView('songs')
+      await settle(200)
+      return picked
+    `)
+    record('设置页子标题高亮跟随点击（五个逐个验证）',
+      navActiveFollow.length === 5 && navActiveFollow.every((item) => item.want === item.active),
+      navActiveFollow.map((item) => `${item.want}→${item.active}`).join('　'))
+
     /* ---------- 系统集成 ---------- */
 
     const { createNoteIcon, createTransportIcon, WHITE, BLACK } = require('./util/raster')

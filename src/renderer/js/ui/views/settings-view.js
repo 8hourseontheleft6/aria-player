@@ -59,6 +59,9 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   let navScrollBound = false
   // 点击子标题后的静默期：这段时间内联动高亮不生效
   let navClickUntil = 0
+  // 是否发生过手动滚动（点击定位不算）
+  let navUserScrolled = false
+  let navClickTimer = null
   const sectionNav = h('div', { class: 'settings-nav' })
 
   const toolbar = h('div', { class: 'view-toolbar' },
@@ -1067,7 +1070,10 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       if (!target || !shouldScroll) return
       // 点击后这段时间内不采纳联动高亮：平滑滚动途中会连续触发 scroll，
       // 会把刚点中的子标题覆盖成别的（用户反馈「点谁都显示关于」）。
-      navClickUntil = Date.now() + 700
+      navClickUntil = Date.now() + 1500
+      // 滚动动画期间与结束后都再确认一次高亮：点击就是唯一权威
+      clearTimeout(navClickTimer)
+      navClickTimer = setTimeout(() => highlightSection(label), 900)
       // 用 rect 差值算目标位置，不依赖 offsetTop / offsetParent
       const delta = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top
       scroll.scrollBy({ top: delta - 8, behavior: 'smooth' })
@@ -1088,16 +1094,33 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 不拦就会叠加出 N 个滚动监听（老代码里就是这么处理的）。
      */
     if (!navScrollBound) {
+      // 只有手动滚动（滚轮 / 触控板）才算「用户在浏览」，点击定位不算
+      on(scroll, 'wheel', () => { navUserScrolled = true }, { passive: true })
       on(scroll, 'scroll', () => {
-        // 刚点过子标题：把这段滚动交给它自己，别改高亮
         if (Date.now() < navClickUntil) return
+        // 没手动滚过就不联动 —— 否则点击后的定位会被判成别的类
+        if (!navUserScrolled) return
         const scrollerTop = scroll.getBoundingClientRect().top
-        let current = SECTIONS[0].label
-        for (const section of SECTIONS) {
-          const node = sectionTarget(section.label)
-          if (!node) continue
-          // 相对滚动容器顶部的位置：>0 表示还在下面，<=80 表示已经滚过顶部附近
-          if (node.getBoundingClientRect().top - scrollerTop <= 80) current = section.label
+        /*
+         * 反过来查：先找出「当前贴在顶部附近、且位置最低的那个标签框」，
+         * 再反查它属于哪个子标题。
+         * 不能按「每个子标题的第一个标签框」去比 —— 标签框在 DOM 里的顺序与
+         * 子标题顺序并不一致（「封面缓存」属于在线与扩展，却排在「在线功能」前面），
+         * 那样会把「在线与扩展」判成别的类（实测错判成「关于」）。
+         */
+        const labelOfGroup = (node) => {
+          const title = node.querySelector('.settings__group-title')?.textContent || ''
+          const section = SECTIONS.find((item) => item.groups.includes(title))
+          return section ? section.label : null
+        }
+        let current = activeSection
+        let best = -Infinity
+        for (const node of groupNodes) {
+          const top = node.getBoundingClientRect().top - scrollerTop
+          if (top <= 80 && top > best) {
+            best = top
+            current = labelOfGroup(node) || current
+          }
         }
         if (current !== activeSection) {
           activeSection = current
