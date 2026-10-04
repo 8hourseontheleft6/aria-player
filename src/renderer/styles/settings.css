@@ -561,3 +561,12 @@
   width: fit-content;
   max-width: 100%;
 }
+
+/* 标签行右侧的版本号：淡一点，不与标签抢注意力 */
+.settings-nav__version {
+  margin-left: auto;
+  padding-right: 4px;
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}

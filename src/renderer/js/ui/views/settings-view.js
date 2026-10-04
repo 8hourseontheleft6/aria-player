@@ -116,6 +116,17 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
    * （用户反馈「右边的设置标签」）。放在下面成一行、允许换行就不会再溢出。
    */
   const navRow = h('div', { class: 'settings-nav-row' }, sectionNav)
+
+  /*
+   * 版本号放在分类标签同一行右侧。
+   * 排查问题时第一件事就是确认「你在跑哪一版」，而它原来只在最底部「关于」里
+   * （用户反馈「根本看不到版本号」）。这里自带一次 app.info 查询，不依赖别处。
+   */
+  const navVersion = h('span', { class: 'settings-nav__version', text: '' })
+  navRow.appendChild(navVersion)
+  remote.app.info().then((info) => {
+    navVersion.textContent = `Aria ${info?.version || ''}`
+  }).catch(() => {})
   element.append(toolbar, navRow, scroll, infoLayer)
   // 滚动时气泡会跟丢，直接收起来
   on(scroll, 'scroll', hideTip, { passive: true })
