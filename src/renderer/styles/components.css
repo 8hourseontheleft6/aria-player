@@ -1116,3 +1116,57 @@ button.popover__row.is-danger:hover {
 .pill.is-danger {
   color: var(--danger, #ff453a);
 }
+
+/* ==========================================================================
+   文本输入（控件规范）
+   ==========================================================================
+   这一套之前完全缺失（样式表里没有任何 .input 规则），输入框是浏览器默认外观，
+   和药丸按钮 / 开关不是同一个体系。这里按同一套令牌补齐：
+     · 高度与 .btn 对齐（32px，--sm 26px）
+     · 圆角 --radius-md，聚焦时一道描边（不是系统 focus ring）
+     · 颜色全部走语义令牌，深色 / 浅色自动成对
+   ========================================================================== */
+
+.input {
+  height: 32px;
+  padding: 0 12px;
+  min-width: 0;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--fill-quaternary);
+  color: var(--label-2);
+  font-size: var(--text-callout);
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-ios), background var(--dur-fast) var(--ease-ios);
+}
+
+.input::placeholder {
+  color: var(--label-4);
+}
+
+.input:hover {
+  border-color: var(--separator-strong);
+}
+
+.input:focus {
+  border-color: var(--accent);
+  background: var(--bg-window);
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input--sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--text-subhead);
+}
+
+/* 数字 / 单行短输入：右对齐更好读（倍速、秒数这类） */
+.input--numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
