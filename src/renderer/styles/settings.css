@@ -480,3 +480,43 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ==========================================================================
+   带输入框的设置行：竖向铺满（在线模型那组）
+   ==========================================================================
+   之前输入框挤在行右侧一窄条里，长地址要横向拖动才能看全（用户反馈）。
+   这里把这几种行改成「标题在上、控件在下、铺满整行」，竖向阅读。
+   :has() 在 Electron 42（Chromium 120+）可用。
+   ========================================================================== */
+
+.settings__row:has(.settings__field) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.settings__row:has(.settings__field) .settings__row-text {
+  width: 100%;
+}
+
+.settings__field {
+  width: 100%;
+  max-width: none;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 输入框吃满整行，长地址一眼看全，不需要横向拖 */
+.settings__field .input,
+.settings__field input[type="text"],
+.settings__field input[type="password"],
+.settings__field input[type="url"] {
+  width: 100%;
+  min-width: 0;
+}
+
+/* 密钥行右侧那颗「清除」按钮：换行后不要被拉伸 */
+.settings__field > .btn {
+  flex: none;
+  align-self: flex-start;
+}
