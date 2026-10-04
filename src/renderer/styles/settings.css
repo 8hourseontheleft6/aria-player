@@ -523,3 +523,23 @@
 
 /* 在线模型那几行的输入框实际用的是 .settings__input（固定 220px）——上面按 .input/类型写的选择器打不中它，这里补精准规则 */
 .settings__field .settings__input { width: 100%; min-width: 0; }
+
+/* ==========================================================================
+   设置页禁止横向滚动（实机探针定位）
+   ==========================================================================
+   探针实测：.settings 容器 overflow-x:auto、宽 936 而 scrollWidth 2712 ——
+   于是整页可以左右拖（用户反馈「在线模型那里还是横向拖拉」，其实与那几行无关）。
+   根因是超长且不换行的文本（接口地址这类连续字符串）把内容撑宽。
+   这里收口：容器不允许横向滚动，长文本一律允许任意位置断行。
+   ========================================================================== */
+.settings.scroll { overflow-x: hidden; }
+.settings, .settings * { min-width: 0; }
+.settings__row, .settings__row-text, .settings__row-title, .settings__row-sub,
+.settings__field, .settings__input, .settings__group, .settings__card {
+  min-width: 0;
+  max-width: 100%;
+}
+.settings__row-title, .settings__row-sub {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
