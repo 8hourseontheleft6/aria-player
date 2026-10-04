@@ -520,3 +520,6 @@
   flex: none;
   align-self: flex-start;
 }
+
+/* 在线模型那几行的输入框实际用的是 .settings__input（固定 220px）——上面按 .input/类型写的选择器打不中它，这里补精准规则 */
+.settings__field .settings__input { width: 100%; min-width: 0; }
