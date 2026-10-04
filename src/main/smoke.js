@@ -4968,11 +4968,14 @@ async function runSmoke ({ win, ctx }) {
       const before = visible()
       const about = navItems.find((item) => item.textContent === '关于')
       about?.click()
-      await settle(400)
+      await settle(900)
       const afterAbout = visible()
       const library = navItems.find((item) => item.textContent === '音乐库')
+      const online = navItems.find((item) => item.textContent === '在线与扩展')
+      online?.click()
+      await settle(900)
       library?.click()
-      await settle(400)
+      await settle(900)
       const afterLibrary = visible()
       actions.setView('songs')
       await settle(200)
@@ -4982,14 +4985,24 @@ async function runSmoke ({ win, ctx }) {
       const widest = navItems.reduce((max, item) => Math.max(max, item.getBoundingClientRect().right), 0)
       const navFullyVisible = Boolean(nav) && nav.scrollWidth <= nav.clientWidth + 2 &&
         widest <= (window.innerWidth || 99999) && navBox.left >= 0
-      return { navCount: navItems.length, before, afterAbout, afterLibrary, navFullyVisible, navTop: navBox ? Math.round(navBox.top) : -1, titleBottom: Math.round((document.querySelector('.view-toolbar') || { getBoundingClientRect: () => ({ bottom: -1 }) }).getBoundingClientRect().bottom) }
+      // 全部标签框都在（不再隐藏） + 点「关于」「在线与扩展」后目标框是否贴顶
+      const allGroups = [...document.querySelectorAll('.settings__group')]
+      const scroller = document.querySelector('.settings')
+      const topOffsetOf = (groupTitle) => {
+        const node = allGroups.find((item) => !item.hidden && ((item.querySelector('.settings__group-title') || {}).textContent || '') === groupTitle)
+        if (!node || !scroller) return 9999
+        return Math.round(node.getBoundingClientRect().top - scroller.getBoundingClientRect().top)
+      }
+      const aboutOffset = topOffsetOf('关于')
+      const onlineOffset = topOffsetOf('在线功能')
+      return { navCount: navItems.length, before, afterAbout, afterLibrary, allVisible: allGroups.length >= 5, aboutTopOffset: aboutOffset, onlineTopOffset: onlineOffset }
     `)
-    record('设置页两层结构（选分类只显示该分类的分组）',
+    record('设置页子标题：点击后把对应的标签框滚到最上面（不隐藏其它框）',
       settingsSections.navCount >= 4 &&
-      settingsSections.afterAbout.length === 1 &&
-      settingsSections.afterAbout[0] === '关于' &&
-      settingsSections.afterLibrary.length === 1 &&
-      settingsSections.afterLibrary[0] === '音乐文件夹',
+      settingsSections.allVisible === true &&
+      settingsSections.afterAbout.length >= 1 &&
+      Math.abs(settingsSections.aboutTopOffset) <= 16 &&
+      Math.abs(settingsSections.onlineTopOffset) <= 16,
       `分类 ${settingsSections.navCount} 个；默认显示 ${JSON.stringify(settingsSections.before)}；` +
       `点「关于」→ ${JSON.stringify(settingsSections.afterAbout)}；点「音乐库」→ ${JSON.stringify(settingsSections.afterLibrary)}；` +
       `标签完整可见=${settingsSections.navFullyVisible}（navTop=${settingsSections.navTop} / 工具栏底=${settingsSections.titleBottom}）`)

@@ -55,6 +55,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   ]
   // 当前选中的设置分类（两层结构的「第二层」由它决定显示哪一组）
   let activeSection = SECTIONS[0].label
+  // 滚动联动是否已绑定（设置页会重渲染多次，避免叠加监听）
+  let navScrollBound = false
   const sectionNav = h('div', { class: 'settings-nav' })
 
   const toolbar = h('div', { class: 'view-toolbar' },
@@ -1038,17 +1040,31 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 分类本身始终列在导航里，什么都不会藏起来找不着。
      * activeSection 放在闭包外层，重渲染后仍停在你刚看的那一类。
      */
-    const applySection = (label) => {
-      activeSection = label
+    /** 某个子标题对应的**第一个标签框**（滚动定位的目标） */
+    const sectionTarget = (label) => {
       const section = SECTIONS.find((item) => item.label === label) || SECTIONS[0]
-      for (const node of groupNodes) {
-        const title = node.querySelector('.settings__group-title')?.textContent || ''
-        node.hidden = !section.groups.includes(title)
-      }
+      return groupNodes.find((node) => section.groups.includes(node.querySelector('.settings__group-title')?.textContent || ''))
+    }
+
+    const highlightSection = (label) => {
       for (const item of sectionNav.children) {
-        item.classList.toggle('is-active', item.dataset.section === section.label)
+        item.classList.toggle('is-active', item.dataset.section === label)
       }
-      scroll.scrollTop = 0
+    }
+
+    /*
+     * 点子标题 → 滚到对应的标签框，让它在最上面。
+     * 之前是「把其它类隐藏掉」，用户更喜欢全部留在一页、靠滚动定位
+     * （需求原话：选择什么，就把页面下拉到对应的位置）。
+     * shouldScroll=true 只在点击时传，避免每次重渲染都跳一下。
+     */
+    const applySection = (label, shouldScroll = false) => {
+      activeSection = label
+      highlightSection(label)
+      const target = sectionTarget(label)
+      if (!target || !shouldScroll) return
+      // 减 8px 留一点呼吸，避免标签框贴着顶边
+      scroll.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior: 'smooth' })
     }
 
     sectionNav.replaceChildren(...SECTIONS.map((section) => h('button', {
@@ -1056,9 +1072,29 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       type: 'button',
       text: section.label,
       dataset: { section: section.label },
-      onClick: () => applySection(section.label)
+      onClick: () => applySection(section.label, true)
     })))
     applySection(activeSection)
+
+    /*
+     * 滚动联动：高亮「当前停在最上面的那一类」，和点击定位形成闭环。
+     * 用标志位保证只绑一次 —— 设置页每次重渲染都会走这段代码，
+     * 不拦就会叠加出 N 个滚动监听（老代码里就是这么处理的）。
+     */
+    if (!navScrollBound) {
+      on(scroll, 'scroll', () => {
+        let current = SECTIONS[0].label
+        for (const section of SECTIONS) {
+          const node = sectionTarget(section.label)
+          if (node && node.offsetTop - scroll.scrollTop <= 80) current = section.label
+        }
+        if (current !== activeSection) {
+          activeSection = current
+          highlightSection(current)
+        }
+      }, { passive: true })
+      navScrollBound = true
+    }
     if (activeId) {
       const restored = scroll.querySelector(`[data-setting-id="${activeId}"]`)
       // 焦点原本在「控件」上（开关 / 下拉），恢复时也优先还给它
