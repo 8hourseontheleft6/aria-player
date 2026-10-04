@@ -58,9 +58,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   const sectionNav = h('div', { class: 'settings-nav' })
 
   const toolbar = h('div', { class: 'view-toolbar' },
-    h('div', { class: 'view-toolbar__title', text: '设置' }),
-    h('div', { class: 'view-toolbar__spacer' }),
-    sectionNav
+    h('div', { class: 'view-toolbar__title', text: '设置' })
   )
 
   const scroll = h('div', { class: 'settings scroll view-body' })
@@ -112,7 +110,13 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     }, 'i')
   }
 
-  element.append(toolbar, scroll, infoLayer)
+  /*
+   * 分类标签独立成一行，放在「设置」标题下面。
+   * 原来是塞在工具栏最右侧：5 个标签单行排列会溢出，得左右拖着才看得全
+   * （用户反馈「右边的设置标签」）。放在下面成一行、允许换行就不会再溢出。
+   */
+  const navRow = h('div', { class: 'settings-nav-row' }, sectionNav)
+  element.append(toolbar, navRow, scroll, infoLayer)
   // 滚动时气泡会跟丢，直接收起来
   on(scroll, 'scroll', hideTip, { passive: true })
 

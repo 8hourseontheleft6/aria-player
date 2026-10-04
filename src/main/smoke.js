@@ -4976,7 +4976,13 @@ async function runSmoke ({ win, ctx }) {
       const afterLibrary = visible()
       actions.setView('songs')
       await settle(200)
-      return { navCount: navItems.length, before, afterAbout, afterLibrary }
+      // 标签必须完整可见：不溢出（scrollWidth ≤ clientWidth）且都在视口宽度内
+      const nav = document.querySelector('.settings-nav')
+      const navBox = nav ? nav.getBoundingClientRect() : null
+      const widest = navItems.reduce((max, item) => Math.max(max, item.getBoundingClientRect().right), 0)
+      const navFullyVisible = Boolean(nav) && nav.scrollWidth <= nav.clientWidth + 2 &&
+        widest <= (window.innerWidth || 99999) && navBox.left >= 0
+      return { navCount: navItems.length, before, afterAbout, afterLibrary, navFullyVisible, navTop: navBox ? Math.round(navBox.top) : -1, titleBottom: Math.round((document.querySelector('.view-toolbar') || { getBoundingClientRect: () => ({ bottom: -1 }) }).getBoundingClientRect().bottom) }
     `)
     record('设置页两层结构（选分类只显示该分类的分组）',
       settingsSections.navCount >= 4 &&
@@ -4985,7 +4991,8 @@ async function runSmoke ({ win, ctx }) {
       settingsSections.afterLibrary.length === 1 &&
       settingsSections.afterLibrary[0] === '音乐文件夹',
       `分类 ${settingsSections.navCount} 个；默认显示 ${JSON.stringify(settingsSections.before)}；` +
-      `点「关于」→ ${JSON.stringify(settingsSections.afterAbout)}；点「音乐库」→ ${JSON.stringify(settingsSections.afterLibrary)}`)
+      `点「关于」→ ${JSON.stringify(settingsSections.afterAbout)}；点「音乐库」→ ${JSON.stringify(settingsSections.afterLibrary)}；` +
+      `标签完整可见=${settingsSections.navFullyVisible}（navTop=${settingsSections.navTop} / 工具栏底=${settingsSections.titleBottom}）`)
 
     /* ---------- 系统集成 ---------- */
 
