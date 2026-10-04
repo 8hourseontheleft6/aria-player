@@ -439,3 +439,44 @@
   font-family: var(--font-ui);
   color: var(--label-2);
 }
+
+/* ==========================================================================
+   排版节奏（第 3 步）
+   ==========================================================================
+   设置页改成「一次只显示一个分类」之后，双列排版反而有害：
+   「音乐库」「关于」这类只有一组的分类会被缩在半边，右边一片空白（第 1 步的副作用）。
+   这里收回单列、把左右内边距对齐全局的 24px，并统一分组间距与说明文字行数。
+   ========================================================================== */
+
+.settings {
+  columns: 1;
+  column-gap: 0;
+  padding: 0 24px 40px;
+}
+
+/* 分组之间统一 28px；最后一组收紧，避免底部一大块空白 */
+.settings__group {
+  margin-bottom: 28px;
+  max-width: none;
+}
+
+.settings__group:last-child {
+  margin-bottom: 8px;
+}
+
+/* 单列下卡片吃满整行 */
+.settings__card {
+  width: 100%;
+  max-width: none;
+}
+
+/*
+ * 说明文字最多两行：之前长短不一（有的两行、有的四行），行高参差看着乱。
+ * 超出部分省略，完整说明仍可在 ⓘ 里看到。
+ */
+.settings__row-sub {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
