@@ -570,3 +570,18 @@
   color: var(--label-3);
   font-variant-numeric: tabular-nums;
 }
+
+/* 标签行：标签在左、版本号在右，同一行（之前版本号被挤到下一行、靠左） */
+.settings-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px 10px;
+}
+.settings-nav-row .settings-nav {
+  flex: 0 1 auto;
+}
+.settings-nav__version {
+  margin-left: auto;
+  white-space: nowrap;
+}
