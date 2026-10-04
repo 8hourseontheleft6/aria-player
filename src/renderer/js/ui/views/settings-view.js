@@ -57,6 +57,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   let activeSection = SECTIONS[0].label
   // 滚动联动是否已绑定（设置页会重渲染多次，避免叠加监听）
   let navScrollBound = false
+  // 点击子标题后的静默期：这段时间内联动高亮不生效
+  let navClickUntil = 0
   const sectionNav = h('div', { class: 'settings-nav' })
 
   const toolbar = h('div', { class: 'view-toolbar' },
@@ -1063,8 +1065,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       highlightSection(label)
       const target = sectionTarget(label)
       if (!target || !shouldScroll) return
-      // 减 8px 留一点呼吸，避免标签框贴着顶边
-      scroll.scrollTo({ top: Math.max(0, target.offsetTop - 8), behavior: 'smooth' })
+      // 点击后这段时间内不采纳联动高亮：平滑滚动途中会连续触发 scroll，
+      // 会把刚点中的子标题覆盖成别的（用户反馈「点谁都显示关于」）。
+      navClickUntil = Date.now() + 700
+      // 用 rect 差值算目标位置，不依赖 offsetTop / offsetParent
+      const delta = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top
+      scroll.scrollBy({ top: delta - 8, behavior: 'smooth' })
     }
 
     sectionNav.replaceChildren(...SECTIONS.map((section) => h('button', {
@@ -1083,10 +1089,15 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      */
     if (!navScrollBound) {
       on(scroll, 'scroll', () => {
+        // 刚点过子标题：把这段滚动交给它自己，别改高亮
+        if (Date.now() < navClickUntil) return
+        const scrollerTop = scroll.getBoundingClientRect().top
         let current = SECTIONS[0].label
         for (const section of SECTIONS) {
           const node = sectionTarget(section.label)
-          if (node && node.offsetTop - scroll.scrollTop <= 80) current = section.label
+          if (!node) continue
+          // 相对滚动容器顶部的位置：>0 表示还在下面，<=80 表示已经滚过顶部附近
+          if (node.getBoundingClientRect().top - scrollerTop <= 80) current = section.label
         }
         if (current !== activeSection) {
           activeSection = current
