@@ -1004,3 +1004,115 @@ button.popover__row.is-danger:hover {
     height: 100%;
   }
 }
+
+/* ==========================================================================
+   药丸选择器（pill-menu.js）
+   ==========================================================================
+   从 wip/visualizer-immersive 分支取回：原生下拉的弹层由系统绘制，深色下与整体
+   风格不搭；这里统一成「按钮 + 自绘浮层」的多选一控件（选中的那颗抬起来）。
+   仅追加，未改动本文件既有规则。
+   ========================================================================== */
+
+/* ------------------------------ 竖向药丸菜单 ------------------------------ */
+/*
+ * 下拉框自己画：原生弹层改不动、深色下要么白底要么和整体不搭。
+ * 视觉沿用灵动岛：半透明药丸 + 0.5px 描边，选中的那颗「抬起来」。
+ */
+
+.pill-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-tertiary);
+  color: var(--label);
+  font-size: var(--text-subhead);
+  transition: background var(--dur-fast) var(--ease-ios);
+}
+
+.pill-select:hover:not(:disabled) {
+  background: var(--fill-secondary);
+}
+
+.pill-select:disabled {
+  opacity: 0.45;
+}
+
+.pill-select__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill-select__chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--label-3);
+  flex: none;
+}
+
+.pill-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
+  padding: 6px;
+}
+
+.pill-menu__title {
+  padding: 4px 6px 2px;
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--fill-floating);
+  box-shadow: 0 0 0 0.5px var(--separator);
+  color: var(--label);
+  font-size: var(--text-subhead);
+  text-align: left;
+  transition:
+    transform var(--dur-fast) var(--ease-ios),
+    background var(--dur-fast) var(--ease-ios);
+}
+
+.pill:hover {
+  transform: translateY(var(--lift));
+  background: var(--fill-floating-strong);
+}
+
+/* 选中：抬起来 + 强调色 —— 灵动岛滑块的那套感觉 */
+.pill.is-active {
+  background: var(--fill-floating-strong);
+  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-2);
+  color: var(--label);
+}
+
+.pill__label {
+  flex: 1;
+  min-width: 0;
+}
+
+.pill__hint {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+}
+
+.pill__check {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+  flex: none;
+}
+
+.pill.is-danger {
+  color: var(--danger, #ff453a);
+}
