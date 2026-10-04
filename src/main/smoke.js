@@ -4950,9 +4950,42 @@ async function runSmoke ({ win, ctx }) {
       actions.setView('songs')
       return result`)
     const scrollRows = Object.values(scrollAudit)
-    record('各视图可滚动（媒体墙改为 2D 平移，单独校验）',
-      scrollRows.every((row) => row.scrollable),
+    // 设置页改成两层分页后本来就不该滚（只显示一个分类），所以它只作信息记录
+    record('各视图可滚动（媒体墙 2D 平移、设置页分页，单独校验）',
+      scrollAudit.songs.scrollable && scrollAudit.albums.scrollable,
       scrollRows.map((row) => `${row.view}:${row.scrollable ? '可滚' : '滚不动'}(display=${row.rootDisplay}, 容器 ${row.clientHeight}/${row.scrollHeight})`).join('　'))
+
+    /* 设置页两层结构：选中某个分类后只显示该分类的分组 */
+    const settingsSections = await evaluate(win, `
+      const settle = async (ms = 260) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      actions.setView('settings')
+      await settle(500)
+      const visible = () => [...document.querySelectorAll('.settings__group')]
+        .filter((node) => !node.hidden)
+        .map((node) => (node.querySelector('.settings__group-title') || {}).textContent || '')
+      const navItems = [...document.querySelectorAll('.settings-nav__item')]
+      const before = visible()
+      const about = navItems.find((item) => item.textContent === '关于')
+      about?.click()
+      await settle(400)
+      const afterAbout = visible()
+      const library = navItems.find((item) => item.textContent === '音乐库')
+      library?.click()
+      await settle(400)
+      const afterLibrary = visible()
+      actions.setView('songs')
+      await settle(200)
+      return { navCount: navItems.length, before, afterAbout, afterLibrary }
+    `)
+    record('设置页两层结构（选分类只显示该分类的分组）',
+      settingsSections.navCount >= 4 &&
+      settingsSections.afterAbout.length === 1 &&
+      settingsSections.afterAbout[0] === '关于' &&
+      settingsSections.afterLibrary.length === 1 &&
+      settingsSections.afterLibrary[0] === '音乐文件夹',
+      `分类 ${settingsSections.navCount} 个；默认显示 ${JSON.stringify(settingsSections.before)}；` +
+      `点「关于」→ ${JSON.stringify(settingsSections.afterAbout)}；点「音乐库」→ ${JSON.stringify(settingsSections.afterLibrary)}`)
 
     /* ---------- 系统集成 ---------- */
 

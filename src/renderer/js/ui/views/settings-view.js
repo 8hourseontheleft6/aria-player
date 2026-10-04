@@ -53,6 +53,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     { label: '在线与扩展', groups: ['在线功能', '在线音源', '插件与扩展点', '外部模型（自填 API）', '封面缓存'] },
     { label: '关于', groups: ['关于'] }
   ]
+  // 当前选中的设置分类（两层结构的「第二层」由它决定显示哪一组）
+  let activeSection = SECTIONS[0].label
   const sectionNav = h('div', { class: 'settings-nav' })
 
   const toolbar = h('div', { class: 'view-toolbar' },
@@ -1013,33 +1015,35 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
     /* 分区导航：按分组标题找锚点，点一下滚过去；滚动时高亮当前块 */
     const groupNodes = [...scroll.querySelectorAll('.settings__group')]
-    const sectionOf = (label) => groupNodes.find((node) =>
-      SECTIONS.find((section) => section.label === label)?.groups
-        .includes(node.querySelector('.settings__group-title')?.textContent || ''))
+    /*
+     * 两层结构：选中某个分类**只显示该类的分组**，而不是滚过去。
+     *
+     * 之前的做法是「单页 + 锚点导航」——点一下平滑滚到那一块，页面依旧长得吓人
+     * （用户反馈「设置页太长」）。改成分页之后，首屏只留一类设置，短得多；
+     * 分类本身始终列在导航里，什么都不会藏起来找不着。
+     * activeSection 放在闭包外层，重渲染后仍停在你刚看的那一类。
+     */
+    const applySection = (label) => {
+      activeSection = label
+      const section = SECTIONS.find((item) => item.label === label) || SECTIONS[0]
+      for (const node of groupNodes) {
+        const title = node.querySelector('.settings__group-title')?.textContent || ''
+        node.hidden = !section.groups.includes(title)
+      }
+      for (const item of sectionNav.children) {
+        item.classList.toggle('is-active', item.dataset.section === section.label)
+      }
+      scroll.scrollTop = 0
+    }
+
     sectionNav.replaceChildren(...SECTIONS.map((section) => h('button', {
       class: 'settings-nav__item',
       type: 'button',
       text: section.label,
       dataset: { section: section.label },
-      onClick: () => {
-        const target = sectionOf(section.label)
-        if (target) scroll.scrollTo({ top: target.offsetTop - 8, behavior: 'smooth' })
-      }
+      onClick: () => applySection(section.label)
     })))
-    if (!sectionNavListenerAdded) {
-      on(scroll, 'scroll', () => {
-        // 高亮「当前正在看的那一块」：最后一个标题已经滚过顶部的分区
-        let active = SECTIONS[0].label
-        for (const section of SECTIONS) {
-          const node = sectionOf(section.label)
-          if (node && node.offsetTop - scroll.scrollTop <= 60) active = section.label
-        }
-        for (const item of sectionNav.children) {
-          item.classList.toggle('is-active', item.dataset.section === active)
-        }
-      }, { passive: true })
-      sectionNavListenerAdded = true
-    }
+    applySection(activeSection)
     if (activeId) {
       const restored = scroll.querySelector(`[data-setting-id="${activeId}"]`)
       // 焦点原本在「控件」上（开关 / 下拉），恢复时也优先还给它
