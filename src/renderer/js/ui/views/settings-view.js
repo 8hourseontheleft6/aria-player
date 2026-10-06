@@ -609,8 +609,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
     scroll.appendChild(group('在线功能', [
       row({
-        title: '在线补全歌词与封面',
-        sub: '开启后会向 LRCLIB（歌词）与 Deezer / iTunes（封面）发起请求。这是本项目唯一的联网功能，**默认开启**（歌词自动匹配；封面默认不匹配，需要时可在下面单独打开）；想彻底断网就把这里关掉，两者一起停。请求全部由主进程发出，页面本身仍然不能联网。',
+        title: '在线补全（歌词 / 封面 / 艺人头像）',
+        sub: '开启后会向 LRCLIB（歌词）与 Deezer / iTunes（封面）发起请求。这是本项目全部联网行为的总闸（歌词、封面、艺人头像都走它），**默认开启**（歌词自动匹配；封面默认不匹配，需要时可在下面单独打开）；想彻底断网就把这里关掉，两者一起停。请求全部由主进程发出，页面本身仍然不能联网。',
         control: switchControl(onlineOn, (value) => actions.setSetting({ onlineFeatures: value }))
       }),
       row({
