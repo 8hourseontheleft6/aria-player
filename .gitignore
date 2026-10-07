@@ -11,3 +11,4 @@ Thumbs.db
 
 # 打包产物（npm run dist）
 release/
+.tmp/
