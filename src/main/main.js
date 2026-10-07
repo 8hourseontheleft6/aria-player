@@ -30,6 +30,20 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 app.commandLine.appendSwitch('js-flags', '--expose-gc')
 
 /*
+ * 硬件加速降级开关：ARIA_DISABLE_GPU=1（等价于命令行 --disable-gpu）。
+ *
+ * 为什么要有它：GPU 进程启动失败时（实测 error_code=18 →
+ * "FATAL: GPU process isn't usable. Goodbye."）Electron 会**直接退出** ——
+ * 没有窗口、控制台零输出、所有版本表现一致，用户完全无从下手（这次排查花了几小时）。
+ * 有显卡驱动问题 / 远程桌面 / 虚拟化环境时，带上这个开关即可正常使用。
+ * 必须在 app ready 之前调用，所以才放在文件顶部这一带。
+ */
+if (process.env.ARIA_DISABLE_GPU === '1') {
+  app.disableHardwareAcceleration()
+  console.log('[main] 已按 ARIA_DISABLE_GPU=1 禁用硬件加速（软件渲染）')
+}
+
+/*
  * 自动化模式（自检 / 截图 / 帧率诊断 / 视觉审计）使用独立的用户数据目录。
  *
  * 两个原因，都是踩过的坑：
