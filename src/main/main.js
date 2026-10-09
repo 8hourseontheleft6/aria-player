@@ -38,6 +38,23 @@ app.commandLine.appendSwitch('js-flags', '--expose-gc')
  * 有显卡驱动问题 / 远程桌面 / 虚拟化环境时，带上这个开关即可正常使用。
  * 必须在 app ready 之前调用，所以才放在文件顶部这一带。
  */
+/*
+ * 兼容模式：ARIA_SAFE_MODE=1
+ *
+ * 适用场景（实测）：Chromium 的沙箱子进程与 GPU 进程都起不来时，Electron 会直接退出，
+ * 表现为「双击没反应、控制台零输出、所有版本一致」，用户完全无从下手。
+ * 打开后等价于：--no-sandbox --disable-gpu --disable-software-rasterizer。
+ * 代价：渲染走软件实现（会卡），且关闭了 Chromium 沙箱（安全性降低）——
+ * 仅作为用户机器异常时的兜底，修好显卡驱动/内存完整性后建议关掉。
+ */
+if (process.env.ARIA_SAFE_MODE === '1') {
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-gpu')
+  app.commandLine.appendSwitch('disable-software-rasterizer')
+  app.disableHardwareAcceleration()
+  console.log('[main] 兼容模式：已禁用沙箱与硬件加速（软件渲染）')
+}
+
 if (process.env.ARIA_DISABLE_GPU === '1') {
   app.disableHardwareAcceleration()
   console.log('[main] 已按 ARIA_DISABLE_GPU=1 禁用硬件加速（软件渲染）')
