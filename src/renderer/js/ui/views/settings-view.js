@@ -209,6 +209,20 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     }
   })
 
+  /*
+   * 按子标题顺序重排标签框（修正「播放与音效 / 外观与系统 看起来放反了」）。
+   * 标签框在 DOM 里的原始顺序是零散的：外观 会排在 均衡器/播放 之前，
+   * 于是点子标题滚动定位时，落到的是别类的地盘。这里统一按 SECTIONS 排。
+   * 用 includes 匹配标题，避开分组标题尾部带 ⓘ 的字符。
+   */
+  const sectionIndexOf = (node) => {
+    const title = node.querySelector('.settings__group-title')?.textContent || ''
+    const index = SECTIONS.findIndex((item) => item.groups.some((group) => title.includes(group)))
+    return index === -1 ? SECTIONS.length : index
+  }
+  const orderedGroups = [...groupNodes].sort((a, b) => sectionIndexOf(a) - sectionIndexOf(b))
+  for (const node of orderedGroups) scroll.append(node)
+
   element.append(toolbar, navRow, scroll, infoLayer)
   // 滚动时气泡会跟丢，直接收起来
   on(scroll, 'scroll', hideTip, { passive: true })
