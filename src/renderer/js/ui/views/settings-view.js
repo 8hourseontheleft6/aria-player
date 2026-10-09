@@ -64,8 +64,18 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   let navClickTimer = null
   const sectionNav = h('div', { class: 'settings-nav' })
 
+  /* 设置内搜索：输入关键词直达对应的设置项（第 6 步） */
+  const searchInput = h('input', {
+    class: 'settings-search',
+    type: 'search',
+    placeholder: '搜索设置（如 歌词 / 封面 / 快捷键）',
+    'aria-label': '搜索设置项',
+    spellcheck: false
+  })
+  const searchCount = h('span', { class: 'settings-search__count' })
   const toolbar = h('div', { class: 'view-toolbar' },
-    h('div', { class: 'view-toolbar__title', text: '设置' })
+    h('div', { class: 'view-toolbar__title', text: '设置' }),
+    h('div', { class: 'settings-search-wrap' }, searchInput, searchCount)
   )
 
   const scroll = h('div', { class: 'settings scroll view-body' })
@@ -134,6 +144,71 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   remote.app.info().then((info) => {
     navVersion.textContent = `Aria ${info?.version || ''}`
   }).catch(() => {})
+  /* ------------------------------------------------------------------
+   * 设置内搜索（第 6 步）
+   *
+   * 关键词同时匹配「设置项标题」与「说明文字」（直接用行元素的文本，最省事也最准）。
+   * 回车在匹配项之间循环跳转；滚动位置用 rect 差值算 —— offsetTop 在
+   * column-span 多列布局下不可靠（之前实测会把「在线与扩展」判成「关于」）。
+   * ------------------------------------------------------------------ */
+  let searchHits = []
+  let searchIndex = -1
+
+  const clearSearchHits = () => {
+    for (const row of scroll.querySelectorAll('.settings__row')) row.classList.remove('is-search-hit')
+    searchHits = []
+    searchIndex = -1
+  }
+
+  const runSearch = (rawQuery) => {
+    const query = (rawQuery || '').trim().toLowerCase()
+    clearSearchHits()
+    if (!query) {
+      searchCount.textContent = ''
+      return
+    }
+    for (const row of scroll.querySelectorAll('.settings__row')) {
+      const text = (row.textContent || '').toLowerCase()
+      if (text.includes(query)) {
+        row.classList.add('is-search-hit')
+        searchHits.push(row)
+      }
+    }
+    searchCount.textContent = searchHits.length ? searchHits.length + ' 项匹配' : '无匹配'
+    if (searchHits.length) {
+      searchIndex = 0
+      scrollToHit(0)
+    }
+  }
+
+  const scrollToHit = (index) => {
+    const target = searchHits[index]
+    if (!target) return
+    const delta = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top
+    scroll.scrollBy({ top: delta - 16, behavior: 'smooth' })
+  }
+
+  let searchTimer = null
+  on(searchInput, 'input', () => {
+    // 输入时不立刻跳，避免页面在打字过程中乱晃
+    clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => runSearch(searchInput.value), 260)
+  })
+
+  on(searchInput, 'keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      if (!searchHits.length) { runSearch(searchInput.value); return }
+      searchIndex = (searchIndex + 1) % searchHits.length
+      scrollToHit(searchIndex)
+    } else if (event.key === 'Escape') {
+      searchInput.value = ''
+      searchTimer = null
+      runSearch('')
+      searchInput.blur()
+    }
+  })
+
   element.append(toolbar, navRow, scroll, infoLayer)
   // 滚动时气泡会跟丢，直接收起来
   on(scroll, 'scroll', hideTip, { passive: true })

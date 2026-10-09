@@ -679,3 +679,53 @@
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--tint) 70%, var(--separator));
 }
+
+/* ==========================================================================
+   设置内搜索（第 6 步）
+   ==========================================================================
+   工具栏右侧一个搜索框：输入关键词匹配「设置项标题 + 说明文字」，
+   匹配到的行本类高亮（吃专辑色，与全局语言一致），回车在匹配项间跳转。
+   ========================================================================== */
+.settings-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.settings-search {
+  width: 230px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--fill-tertiary);
+  color: var(--label-2);
+  font-size: var(--text-footnote);
+  outline: none;
+  transition:
+    background var(--dur-fast) var(--ease-ios),
+    box-shadow var(--dur-fast) var(--ease-ios);
+}
+
+.settings-search::placeholder {
+  color: var(--label-3);
+}
+
+.settings-search:focus {
+  background: var(--fill-secondary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tint) 36%, transparent);
+}
+
+.settings-search__count {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  white-space: nowrap;
+}
+
+/* 命中的设置项：淡淡的专辑色底 + 细边，便于在长列表里扫到 */
+.settings__row.is-search-hit {
+  background: color-mix(in srgb, var(--tint) 16%, transparent);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--tint) 42%, transparent);
+}
