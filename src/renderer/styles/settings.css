@@ -620,3 +620,62 @@
   display: block;
   width: 100%;
 }
+
+/* ==========================================================================
+   与播放页 / 媒体墙风格对齐（第 4 步）
+   ==========================================================================
+   设置页原来是一套「纯灰」语言：选中态与卡片都用中性色，和播放页/媒体墙那种
+   「吃专辑色 + 玻璃 + 统一阴影」的观感不像同一个应用。
+   这里把设置页接到同一套 tokens 上：
+     · 子标题选中态吃专辑色（--tint），与播放页进度条、媒体墙聚焦块同色系
+     · 标签框卡片使用播放页同一套圆角 / 阴影 / 模糊层级
+     · 分组标题左侧一点专辑色作为分隔（很淡，不抢注意力）
+   全部只追加、不改既有规则；颜色用 color-mix 派生，深色浅色都自适应。
+   ========================================================================== */
+
+/* 子标题：选中态吃专辑色 */
+.settings-nav__item {
+  transition:
+    background var(--dur-fast) var(--ease-ios),
+    color var(--dur-fast) var(--ease-ios),
+    box-shadow var(--dur-fast) var(--ease-ios);
+}
+
+.settings-nav__item.is-active {
+  background: color-mix(in srgb, var(--tint) 26%, transparent);
+  color: var(--label-2);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--tint) 52%, transparent);
+}
+
+.settings-nav__item:hover:not(.is-active) {
+  background: var(--fill-tertiary);
+}
+
+/* 标签框：与播放页卡片同一套圆角 / 阴影 / 模糊底 */
+.settings__card {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-1);
+  background: color-mix(in srgb, var(--bg-window) 86%, transparent);
+  backdrop-filter: blur(var(--blur));
+  transition: box-shadow var(--dur) var(--ease-ios);
+}
+
+/* 悬停轻微抬起，与媒体墙的悬停语言一致 */
+.settings__card:hover {
+  box-shadow: var(--elev-2);
+}
+
+/* 分组标题左侧一点专辑色，作为视觉分隔 */
+.settings__group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings__group-title::before {
+  content: "";
+  width: 3px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--tint) 70%, var(--separator));
+}
