@@ -167,6 +167,24 @@ function createMainWindow (ctx) {
 
   win.webContents.on('render-process-gone', (_event, details) => {
     console.error('[main] 渲染进程异常退出:', details.reason)
+    /*
+     * 自愈降级：渲染/GPU 子进程创建失败时（实测 reason = launch-failed，伴随
+     * "GPU process launch failed: error_code=18"），直接退出会表现为「双击没反应」。
+     * 这里写下降级标记并立即用兼容模式重启一次 —— 用户不需要知道任何命令行参数。
+     * 标记在下次成功启动后由 main.js 清除，环境修好会自动恢复硬件加速。
+     */
+    if (details && details.reason === 'launch-failed' && process.env.ARIA_SAFE_MODE !== '1') {
+      try {
+        const fs = require('node:fs')
+        const path = require('node:path')
+        const { app } = require('electron')
+        fs.writeFileSync(path.join(app.getPath('userData'), 'safe-mode.flag'), String(Date.now()), 'utf8')
+        console.error('[main] 子进程无法创建：已记录降级标记，改用兼容模式重新启动')
+        app.relaunch()
+        app.exit(0)
+        return
+      } catch (err) { console.error('[main] 写降级标记失败:', err.message) }
+    }
   })
 
   // 开发期快捷键

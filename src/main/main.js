@@ -1,6 +1,7 @@
 'use strict'
 
 const path = require('node:path')
+const fs = require('node:fs')
 const { app, BrowserWindow } = require('electron')
 
 const { createContext } = require('./registry')
@@ -47,6 +48,20 @@ app.commandLine.appendSwitch('js-flags', '--expose-gc')
  * 代价：渲染走软件实现（会卡），且关闭了 Chromium 沙箱（安全性降低）——
  * 仅作为用户机器异常时的兜底，修好显卡驱动/内存完整性后建议关掉。
  */
+/*
+ * 自愈降级：上次若因「渲染/GPU 子进程无法创建」失败，这次自动走兼容模式。
+ * 用户不需要记任何命令行参数 —— 双击即可；环境修好后第一次成功启动会清除标记。
+ */
+const safeModeFlag = path.join(app.getPath('userData'), 'safe-mode.flag')
+let autoSafe = false
+try {
+  autoSafe = fs.existsSync(safeModeFlag)
+} catch { autoSafe = false }
+if (autoSafe && process.env.ARIA_SAFE_MODE !== '1') {
+  process.env.ARIA_SAFE_MODE = '1'
+  console.log('[main] 检测到上次启动失败，本次自动使用兼容模式')
+}
+
 if (process.env.ARIA_SAFE_MODE === '1') {
   app.commandLine.appendSwitch('no-sandbox')
   app.commandLine.appendSwitch('disable-gpu')
@@ -281,6 +296,8 @@ async function bootstrap () {
     await ctx.disposeAll()
   })
 
+  // 成功启动到这一步，说明环境没问题：清掉降级标记，下次恢复硬件加速
+  if (fs.existsSync(safeModeFlag)) { try { fs.unlinkSync(safeModeFlag) } catch { /* 无所谓 */ } }
   console.log(`[main] Aria 已启动 (Electron ${process.versions.electron}, 用户数据目录: ${app.getPath('userData')})`)
   if (watchResult.watching) {
     console.log(`[main] 目录监听已开启（${watchResult.watching} 个根目录）`)
