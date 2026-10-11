@@ -531,7 +531,9 @@ html[data-platform="darwin"] .titlebar {
   align-items: center;
   gap: 10px;
   height: 52px;
-  padding: 0 20px;
+  /* 与各视图内容的左右内边距保持一致（专辑/艺人页 24px、设置页 24px），
+     否则标题的左边线会比内容缩进 4px，整排看起来是歪的 */
+  padding: 0 24px;
   background: color-mix(in srgb, var(--bg-content) 80%, transparent);
   backdrop-filter: blur(var(--blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
