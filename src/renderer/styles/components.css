@@ -1170,3 +1170,36 @@ button.popover__row.is-danger:hover {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* ==========================================================================
+   悬停语言统一（第 5 步·精简版：只做侧边栏与播放条，不碰顶栏/灵动岛）
+   ==========================================================================
+   这两处各自写过一套 hover（底色来源不一、有的没有过渡），移到上面时观感不一致。
+   统一为：悬停 --fill-tertiary → 按下 --fill-secondary，过渡走 --dur-fast/--ease-ios，
+   播放条按钮圆角统一 --radius-sm。只加过渡与底色，不改尺寸间距。
+   ========================================================================== */
+.sidebar__row,
+.sidebar__row-action,
+.sidebar__collapse,
+.player-bar .btn,
+.player-bar__now {
+  transition:
+    background var(--dur-fast) var(--ease-ios),
+    color var(--dur-fast) var(--ease-ios),
+    box-shadow var(--dur-fast) var(--ease-ios);
+}
+
+.sidebar__row:hover,
+.player-bar .btn:hover,
+.player-bar__now:hover {
+  background: var(--fill-tertiary);
+}
+
+.sidebar__row:active,
+.player-bar .btn:active {
+  background: var(--fill-secondary);
+}
+
+.player-bar .btn {
+  border-radius: var(--radius-sm);
+}
