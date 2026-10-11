@@ -254,6 +254,32 @@ async function runScreenshots ({ win }) {
         await new Promise((r) => setTimeout(r, 700))
         return true`)
       await sleep(900)
+    }],
+    // 设置页的信息悬浮窗：必须走**鼠标**路径（键盘 focus 是另一条分支，位置算法不同）
+    ['20-settings-tip.png', '设置页：信息悬浮窗的位置', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setQuery('')
+        actions.setView('settings')
+        await new Promise((r) => setTimeout(r, 1200))
+        // 挑一个靠右的 ⓘ（工具栏/行尾附近最容易看出错位），拿到它的中心点当光标位置
+        const infos = [...document.querySelectorAll('.settings__info')]
+        const pick = infos.find((n) => n.getBoundingClientRect().left > window.innerWidth * 0.55) || infos[0]
+        const rect = pick.getBoundingClientRect()
+        pick.dispatchEvent(new MouseEvent('mouseenter', {
+          bubbles: false,
+          clientX: Math.round(rect.left + rect.width / 2),
+          clientY: Math.round(rect.top + rect.height / 2)
+        }))
+        await new Promise((r) => setTimeout(r, 400))
+        const tip = document.querySelector('.setting-tip')
+        console.log(JSON.stringify({
+          icon: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width) },
+          tipHidden: tip ? tip.hidden : null,
+          tip: tip ? { x: Math.round(tip.getBoundingClientRect().left), y: Math.round(tip.getBoundingClientRect().top), w: Math.round(tip.getBoundingClientRect().width), h: Math.round(tip.getBoundingClientRect().height) } : null
+        }))
+        return true`)
+      await sleep(900)
     }]
   ]
 

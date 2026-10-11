@@ -142,18 +142,33 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   }
 
   /**
-   * 把气泡放在**鼠标附近**（右下 12px），而不是按 ⓘ 的位置算。
-   * 之前按锚点算，两列布局下常常离指针很远（用户反馈「出现在鼠标右侧很远」）。
+   * 贴着 ⓘ 图标定位（图标下方 8px），靠近视口边缘时翻到另一侧。
+   *
+   * 为什么不再跟光标走：气泡是 position: fixed，但设置页的祖先里有一层
+   * （模糊/变换）会**创建包含块** —— 于是 left/top 不是相对视口，而是相对内容区
+   * （内容区起点正好是侧栏 248 + 标题栏 40）。实测：ⓘ 在 x=331，气泡却落在 x=600，
+   * 差的正是 248（+41）。以前那条「气泡离指针很远」的抱怨，其实是这个偏移的症状，
+   * 当时改成跟光标走只是治标。现在把气泡挂到 body（脱离那层包含块）+ 锚定图标，
+   * 两个问题一起解决 —— 悬停时指针本来就在图标上，所以锚定图标既稳又不会离得远。
    */
-  function showTip (anchorNode, text, event) {
+  function showTip (anchorNode, text) {
     infoLayer.textContent = text
     infoLayer.hidden = false
     const box = infoLayer.getBoundingClientRect()
-    const point = event && Number.isFinite(event.clientX)
-      ? { x: event.clientX, y: event.clientY }
-      : (() => { const r = anchorNode.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.bottom } })()
-    let left = point.x + 14
-    let top = point.y + 16
+    const anchor = anchorNode.getBoundingClientRect()
+    /*
+     * 贴在图标**右侧**、与图标垂直居中（macOS 气泡的常规位置）。
+     * 先试过贴着图标下方：设置行的标题正下方就是控件区，气泡会压住
+     * 「添加文件夹」这类按钮 —— 看图才发现的色块重叠。卡片右侧是空白，
+     * 放这里零遮挡。靠近视口右/下边缘时翻到左侧。
+     */
+    let left = anchor.right + 8
+    let top = anchor.top + anchor.height / 2 - box.height / 2
+    if (left + box.width > window.innerWidth - 12) left = anchor.left - box.width - 8
+    if (top < 12) top = 12
+    if (top + box.height > window.innerHeight - 12) top = window.innerHeight - box.height - 12
+    left = Math.max(12, left)
+    top = Math.max(12, top)
     // 贴边时翻到另一侧，别被视口切掉
     if (left + box.width > window.innerWidth - 8) left = Math.max(8, point.x - box.width - 14)
     if (top + box.height > window.innerHeight - 8) top = Math.max(8, point.y - box.height - 12)
@@ -168,9 +183,9 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       role: 'img',
       tabindex: '0',
       'aria-label': text,
-      onMouseenter: (event) => showTip(event.currentTarget, text, event),
+      onMouseenter: (event) => showTip(event.currentTarget, text),
       onMouseleave: hideTip,
-      onFocus: (event) => showTip(event.currentTarget, text, null),
+      onFocus: (event) => showTip(event.currentTarget, text),
       onBlur: hideTip
     }, 'i')
   }
@@ -334,7 +349,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
    * 刻意不把它塞进滚动区：那样要挪动子标题行的父节点，自检立刻报「分类 0 个」——
    * 只是个标题，不值得动结构。
    */
-  element.append(toolbar, pageHeader, navRow, scroll, infoLayer)
+  element.append(toolbar, pageHeader, navRow, scroll)
+  /*
+   * 气泡挂在 body 上，而不是这个视图里：视图的祖先有 backdrop-filter/transform，
+   * 会把 position: fixed 的包含块从视口改成那个祖先 —— 挂 body 才真的是视口坐标。
+   */
+  document.body.appendChild(infoLayer)
   // 滚动时气泡会跟丢，直接收起来
   on(scroll, 'scroll', hideTip, { passive: true })
 
