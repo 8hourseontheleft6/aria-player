@@ -939,3 +939,20 @@ html[data-reduce-motion='true'] .wall-tile.is-featured:hover .wall-tile__art img
   transform: none;
   box-shadow: none;
 }
+
+/*
+ * 艺人详情没有在线头像时：藏掉通用人形图标，显示名字首字母（Apple 的占位做法）。
+ * :has() 在 Electron 43（Chromium 154）可用，代码里本来也在用 —— 只在**没有 img** 时生效，
+ * 所以真头像加载出来时不受影响。
+ */
+.browse-detail__avatar:not(:has(img)) .icon {
+  display: none;
+}
+
+.browse-detail__avatar:not(:has(img))::after {
+  content: attr(data-initial);
+  /* 按 Apple 通讯录的比例：首字母约占圆径的四分之一（圆径约 190px） */
+  font-size: calc(var(--text-large-title) * 1.5);
+  font-weight: 600;
+  color: var(--label-3);
+}

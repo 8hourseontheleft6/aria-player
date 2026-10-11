@@ -310,7 +310,12 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         artistStats.textContent = `${artist.albumCount} 张专辑 · ${artist.trackCount} 首 · ${formatDurationLong(artist.duration)}`
         // 艺人头像走**在线按名查**（伪曲目 artistOnly）：不再拿合作曲目的专辑封面顶替，
         // 查不到就显示占位图标（见 plugins/online-media.js 的 artworkProvider）
-        lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
+        /*
+     * 无在线头像时用**首字母**占位（Apple 在通讯录/音乐里就是这么做的），比一个通用人形图标
+     * 更像"这里本来有内容"。样式侧用 :has() 判断有没有真的 img，只在没图时才显示。
+     */
+    artistAvatar.dataset.initial = (artist.name || '?').trim().charAt(0).toUpperCase()
+    lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
         artistGrid.setItems(artist.albumList.map((album) => ({
           key: album.key,
           title: album.name,
