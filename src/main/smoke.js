@@ -3677,7 +3677,13 @@ async function runSmoke ({ win, ctx }) {
       win.webContents.sendInputEvent({ type: 'mouseMove', x: 420, y: 620 })
       await sleep(400)
       win.webContents.sendInputEvent({ type: 'mouseMove', x: hoverPoint.x, y: hoverPoint.y })
-      await sleep(600)
+      /*
+       * 等**目标值**出现，而不是等一个猜出来的时长。
+       * 原来固定 sleep(600)：机器一忙，合成鼠标的 hover 生效更晚，
+       * 断言时过渡才走到一半（实测 translateY=-0.783，而目标是 -1.5），报成假失败。
+       */
+      await waitFor(win, `(getComputedStyle(document.querySelector('.track-row:hover') || document.body).transform || '').includes('-1.5')`,
+        { timeout: 3000, label: '歌曲行悬停过渡完成' })
       const shot = await evaluate(win, `
         const row = document.querySelector('.track-row:hover')
         const island = document.querySelector('.island')
@@ -5196,15 +5202,22 @@ async function runSmoke ({ win, ctx }) {
        * 原来只 await settle(400) 就读值 —— 机器一忙就假失败（报「到点复位为 15」），
        * 而这条假失败看起来像真回归，白追了两轮。按项目里其它检查的做法改成轮询。
        */
+      /*
+       * 断言 store 值复位为 0（这是「到点复位」的核心行为），但要给它足够时间：
+       * 复位要经主进程 250ms 防抖 + 一次 IPC，机器一忙就可能超过 2 秒 ——
+       * 所以轮询预算给到 5 秒。（中途试过改断言行内文字，结果 querySelector
+       * 命中了别的行的同名元素，反而误判 —— 已改回 store 值。）
+       */
+      const sleepNote = (document.querySelector('.settings__row-value') || {}).textContent || ''
       let afterFire = store.get().settings.sleepTimerMinutes
-      for (let i = 0; i < 40 && afterFire !== 0; i++) {
+      for (let i = 0; i < 100 && afterFire !== 0; i++) {
         await settle(50)
         afterFire = store.get().settings.sleepTimerMinutes
       }
       actions.setSetting({ sleepTimerMinutes: 0 })
       actions.setView('songs')
       await settle(200)
-      return { optionCount, labels, armed, afterFire }
+      return { optionCount, labels, armed, afterFire, note: sleepNote }
     `)
     record('睡眠定时器：到点暂停并复位（把 setTimeout 换成立即执行来验）',
       sleepTimerCheck.armed === 15 && sleepTimerCheck.afterFire === 0 && sleepTimerCheck.optionCount >= 5,
