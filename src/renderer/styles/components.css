@@ -1203,3 +1203,31 @@ button.popover__row.is-danger:hover {
 .player-bar .btn {
   border-radius: var(--radius-sm);
 }
+
+/* ==========================================================================
+   悬停语言统一（第 5 步·顶栏与灵动岛）
+   ==========================================================================
+   与侧边栏/播放条保持同一套：悬停 --fill-tertiary、按下 --fill-secondary、
+   过渡 --dur-fast/--ease-ios。
+   刻意不改圆角与任何尺寸 —— 顶栏是命中测试最容易受影响的区域，
+   这里只加"底色 + 过渡"，改完立刻用自检验证。
+   ========================================================================== */
+.island__item,
+.titlebar__left .btn,
+.titlebar__right .btn {
+  transition:
+    background var(--dur-fast) var(--ease-ios),
+    color var(--dur-fast) var(--ease-ios);
+}
+
+.island__item:hover,
+.titlebar__left .btn:hover,
+.titlebar__right .btn:hover {
+  background: var(--fill-tertiary);
+}
+
+.island__item:active,
+.titlebar__left .btn:active,
+.titlebar__right .btn:active {
+  background: var(--fill-secondary);
+}
