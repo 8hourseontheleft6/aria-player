@@ -5336,14 +5336,20 @@ async function runSmoke ({ win, ctx }) {
      *   · 关掉总开关 → 两者一起停（用户关它就是明确不要联网，不该有例外）；
      *   · 分项开关（onlineLyrics / onlineCovers）用来只关其中一样。
      */
-    const defaultOnline = settingsService.get().onlineFeatures
+    /*
+     * 读**代码默认值**（DEFAULTS），不是当前持久化的值。
+     * 原来读 settingsService.get()，而本检查自己在末尾把开关改成 false，
+     * 于是同一份配置目录里第二次运行读到的就是 false —— 自我污染、依赖运行顺序，
+     * 只在全新配置目录下才会通过。
+     */
+    const defaultOnline = require('./services/settings.js').DEFAULTS.onlineFeatures
     settingsService.set({ onlineFeatures: false, onlineLyrics: true, onlineCovers: true })
     await sleep(200)
     const lyricsWhenMasterOff = await online.fetchLyrics(sample)
     const coversWhenMasterOff = await online.fetchCover(sample)
     settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
     await sleep(150)
-    record('联网总开关：默认开着（歌词与封面都自动匹配），关掉则两者一起停',
+    record('联网总开关：默认开着（歌词自动匹配、封面需单独打开），关掉则两者一起停',
       defaultOnline === true &&
       lyricsWhenMasterOff.skipped === true &&
       coversWhenMasterOff.skipped === true,
