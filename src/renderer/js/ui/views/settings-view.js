@@ -464,6 +464,33 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   let outputDevicesListenerAdded = false
   let sectionNavListenerAdded = false
 
+  /*
+   * 睡眠定时器：会话内有效，到点暂停播放并复位选择。
+   * 放在设置视图里是因为视图本来就持有 player，且它在启动时就创建 ——
+   * 离开设置页后定时器照样在跑，不必为它去改 app.js。
+   */
+  let sleepTimerId = null
+  let lastSleepMinutes = store.get().settings.sleepTimerMinutes || 0
+  const applySleepTimer = (minutes) => {
+    if (sleepTimerId) {
+      clearTimeout(sleepTimerId)
+      sleepTimerId = null
+    }
+    if (!minutes) return
+    sleepTimerId = setTimeout(() => {
+      sleepTimerId = null
+      player.pause?.()
+      actions.setSetting('sleepTimerMinutes', 0)
+    }, minutes * 60 * 1000)
+  }
+  applySleepTimer(lastSleepMinutes)
+  store.subscribe((state) => {
+    const minutes = state.settings.sleepTimerMinutes || 0
+    if (minutes === lastSleepMinutes) return
+    lastSleepMinutes = minutes
+    applySleepTimer(minutes)
+  })
+
   function render () {
     const state = store.get()
     const settings = state.settings
@@ -665,7 +692,22 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       })
     ], { collapsible: true, sub: eqState }))
 
-    scroll.appendChild(group('播放', [
+      /* 睡眠定时器：选一个时长后倒计时，到点暂停播放并把选择复位 */
+  scroll.appendChild(group('播放', [
+    row({
+      title: '睡眠定时器',
+      sub: '选一个时长，到点自动暂停播放。只在本次运行内有效（重启后需要重新选）。',
+      control: (() => {
+        const options = [[0, '关闭'], [15, '15 分钟'], [30, '30 分钟'], [45, '45 分钟'], [60, '1 小时'], [90, '1.5 小时']]
+        const select = h('select', {
+          'aria-label': '睡眠定时器时长',
+          onChange: (event) => actions.setSetting('sleepTimerMinutes', Number(event.currentTarget.value))
+        }, options.map(([value, label]) =>
+          h('option', { value: String(value), selected: (store.get().settings.sleepTimerMinutes || 0) === value }, label)))
+        // .select 是**包裹层**类（负责配色与右侧箭头），要包在 <select> 外面
+        return h('div', { class: 'select' }, select)
+      })()
+    }),
       row({
         title: '输出设备',
         sub: '通话 / 游戏语音时想让对方听不到音乐：把这里选成你的耳机（通话留在原设备）。音乐只进你的耳朵，麦克风拾不到它，对方就什么也听不到。留「跟随系统」则与其它应用共用默认输出。',

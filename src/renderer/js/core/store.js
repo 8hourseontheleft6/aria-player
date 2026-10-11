@@ -99,6 +99,7 @@ export function initialState () {
       searchScope: 'basic',
       searchHistory: [],
       settingsSearchHistory: [],
+  sleepTimerMinutes: 0,
       jumpToMatchedLyric: true,
       playOnSingleClick: false,
       audioOutputDevice: '',

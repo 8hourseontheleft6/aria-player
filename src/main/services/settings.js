@@ -7,6 +7,9 @@ const path = require('node:path')
 
 /** 默认设置。新增字段只需在这里补一行，旧配置文件会自动合并。 */
 const DEFAULTS = {
+  // 睡眠定时器：选中的时长（分钟），0 = 关闭。定时器本身只在会话内有效，
+  // 这个值只是"上次选的时长"，重启后不会自动开始倒计时。
+  sleepTimerMinutes: 0,
   version: 1,
   folders: [],
   theme: 'system',
