@@ -283,6 +283,32 @@ async function runScreenshots ({ win }) {
           const settingsScroll = document.querySelector('.settings.scroll')
           const head = settingsScroll ? settingsScroll.parentElement.querySelector('.view-header__title') : null
           const groupTitles = [...document.querySelectorAll('.settings__group-title')]
+          const scopedSettings = document.querySelector('.settings.scroll') || document
+          const style = (sel, root) => {
+            const el = (root || scopedSettings).querySelector(sel)
+            if (!el) return null
+            const cs = getComputedStyle(el)
+            return { size: cs.fontSize, weight: cs.fontWeight, lh: cs.lineHeight }
+          }
+          console.log('[type] ' + JSON.stringify({
+            doc: getComputedStyle(document.body).fontSize,
+            largeTitle: style('.view-header__title', document),
+            groupTitle: style('.settings__group-title'),
+            rowTitle: style('.settings__row-title'),
+            rowValue: style('.settings__row-value'),
+            navItem: style('.settings-nav__item'),
+            navItemVisible: style('.settings-nav__item', document),
+            boxes: (() => {
+              const v = (sel) => [...document.querySelectorAll(sel)].find((el) => el.getBoundingClientRect().height > 0)
+              const c = v('.settings.scroll')
+              const card = v('.settings__card')
+              const row = v('.settings__row')
+              const t = v('.settings__row-title')
+              const r = (el) => el ? { x: Math.round(el.getBoundingClientRect().left), w: Math.round(el.getBoundingClientRect().width) } : null
+              return { container: r(c), card: r(card), row: r(row), rowTitle: r(t) }
+            })(),
+            info: style('.settings__info')
+          }))
           console.log('[geom] ' + JSON.stringify({
             rowDetail: [...document.querySelectorAll('.settings__row')].slice(0, 14).map((r) => {
               const rect = r.getBoundingClientRect()

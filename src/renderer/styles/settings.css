@@ -35,8 +35,12 @@
 
 .settings__group-title {
   padding: 0 4px 7px;
-  font-size: var(--text-footnote);
-  font-weight: 500;
+  /*
+   * Apple 的 grouped list 里，分组小标题是 **13px semibold**（--text-subhead / 600）。
+   * 原来是 12px / 500（--text-footnote），比正文(15)只小一级且偏轻，整页读起来发飘。
+   */
+  font-size: var(--text-subhead);
+  font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--label-3);
   text-transform: none;
