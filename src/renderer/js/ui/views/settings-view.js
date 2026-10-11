@@ -470,6 +470,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
    * 离开设置页后定时器照样在跑，不必为它去改 app.js。
    */
   const sleepValue = h('span', { class: 'settings__row-value' })
+  /* 到点复位后，下拉自身也要跟着回到「关闭」，否则界面与状态不一致 */
+  let sleepSelect = null
   let sleepTimerId = null
   let lastSleepMinutes = store.get().settings.sleepTimerMinutes || 0
 
@@ -507,6 +509,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     const minutes = state.settings.sleepTimerMinutes || 0
     if (minutes === lastSleepMinutes) return
     lastSleepMinutes = minutes
+    // 状态是唯一事实来源：下拉跟着它走（到点复位时也回到「关闭」）
+    if (sleepSelect && sleepSelect.value !== String(minutes)) sleepSelect.value = String(minutes)
     applySleepTimer(minutes)
   })
 
@@ -724,6 +728,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         }, options.map(([value, label]) =>
           h('option', { value: String(value), selected: (store.get().settings.sleepTimerMinutes || 0) === value }, label)))
         // .select 是**包裹层**类（负责配色与右侧箭头），要包在 <select> 外面
+        sleepSelect = select
         return h('div', { class: 'settings__row-control' },
           h('div', { class: 'select' }, select),
           sleepValue,
