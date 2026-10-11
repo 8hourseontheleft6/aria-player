@@ -35,6 +35,21 @@ for (const file of docs) {
   }
 }
 
+/* ---- 文档里提到的 npm run 脚本必须真的存在 ---- */
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+const scriptNames = new Set(Object.keys(pkg.scripts || {}))
+let scriptRefs = 0
+for (const file of docs) {
+  const rel = path.relative(ROOT, file).replace(/\\/g, '/')
+  const source = fs.readFileSync(file, 'utf8')
+  for (const match of source.matchAll(/npm run ([a-zA-Z0-9:_-]+)/g)) {
+    scriptRefs++
+    if (!scriptNames.has(match[1])) {
+      problems.push(`${rel}  文档里写的脚本不存在：npm run ${match[1]}`)
+    }
+  }
+}
+
 for (const problem of problems) console.log(problem)
-console.log(`\n检查了 ${docs.length} 份文档：本地链接 ${checked} 条，问题 ${problems.length} 处`)
+console.log(`\n检查了 ${docs.length} 份文档：本地链接 ${checked} 条、脚本引用 ${scriptRefs} 处，问题 ${problems.length} 处`)
 if (problems.length > 0) process.exit(1)
