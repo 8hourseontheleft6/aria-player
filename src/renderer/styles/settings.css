@@ -718,3 +718,9 @@
   border-radius: var(--radius-md);
   box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--tint) 42%, transparent);
 }
+
+/* 减少动画：以上这些悬停会位移/投影，开了「减少动画」时只保留底色反馈 */
+html[data-reduce-motion='true'] .settings__card:hover {
+  transform: none;
+  box-shadow: none;
+}

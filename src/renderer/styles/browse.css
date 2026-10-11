@@ -913,3 +913,29 @@ html[data-reduce-motion="true"] .wall-tile:hover {
   flex: 1;
   min-height: 0;
 }
+
+/* 减少动画：以上这些悬停会位移/投影，开了「减少动画」时只保留底色反馈 */
+html[data-reduce-motion='true'] .cover-card:hover .cover-card__art {
+  /* 这条的 transform 含功能性位移（如 translateY(-50%) 用来居中），只清阴影 */
+  box-shadow: none;
+}
+
+html[data-reduce-motion='true'] .cover-card:hover .cover-card__play {
+  transform: none;
+  box-shadow: none;
+}
+
+html[data-reduce-motion='true'] .wall-tile:hover .wall-tile__art img {
+  transform: none;
+  box-shadow: none;
+}
+
+html[data-reduce-motion='true'] .wall-tile:hover .wall-tile__open {
+  transform: none;
+  box-shadow: none;
+}
+
+html[data-reduce-motion='true'] .wall-tile.is-featured:hover .wall-tile__art img {
+  transform: none;
+  box-shadow: none;
+}

@@ -1231,3 +1231,15 @@ button.popover__row.is-danger:hover {
 .titlebar__right .btn:active {
   background: var(--fill-secondary);
 }
+
+/* 减少动画：以上这些悬停会位移/投影，开了「减少动画」时只保留底色反馈 */
+html[data-reduce-motion='true'] .slider:hover .slider__thumb,
+.slider.is-dragging .slider__thumb {
+  /* 这条的 transform 含功能性位移（如 translateY(-50%) 用来居中），只清阴影 */
+  box-shadow: none;
+}
+
+html[data-reduce-motion='true'] .pill:hover {
+  /* 这条的 transform 含功能性位移（如 translateY(-50%) 用来居中），只清阴影 */
+  box-shadow: none;
+}
