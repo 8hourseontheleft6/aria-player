@@ -571,7 +571,11 @@ html[data-platform="darwin"] .titlebar {
 }
 
 .view-header {
-  padding: 4px 20px 16px;
+  /*
+   * 水平内边距用 24px，与内容基准线一致（工具栏 / 封面网格 / 设置页内容 / 详情页头部都是 24）。
+   * 原来是 20px —— 实测专辑页大标题在 x=268，而封面网格在 272，整页标题比内容偏左 4px。
+   */
+  padding: 4px 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;

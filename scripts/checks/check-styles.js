@@ -125,6 +125,7 @@ if (fs.existsSync(tokensFile)) {
  */
 const BASELINE = [
   ['shell.css', '.view-toolbar'],
+  ['shell.css', '.view-header'],
   ['browse.css', '.cover-grid'],
   ['browse.css', '.browse-detail'],
   ['settings.css', '.settings']

@@ -126,6 +126,13 @@ async function runScreenshots ({ win }) {
     ['09-albums.png', '专辑网格', async () => {
       await evaluate(win, `window.__aria.actions.setView('albums'); return true`)
       await sleep(1600)
+      await evaluate(win, `console.log('[albums] ' + JSON.stringify((() => {
+        const vis = (sel) => [...document.querySelectorAll(sel)].find((el) => el.getBoundingClientRect().height > 0)
+        const b = (el) => el ? { x: Math.round(el.getBoundingClientRect().left), w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height) } : null
+        const cards = [...document.querySelectorAll('.cover-card')].slice(0, 6).map(b)
+        return { grid: b(vis('.cover-grid')), header: b(vis('.view-header__title')), sub: b(vis('.view-header__subtitle')), toolMeta: b(vis('.view-toolbar__meta')), cards }
+      })())); return true`)
+      await sleep(200)
     }],
     ['10-album-detail.png', '专辑详情', async () => {
       await evaluate(win, `
