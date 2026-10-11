@@ -201,12 +201,56 @@ for (const [file, selector] of BASELINE) {
   }
 }
 
-/* ---------------- 5. 报告 ---------------- */
+/* ---------------- 5. 裸值守卫（棘轮：只减不增） ---------------- */
+/*
+ * 颜色 / 时长 / 字号本该全部来自 tokens.css —— 写裸值等于只把当前主题调好，
+ * 另一个主题必然失配。但代码里确实存在一批**刻意**的裸值：画在封面/渐变上的白字、
+ * 拖拽指示器的 `90ms linear`、9~10px 的小徽章。
+ *
+ * 一刀切会立刻产生几十处误报，然后这条规则就会被绕过 —— 那还不如没有。
+ * 所以做成「棘轮」：只统计总量，**不增加**就通过。
+ *   · 想减少：直接减，然后同步下面的基准；
+ *   · 想新增：先想清楚是不是真没有对应令牌；确认必须新增时，
+ *     同步基准并在提交信息里说明原因（例如「新的画在图片上的文字」）。
+ * 这样它挡得住「悄悄多出第二种写法」，又不会因为历史存量而报假警。
+ */
+const NAKED_BASELINE = { color: 44, duration: 9, fontSize: 5 }
+
+const naked = { color: 0, duration: 0, fontSize: 0 }
+for (const file of cssFiles) {
+  if (path.basename(file) === 'tokens.css') continue
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+  for (const line of lines) {
+    if (line.trim().startsWith('/*') || line.trim().startsWith('*')) continue
+    const hasVar = line.includes('var(--')
+    if (!hasVar && (/#[0-9a-fA-F]{3,8}\b/.test(line) || /\brgba?\(/.test(line) || /\bhsla?\(/.test(line))) {
+      naked.color++
+    }
+    if (/(transition|animation|duration)[^;]*\b\d+(\.\d+)?(ms|s)\b/.test(line)) naked.duration++
+    if (/font-size:\s*\d+(\.\d+)?px/.test(line)) naked.fontSize++
+  }
+}
+
+for (const kind of ['color', 'duration', 'fontSize']) {
+  const now = naked[kind]
+  const base = NAKED_BASELINE[kind]
+  if (now > base) {
+    problems.push(
+      `裸值守卫：${kind} 从 ${base} 涨到 ${now} —— 新增的裸值应改用令牌` +
+      `（颜色用 --label/--fill/--bg/--separator 等，时长用 --dur-*，字号用 --text-*）；` +
+      '确属刻意（画在图片上的文字等）才同步 NAKED_BASELINE 并在提交信息里说明'
+    )
+  }
+}
+
+/* ---------------- 6. 报告 ---------------- */
 for (const problem of problems) console.log(problem)
 
 console.log(
   `\n检查了 ${cssFiles.length} 个样式表：圆角 ${checkedRadius} 处、阴影 ${checkedShadow} 处，` +
-  `基准线 ${checkedBaseline} 处、已定义令牌 ${defined.size} 个，问题 ${problems.length} 处`
+  `基准线 ${checkedBaseline} 处、裸值 色${naked.color}/时${naked.duration}/字${naked.fontSize}` +
+  `（上限 ${NAKED_BASELINE.color}/${NAKED_BASELINE.duration}/${NAKED_BASELINE.fontSize}）、` +
+  `已定义令牌 ${defined.size} 个，问题 ${problems.length} 处`
 )
 
 if (problems.length > 0) process.exit(1)
