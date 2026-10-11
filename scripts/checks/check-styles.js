@@ -326,12 +326,43 @@ for (const [file, selector] of CARDS) {
   }
 }
 
-/* ---------------- 9. 报告 ---------------- */
+/* ---------------- 9. 重复选择器提示（不阻断） ---------------- */
+/*
+ * 同一个选择器在同一文件里写多遍时，后写的覆盖前面的 —— 前面那条里的同名声明
+ * 是死值，后人在那里改样式会毫无反应。但**不要为了整洁去合并**：
+ * 把后面的声明并到第一处会改变它在层叠中的位置（实测全库 18 处合并后，
+ * 自检从 161 掉到 150：聚焦块尺寸错、列表滚不动、translateY=NaN）。
+ * 所以这里只数一数、提示一下，退出码不受影响。
+ */
+const duplicateSelectors = []
+for (const file of cssFiles) {
+  const source = fs.readFileSync(file, 'utf8')
+  const seen = new Map()
+  for (const match of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = match[1].replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\s+/g, ' ').trim()
+    if (!selector || selector.startsWith('@')) continue
+    // 关键帧的 from / to / 百分比：去掉所有空白再判断，避免缩进造成的漏网
+    const compact = selector.replace(/\s+/g, '')
+    if (['from', 'to'].includes(compact) || /^[\d.]+%$/.test(compact)) continue
+    seen.set(selector, (seen.get(selector) || 0) + 1)
+  }
+  for (const [selector, count] of seen) {
+    if (count > 1) duplicateSelectors.push(rel(file) + '  ' + selector + ' ×' + count)
+  }
+}
+if (duplicateSelectors.length) {
+  console.log('\n提示（不阻断）：以下选择器在同一文件里重复定义，后写的覆盖前面的，' +
+    '前面那条里的同名声明是死值 —— 顺手清自己正在改的那条即可，别专门去合并：')
+  for (const line of duplicateSelectors) console.log('  · ' + line)
+}
+
+/* ---------------- 10. 报告 ---------------- */
 for (const problem of problems) console.log(problem)
 
 console.log(
   `\n检查了 ${cssFiles.length} 个样式表：圆角 ${checkedRadius} 处、阴影 ${checkedShadow} 处，` +
   `基准线 ${checkedBaseline} 处、裸值 色${naked.color}/时${naked.duration}/字${naked.fontSize}` +
+  `、重复选择器 ${duplicateSelectors.length} 处（只提示不改）` +
   `（上限 ${NAKED_BASELINE.color}/${NAKED_BASELINE.duration}/${NAKED_BASELINE.fontSize}）、` +
   `已定义令牌 ${defined.size} 个，问题 ${problems.length} 处`
 )
