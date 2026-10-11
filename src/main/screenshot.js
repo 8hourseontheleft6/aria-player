@@ -263,6 +263,43 @@ async function runScreenshots ({ win }) {
         actions.setView('settings')
         await new Promise((r) => setTimeout(r, 1200))
         // 挑一个靠右的 ⓘ（工具栏/行尾附近最容易看出错位），拿到它的中心点当光标位置
+        // 几何量测：把「同一条左边线、行高节奏、ⓘ 与标题垂直居中」变成数字
+        {
+          const rows = [...document.querySelectorAll('.settings__row')].slice(0, 10).map((r) => {
+            const b = r.getBoundingClientRect()
+            const t = r.querySelector('.settings__row-title')
+            const i = r.querySelector('.settings__info')
+            const tb = t ? t.getBoundingClientRect() : null
+            const ib = i ? i.getBoundingClientRect() : null
+            return {
+              h: Math.round(b.height),
+              titleX: tb ? Math.round(tb.left) : null,
+              titleMidY: tb ? tb.top + tb.height / 2 : null,
+              infoMidY: ib ? ib.top + ib.height / 2 : null
+            }
+          })
+          const uniq = (list) => [...new Set(list.filter((v) => v != null))]
+          const card = document.querySelector('.settings__card')
+          const settingsScroll = document.querySelector('.settings.scroll')
+          const head = settingsScroll ? settingsScroll.parentElement.querySelector('.view-header__title') : null
+          const groupTitles = [...document.querySelectorAll('.settings__group-title')]
+          console.log('[geom] ' + JSON.stringify({
+            rowHeights: uniq(rows.map((r) => r.h)),
+            titleXs: uniq(rows.map((r) => r.titleX)),
+            infoOffsetY: uniq(rows.map((r) => (r.infoMidY != null && r.titleMidY != null) ? Math.round((r.infoMidY - r.titleMidY) * 10) / 10 : null)),
+            groupTitleXs: uniq(groupTitles.map((g) => Math.round(g.getBoundingClientRect().left))),
+            groupDetail: groupTitles.map((g) => ({
+              text: (g.textContent || "").slice(0, 6),
+              x: Math.round(g.getBoundingClientRect().left),
+              inHead: Boolean(g.closest(".settings__group-head")),
+              row: g.closest(".settings__group") ? Math.round(g.closest(".settings__group").getBoundingClientRect().left) : null
+            })),
+            cardX: card ? Math.round(card.getBoundingClientRect().left) : null,
+            cardW: card ? Math.round(card.getBoundingClientRect().width) : null,
+            headX: head ? Math.round(head.getBoundingClientRect().left) : null,
+            headY: head ? Math.round(head.getBoundingClientRect().top) : null
+          }))
+        }
         const infos = [...document.querySelectorAll('.settings__info')]
         const pick = infos.find((n) => n.getBoundingClientRect().left > window.innerWidth * 0.55) || infos[0]
         const rect = pick.getBoundingClientRect()

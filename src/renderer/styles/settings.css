@@ -265,6 +265,8 @@
   width: 100%;
   padding: 0 4px 6px;
   text-align: left;
+  /* 可折叠分组的标题要和普通分组对齐在同一条左边线（原来右偏 4px） */
+  padding-left: 0;
 }
 
 .settings__group-head .settings__group-title {
