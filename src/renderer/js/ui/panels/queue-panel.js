@@ -34,6 +34,25 @@ export function createQueuePanel ({ store, bus, player, artwork, actions }) {
 
   const element = h('div', { class: 'queue-panel', hidden: true }, head, body)
 
+  /*
+   * 计数行右侧顺带显示睡眠状态（「40 首 · 睡眠 15 分钟」）。
+   * 队列**当参数传**进来 —— render 里的 playlist 是局部变量，函数定义在外面拿不到它
+   * （上一版就是踩了这个，运行期 ReferenceError 把整个面板渲染搞坏了）。
+   * 数据源是 store，状态是唯一事实来源，不缓存第二份真相。
+   */
+  let sleepMinutes = store.get().settings.sleepTimerMinutes || 0
+  const paintCount = (queue) => {
+    const parts = [queue.length ? `${queue.length} 首` : '']
+    if (sleepMinutes) parts.push(`睡眠 ${sleepMinutes} 分钟`)
+    countLabel.textContent = parts.filter(Boolean).join(' · ')
+  }
+  store.subscribe((state) => {
+    const next = state.settings.sleepTimerMinutes || 0
+    if (next === sleepMinutes) return
+    sleepMinutes = next
+    paintCount(player.playlist.queue)
+  })
+
   function render () {
     const state = store.get()
     const playlist = player.playlist
@@ -43,7 +62,7 @@ export function createQueuePanel ({ store, bus, player, artwork, actions }) {
     const currentId = state.playback.trackId
 
     clear(body)
-    countLabel.textContent = queue.length ? `${queue.length} 首` : ''
+    paintCount(queue)
 
     if (!queue.length) {
       body.appendChild(h('div', { class: 'empty' },
