@@ -214,8 +214,19 @@ for (const [file, selector] of BASELINE) {
  *   · 想新增：先想清楚是不是真没有对应令牌；确认必须新增时，
  *     同步基准并在提交信息里说明原因（例如「新的画在图片上的文字」）。
  * 这样它挡得住「悄悄多出第二种写法」，又不会因为历史存量而报假警。
+ *
+ * 2026-10 修正基准：字号 5 → 8。原因不是放宽，而是**这条检查原来根本没看到
+ * library.css** —— 那个文件曾经是 UTF-16LE（见下面第 10 条编码守卫），
+ * 用 utf8 读出来每个字符后面跟一个 \u0000，所有正则都匹配不上。
+ * 转成 UTF-8 之后，它的三处「塞进小控件里的微字号」才第一次被算进来：
+ *   library.css  .wheel__mark 9px（16px 高的字母索引）
+ *   library.css  .track-row__badge 10px（15px 高的歌词角标）
+ *   library.css  .knob__hint 8px（旋钮里的提示）
+ * 这三处都是「控件本身很小、用 --text-caption(11px) 会散架」的刻意写法，
+ * 所以同步基准；同一次里 .knob__letter 的 17px 已改成 var(--text-headline)、
+ * 两处裸红 #ff453a 已改成 var(--danger)（那两个才是真错：亮色主题下红色不对）。
  */
-const NAKED_BASELINE = { color: 44, duration: 9, fontSize: 5 }
+const NAKED_BASELINE = { color: 44, duration: 9, fontSize: 8 }
 
 const naked = { color: 0, duration: 0, fontSize: 0 }
 for (const file of cssFiles) {
@@ -357,7 +368,31 @@ if (duplicateSelectors.length) {
   for (const line of duplicateSelectors) console.log('  · ' + line)
 }
 
-/* ---------------- 10. 报告 ---------------- */
+/* ---------------- 10. 编码守卫：必须是 UTF-8 ---------------- */
+/*
+ * 这是一次真实漏检换来的规则：library.css 曾经是 UTF-16LE（带 BOM），
+ * 而本文件到处用 readFileSync(file, 'utf8') —— 读出来每个字符后面跟一个 \u0000，
+ * 于是上面每一条按行/按正则的检查对它全部静默失效。结果是「检查通过」是假的：
+ * 那个文件里 36 处圆角/阴影、4 处裸字号从来没被查过（合并前统计：圆角 113 vs 88）。
+ *
+ * 所以先保证文件本身是干净的 UTF-8：UTF-16 BOM、UTF-8 BOM、含 NUL 字节，一律报错。
+ * 这三条只要命中一条，其它规则的结论就不可信，退出码必须是 1。
+ */
+for (const file of [...cssFiles, ...jsFiles, ...otherFiles]) {
+  if (!fs.existsSync(file)) continue
+  const buf = fs.readFileSync(file)
+  const utf16Bom = buf.length >= 2 && ((buf[0] === 0xFF && buf[1] === 0xFE) || (buf[0] === 0xFE && buf[1] === 0xFF))
+  const utf8Bom = buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF
+  const nulAt = buf.indexOf(0)
+  if (!utf16Bom && !utf8Bom && nulAt < 0) continue
+  const what = utf16Bom ? '是 UTF-16（带 BOM）' : utf8Bom ? '带 UTF-8 BOM' : `含 NUL 字节（偏移 ${nulAt}）`
+  problems.push(
+    `${rel(file)}  ${what} —— 本文件用 utf8 读它，读出来是乱码，下面所有按行/按正则的检查都会静默失效；` +
+    '请转成不带 BOM 的 UTF-8'
+  )
+}
+
+/* ---------------- 11. 报告 ---------------- */
 for (const problem of problems) console.log(problem)
 
 console.log(
