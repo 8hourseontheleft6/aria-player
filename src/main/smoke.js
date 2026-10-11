@@ -5191,7 +5191,16 @@ async function runSmoke ({ win, ctx }) {
       actions.setSetting({ sleepTimerMinutes: 15 })
       await settle(400)
       window.setTimeout = realSetTimeout
-      const afterFire = store.get().settings.sleepTimerMinutes
+      /*
+       * 复位要绕一圈 IPC + 主进程 250ms 防抖，必须等它落定再断言。
+       * 原来只 await settle(400) 就读值 —— 机器一忙就假失败（报「到点复位为 15」），
+       * 而这条假失败看起来像真回归，白追了两轮。按项目里其它检查的做法改成轮询。
+       */
+      let afterFire = store.get().settings.sleepTimerMinutes
+      for (let i = 0; i < 40 && afterFire !== 0; i++) {
+        await settle(50)
+        afterFire = store.get().settings.sleepTimerMinutes
+      }
       actions.setSetting({ sleepTimerMinutes: 0 })
       actions.setView('songs')
       await settle(200)
