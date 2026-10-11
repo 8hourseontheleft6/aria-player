@@ -74,7 +74,51 @@ async function runScreenshots ({ win }) {
     return true`)
 
   const shots = [
-    ['01-library.png', '歌曲列表', async () => {}],
+    ['01-library.png', '歌曲列表', async () => {
+      // 几何量测：内容区顶部那条「白条」到底是谁画的（工具条 vs 大标题 vs 舞台）
+      await evaluate(win, `
+        console.log('[band] ' + JSON.stringify((() => {
+          const vis = (sel) => [...document.querySelectorAll(sel)].find((el) => el.getBoundingClientRect().height > 0)
+          const b = (sel) => { const el = vis(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } }
+          const cs = (sel) => { const el = vis(sel); if (!el) return null; const c = getComputedStyle(el); return { pos: c.position, bg: c.backgroundColor, bf: (c.backdropFilter || c.webkitBackdropFilter || '').slice(0, 40), h: c.height, top: c.top } }
+          const tb = vis('.view-toolbar')
+          const r = tb ? tb.getBoundingClientRect() : null
+          const body = vis('.view-body')
+          return {
+            dpr: devicePixelRatio, iw: innerWidth, ih: innerHeight,
+            toolbar: b('.view-toolbar'), header: b('.view-header'), body: b('.view-body'),
+            stage: b('.stage'), inner: b('.content-inner'),
+            toolbarStyle: cs('.view-toolbar'),
+            stuck: tb ? tb.classList.contains('is-stuck') : null,
+            scrollTop: body ? body.scrollTop : null,
+            at: r ? [[500, r.top + 4], [500, r.top + r.height / 2], [500, r.bottom + 6], [500, r.bottom + 40]].map((p) => {
+              const el = document.elementFromPoint(p[0], p[1])
+              return { x: p[0], y: Math.round(p[1]), el: el ? (el.className || el.tagName).toString().slice(0, 28) : null }
+            }) : null
+          }
+        })())); return true`)
+      await sleep(200)
+      // 滚动后（is-stuck）的样子：工具条现在没有底色，靠 0.5px 分隔线 + 紧凑标题立结构，
+      // 这里量一下它在滚动前后到底有没有出现，量完滚回去（截图仍是未滚动状态）
+      await evaluate(win, `
+        const vp = document.querySelector('.tracklist__viewport')
+        const tb = [...document.querySelectorAll('.view-toolbar')].find((el) => el.getBoundingClientRect().height > 0)
+        const title = tb ? tb.querySelector('.view-toolbar__title') : null
+        const read = (tag) => {
+          const c = getComputedStyle(tb)
+          const t = title ? getComputedStyle(title) : null
+          return { tag, stuck: tb.classList.contains('is-stuck'), border: c.borderBottomColor, bw: c.borderBottomWidth, titleOpacity: t ? t.opacity : null, bg: c.backgroundColor }
+        }
+        const before = read('未滚动')
+        if (vp) { vp.scrollTop = 120; vp.dispatchEvent(new Event('scroll')) }
+        await new Promise((r) => setTimeout(r, 400))
+        const after = read('滚动 120px')
+        if (vp) { vp.scrollTop = 0; vp.dispatchEvent(new Event('scroll')) }
+        await new Promise((r) => setTimeout(r, 400))
+        console.log('[stuck] ' + JSON.stringify({ before, after, restored: read('滚回顶部') }))
+        return true`)
+      await sleep(300)
+    }],
     ['02-now-playing.png', '正在播放（含歌词）', async () => {
       await evaluate(win, `window.__aria.actions.openNowPlaying({ lyrics: true }); return true`)
       await sleep(1400)

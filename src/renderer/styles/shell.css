@@ -531,12 +531,28 @@ html[data-platform="darwin"] .titlebar {
   align-items: center;
   gap: 10px;
   height: 52px;
+  /*
+   * 厚度固定：.view-root 是 flex 列，兄弟节点里只要有一个是 height:100%
+   * （歌曲列表页的 .tracklist 曾经就是），整列溢出就会按比例压缩所有可压缩项 ——
+   * 实测这条工具栏被压成 43px，而专辑页是 52px，切视图时内容区顶部那一条的
+   * 厚度会跟着变。列表那一项现在已经改成 flex:1，这里再上一道锁。
+   */
+  flex: none;
   /* 与各视图内容的左右内边距保持一致（专辑/艺人页 24px、设置页 24px），
      否则标题的左边线会比内容缩进 4px，整排看起来是歪的 */
   padding: 0 24px;
-  background: color-mix(in srgb, var(--bg-content) 80%, transparent);
-  backdrop-filter: blur(var(--blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  /*
+   * 刻意**不给**这条工具栏自己的底色与毛玻璃。
+   *
+   * 它下面从来不会有内容滚过去：各视图的滚动容器都是它的兄弟节点
+   * （.browse-scroll / .tracklist__viewport / .wall-viewport），
+   * 工具条本身不需要遮挡任何东西，那层毛玻璃只是多画一层半透明白 ——
+   * 叠在 .stage 的半透明白之上，内容区顶部就凭空多出一条比周围亮一档的横条
+   * （用户反馈「中间有一个很明显的条」）。去掉之后，顶部与下方是同一个面。
+   *
+   * 吸顶后仍然留一条 0.5px 的分隔线（见下面的 .is-stuck），
+   * 与 iOS 滚动后出现细线的做法一致，不需要靠底色来撑出结构。
+   */
   border-bottom: 0.5px solid transparent;
   transition: border-color var(--dur) var(--ease-ios);
 }

@@ -11,7 +11,14 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  height: 100%;
+  /*
+   * 用 flex:1 而不是 height:100%。
+   * height:100% 是「和父容器一样高」，叠在工具栏 + 大标题下面必然溢出，
+   * 于是 flex 列按比例压缩所有可压缩项 —— 工具栏被压掉 9px（52 → 43），
+   * 大标题也被压掉 11px（83 → 72）。flex:1（basis 0）才是「吃掉剩下的高度」，
+   * 与 .browse-scroll / .wall-viewport / .browse-detail__tracks 的写法一致。
+   */
+  flex: 1;
   /* 右侧滚动轮盘是绝对定位的，锚在这里 */
   position: relative;
 }
