@@ -34,7 +34,22 @@ function rowLift (transform) {
 }
 
 async function evaluate (win, expression) {
-  const result = win.webContents.executeJavaScript(`(async () => { ${expression} })()`, true)
+  /*
+   * 前置：把光标移到 (1,1)（离开任何控件）再执行注入代码。
+   * 自动化运行里，上一条检查派发的鼠标事件留下的 :hover 会让后续
+   * elementFromPoint 命中测试打到别的元素 —— 表现为「元素 opacity=1、
+   * 明明可见却 hit=false」，同一提交 160/160 与 158/160 交替出现。
+   * 在这个统一入口修一次，覆盖全部注入检查（112 处调用）。
+   */
+  const neutralMouse = `
+    try {
+      const opts = { bubbles: true, clientX: 1, clientY: 1 }
+      document.body.dispatchEvent(new MouseEvent('mousemove', opts))
+      document.body.dispatchEvent(new MouseEvent('mouseout', opts))
+    } catch (error) { /* 无所谓，只是尽力清掉 hover */ }
+    await new Promise((resolve) => setTimeout(resolve, 60))
+  `
+  const result = win.webContents.executeJavaScript(`(async () => { ${neutralMouse} ${expression} })()`, true)
   // executeJavaScript 在页面卡死时可能永不 settle，加一层超时保护。
   // 注意给足余量：自检里有些步骤本身就要等好几秒（惯性、防抖、动画收敛），
   // 而这个环境的 rAF 被节流到 ~7fps，15s 很容易被正常等待撞到。
