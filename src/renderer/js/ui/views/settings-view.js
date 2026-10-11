@@ -204,6 +204,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
   const clearSearchHits = () => {
     for (const row of scroll.querySelectorAll('.settings__row')) row.classList.remove('is-search-hit')
+    for (const group of scroll.querySelectorAll('.settings__group')) group.classList.remove('is-search-hit-group')
     searchHits = []
     searchIndex = -1
   }
@@ -215,13 +216,26 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       searchCount.textContent = ''
       return
     }
+    /*
+     * 两处都查：设置项行 + 分组标题。
+     * 只查行是不够的 —— 用户常按分组名找东西（「封面缓存」「在线音源」「快捷键」），
+     * 而这些名字不一定出现在成员行的文本里，于是搜出来是「无匹配」。
+     * 分组命中时把它的所有行也算命中：整块亮起来，符合直觉。
+     */
+    const hit = new Set()
     for (const row of scroll.querySelectorAll('.settings__row')) {
-      const text = (row.textContent || '').toLowerCase()
-      if (text.includes(query)) {
-        row.classList.add('is-search-hit')
-        searchHits.push(row)
-      }
+      if ((row.textContent || '').toLowerCase().includes(query)) hit.add(row)
     }
+    for (const group of scroll.querySelectorAll('.settings__group')) {
+      const title = (group.querySelector('.settings__group-title')?.textContent || '').toLowerCase()
+      if (!title.includes(query)) continue
+      group.classList.add('is-search-hit-group')
+      for (const row of group.querySelectorAll('.settings__row')) hit.add(row)
+    }
+    // 按 DOM 顺序排，回车逐个跳转才符合阅读顺序
+    searchHits = [...hit].sort((a, b) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
+    for (const row of searchHits) row.classList.add('is-search-hit')
     searchCount.textContent = searchHits.length ? searchHits.length + ' 项匹配' : '无匹配'
     if (searchHits.length) {
       searchIndex = 0

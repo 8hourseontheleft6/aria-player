@@ -717,3 +717,11 @@ html[data-reduce-motion='true'] .settings__card:hover {
   transform: none;
   box-shadow: none;
 }
+
+/*
+ * 分组标题命中：按分组名搜（如「封面缓存」）时整块亮起，
+ * 标题吃专辑色，和行命中的淡底呼应。
+ */
+.settings__group.is-search-hit-group .settings__group-title {
+  color: var(--tint);
+}

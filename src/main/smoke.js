@@ -5119,6 +5119,32 @@ async function runSmoke ({ win, ctx }) {
       `搜索框存在=${settingsSearchHistoryCheck.hasInput}；提交后历史首条「${settingsSearchHistoryCheck.first}」（共 ${settingsSearchHistoryCheck.count} 条）；` +
       `资料库搜索历史未被影响=${settingsSearchHistoryCheck.libraryUntouched}`)
 
+    /* 设置内搜索也要能命中「分组标题」—— 用户常按分组名找东西 */
+    const groupSearchCheck = await evaluate(win, `
+      const settle = async (ms = 250) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      actions.setView('settings')
+      await settle(500)
+      const input = document.querySelector('.search--settings input')
+      input.value = '封面缓存'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await settle(600)
+      const groups = document.querySelectorAll('.settings__group.is-search-hit-group').length
+      const rows = document.querySelectorAll('.settings__row.is-search-hit').length
+      const count = (document.querySelector('.search--settings .search__count') || {}).textContent || ''
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await settle(400)
+      const cleared = document.querySelectorAll('.settings__row.is-search-hit').length
+      actions.setView('songs')
+      await settle(200)
+      return { groups, rows, count, cleared }
+    `)
+    record('设置内搜索能命中分组标题（如「封面缓存」）',
+      groupSearchCheck.groups >= 1 && groupSearchCheck.rows >= 1 && groupSearchCheck.cleared === 0,
+      `输入「封面缓存」→ 命中分组 ${groupSearchCheck.groups} 个、行 ${groupSearchCheck.rows} 行、计数「${groupSearchCheck.count}」；` +
+      `清空后残留高亮 ${groupSearchCheck.cleared} 处（应为 0）`)
+
     /* ---------- 系统集成 ---------- */
 
     const { createNoteIcon, createTransportIcon, WHITE, BLACK } = require('./util/raster')
