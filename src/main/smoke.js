@@ -133,6 +133,31 @@ async function runSmoke ({ win, ctx }) {
     console.log(`${ok ? '  ✓' : '  ✗'} ${name}${detail ? ` — ${detail}` : ''}`)
   }
 
+  /*
+   * 兜底总结：无论流程怎么中断，都要留下结论。
+   * 以前总结只在文件末尾打印，一旦某个检查抛异常/超时被杀/整轮跑不完
+   * （实测跑到 136/160 就没有总结行），这一轮自检等于白跑 —— 排查时最伤。
+   */
+  let summaryPrinted = false
+  const printSummary = (tag) => {
+    if (summaryPrinted) return
+    summaryPrinted = true
+    const tail = tag ? '（' + tag + '）' : ''
+    console.log('\n=== 自检结束' + tail + '：' + (checks.length - failed.length) + '/' + checks.length + ' 通过 ===\n')
+    if (failed.length) for (const item of failed) console.log('  ✗ ' + item)
+  }
+  process.on('exit', () => printSummary('提前退出'))
+  process.on('uncaughtException', (error) => {
+    console.log('\n[smoke] 未捕获异常：' + (error && error.stack ? error.stack : error))
+    printSummary('异常中断')
+    process.exit(1)
+  })
+  process.on('unhandledRejection', (error) => {
+    console.log('\n[smoke] 未处理的 Promise 拒绝：' + (error && error.stack ? error.stack : error))
+    printSummary('异常中断')
+    process.exit(1)
+  })
+
   console.log('\n=== Aria 自检 ===\n')
 
   try {
@@ -5338,7 +5363,7 @@ async function runSmoke ({ win, ctx }) {
   }
 
   const failed = checks.filter((check) => !check.ok)
-  console.log(`\n=== 自检结束：${checks.length - failed.length}/${checks.length} 通过 ===\n`)
+  printSummary('')
   if (failed.length) {
     console.log('未通过：')
     for (const check of failed) console.log(`  · ${check.name}${check.detail ? ` — ${check.detail}` : ''}`)
