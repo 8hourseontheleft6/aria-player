@@ -159,6 +159,11 @@ npx electron scripts/preview.js docs/screenshots/01-library.png 104
 界面改动请先读 **[docs/DESIGN.md](docs/DESIGN.md)** —— 间距/圆角/阴影/动效的规则
 与例外都在那里，能自动检查的部分由 `check-styles` 兜住。
 
+动手之前也建议读一遍 **[docs/CONVENTIONS.md](docs/CONVENTIONS.md)**：提交粒度、
+验证顺序（check → smoke → shots，且要真的看图）、改文件的规矩（为什么不要用
+`node -e` / PowerShell 改文件）、代码约定（先声明后使用、rect 而不是 offsetTop、
+页面内搜索不写 `ui.query`…）以及这一路踩过的环境坑。
+
 ## 性能
 
 ### 拖动的每帧开销（媒体墙）
