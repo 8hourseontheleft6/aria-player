@@ -284,6 +284,25 @@ async function runScreenshots ({ win }) {
           const head = settingsScroll ? settingsScroll.parentElement.querySelector('.view-header__title') : null
           const groupTitles = [...document.querySelectorAll('.settings__group-title')]
           console.log('[geom] ' + JSON.stringify({
+            rowDetail: [...document.querySelectorAll('.settings__row')].slice(0, 14).map((r) => {
+              const rect = r.getBoundingClientRect()
+              const sw = r.querySelector('.switch')
+              const sel = r.querySelector('select')
+              const btn = r.querySelector('.btn')
+              const slider = r.querySelector('.slider')
+              const kind = sw ? 'switch' : (sel ? 'select' : (slider ? 'slider' : (btn ? 'button' : 'text')))
+              const node = sw || sel || slider || btn
+              const nb = node ? node.getBoundingClientRect() : null
+              const title = r.querySelector('.settings__row-title')
+              const tb = title ? title.getBoundingClientRect() : null
+              return {
+                t: (r.textContent || '').trim().slice(0, 6),
+                rowH: Math.round(rect.height),
+                kind,
+                ctrlH: nb ? Math.round(nb.height) : null,
+                lineH: tb ? Math.round(tb.height) : null
+              }
+            }),
             rowHeights: uniq(rows.map((r) => r.h)),
             titleXs: uniq(rows.map((r) => r.titleX)),
             infoOffsetY: uniq(rows.map((r) => (r.infoMidY != null && r.titleMidY != null) ? Math.round((r.infoMidY - r.titleMidY) * 10) / 10 : null)),

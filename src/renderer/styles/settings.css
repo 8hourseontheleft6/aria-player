@@ -57,7 +57,13 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 44px;
+  /*
+   * 统一行高：Apple 的设置列表是同一档行高，而这里的行高原本由控件自身高度决定
+   * （开关 31 → 行 47、下拉 30 → 46、按钮 26 / 文字 22 → 44），扫一眼就能看出参差。
+   * 提到 48px 之后所有短控件行都对齐同一档；控件仍按行内垂直居中。
+   */
+  min-height: 48px;
+  /* 「当前频响」那行是例外：行里嵌着频响曲线，比别的行高 2px 是正常的，别去"修"它 */
   padding: 8px 14px;
   position: relative;
 }
