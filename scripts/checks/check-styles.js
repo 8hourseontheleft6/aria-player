@@ -3,11 +3,13 @@
 /**
  * 开发用：守住设计语言的底线（详见 docs/DESIGN.md）。
  *
- * 检查三件事：
+ * 检查四件事：
  *   1. border-radius 必须用 --radius-* 变量（0 和 50% 例外）；
  *   2. box-shadow 必须引用变量，或者是「细环 / 取色发光」这类刻意写法；
  *   3. var(--x) 引用的变量必须真的定义过 —— 令牌名字写错时静默失效是
  *      CSS 最坑的失败模式，这里直接报出来。
+ *   4. 各视图的左右内边距必须是同一条基准（24px）—— 标题与内容差 4px 时
+ *      说不出哪里不对，但整排看着就是歪的（见 DESIGN.md「左右基准线」）。
  *
  * 变量定义既可能来自 CSS（tokens.css 等），也可能来自 JS（运行期
  * setProperty 写入的动态色），两边都算。
@@ -115,12 +117,96 @@ if (fs.existsSync(tokensFile)) {
   }
 }
 
-/* ---------------- 4. 报告 ---------------- */
+/* ---------------- 4. 左右基准线 ---------------- */
+/*
+ * 各视图的左边线要落在同一条竖线上：工具栏标题、封面网格、设置页内容、详情页头部。
+ * 这条是踩出来的 —— 工具栏曾经 20px 而内容是 24px，标题比内容少缩进 4px，
+ * 整排看着是歪的却说不出哪里不对（用户先察觉，代码里看不出来）。新增视图也应加进这张表。
+ */
+const BASELINE = [
+  ['shell.css', '.view-toolbar'],
+  ['browse.css', '.cover-grid'],
+  ['browse.css', '.browse-detail'],
+  ['settings.css', '.settings']
+]
+
+/**
+ * 取某个选择器对应的所有声明体。
+ * 故意不用正则匹配整块：选择器可能带缩进，而且 .settings__group / .browse-detail.is-collapsed
+ * 这类「以它开头但不是它」的写法必须先排除，否则会取到别的规则、把正常写法误判成违规。
+ */
+function ruleBodies (source, selector) {
+  const out = []
+  let from = 0
+  for (;;) {
+    const at = source.indexOf(selector, from)
+    if (at < 0) break
+    from = at + selector.length
+    const open = source.indexOf('{', from)
+    if (open < 0) break
+    if (!/^[\s,]*$/.test(source.slice(from, open))) continue
+    const close = source.indexOf('}', open)
+    if (close < 0) break
+    out.push(source.slice(open + 1, close))
+  }
+  return out
+}
+
+/** 取声明体里的左右内边距（支持 padding: a / a b / a b c / a b c d） */
+function horizontalPadding (body) {
+  const short = /padding:\s*([^;]+);/.exec(body)
+  if (!short) return null
+  const parts = short[1].trim().split(/\s+/)
+  const px = (token) => {
+    const match = /^(\d+)px$/.exec(token || '')
+    return match ? Number(match[1]) : null
+  }
+  if (parts.length <= 2) {
+    const value = px(parts[parts.length - 1])
+    return value === null ? null : { left: value, right: value }
+  }
+  const left = px(parts[1])
+  const right = px(parts[3] === undefined ? parts[1] : parts[3])
+  return left === null || right === null ? null : { left, right }
+}
+
+let checkedBaseline = 0
+for (const [file, selector] of BASELINE) {
+  const full = path.join(STYLES, file)
+  if (!fs.existsSync(full)) {
+    problems.push(`基准线检查：找不到 ${file}`)
+    continue
+  }
+  const bodies = ruleBodies(fs.readFileSync(full, 'utf8'), selector)
+  if (bodies.length === 0) {
+    problems.push(`基准线检查：${file} 里找不到 ${selector} 规则`)
+    continue
+  }
+  // 同一个选择器写多次时，只有最后一条带 padding 的生效
+  let effective = null
+  for (const body of bodies) {
+    const pad = horizontalPadding(body)
+    if (pad) effective = pad
+  }
+  if (!effective) {
+    problems.push(`基准线检查：${file} 的 ${selector} 没写左右内边距，无法判断是否对齐`)
+    continue
+  }
+  checkedBaseline++
+  if (effective.left !== 24 || effective.right !== 24) {
+    problems.push(
+      `src/renderer/styles/${file}  ${selector} 的左右内边距应为 24px（与其他视图同一条左边线），` +
+      `当前 左 ${effective.left}px / 右 ${effective.right}px`
+    )
+  }
+}
+
+/* ---------------- 5. 报告 ---------------- */
 for (const problem of problems) console.log(problem)
 
 console.log(
   `\n检查了 ${cssFiles.length} 个样式表：圆角 ${checkedRadius} 处、阴影 ${checkedShadow} 处，` +
-  `已定义令牌 ${defined.size} 个，问题 ${problems.length} 处`
+  `基准线 ${checkedBaseline} 处、已定义令牌 ${defined.size} 个，问题 ${problems.length} 处`
 )
 
 if (problems.length > 0) process.exit(1)
