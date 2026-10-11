@@ -2,9 +2,9 @@
 
 iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（原生 ES Module）。
 
-![tech](https://img.shields.io/badge/Electron-42-0a84ff) ![tech](https://img.shields.io/badge/渲染层-原生%20ESM-5e5ce6)
+![tech](https://img.shields.io/badge/Electron-43-0a84ff) ![tech](https://img.shields.io/badge/渲染层-原生%20ESM-5e5ce6)
 
-> 版本 `0.0.0-dev`：开发中，尚未发布正式版本，接口与数据结构仍可能变动。
+> 版本见 `package.json`（当前 `0.1.0-beta.32`）：开发中，尚未发布正式版本，接口与数据结构仍可能变动。
 
 ## 界面
 
@@ -85,7 +85,7 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
 - **变速**：0.5× – 2×（步进 0.05），可开关「保持音调」
 - **系统集成**：托盘图标与菜单、关闭窗口最小化到托盘、任务栏进度条与缩略图按钮（上一首/播放/下一首）、系统媒体键、Windows 系统媒体弹窗（含封面）
 - **自动同步**：可开启目录监听，音乐文件夹里增删文件后按扩展名过滤 + 防抖自动刷新资料库；把文件夹或歌曲直接拖进窗口即可导入/播放
-- **在线补全（默认关闭）**：本地没有歌词时向 LRCLIB 取时间轴歌词，没有封面时向 iTunes / Deezer 补 600×600 封面。全部请求由主进程发出，页面本身仍然不能联网，结果缓存在本地
+- **在线补全**：总开关默认开着，**歌词自动匹配**；**封面默认不补**（封面那一项默认关，需要时在设置里单独打开），开了之后本地没有封面时向 iTunes / Deezer 补 600×600。全部请求由主进程发出，页面本身仍然不能联网，结果缓存在本地
 - **在线音源（默认关闭，且不内置音源）**：提供的是「音源脚本宿主」——把 `.js` 音源脚本**从链接导入**、
   从本地文件导入，或直接放进 `<userData>/music-sources`，搜索时结果就会分成两块：
   **网络结果**（音源返回）与**本地结果**（原有的歌曲列表）。每条网络结果都能**直接播放**
@@ -94,6 +94,12 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
   脚本跑在 `vm` 沙箱里，只给 `request` / `crypto` / `zlib` / `Buffer` / 定时器，
   没有 `require`、`fs`、`process`。没有音源时「网络结果」那一块不会出现 ——
   接口说明见 [docs/EXTENDING.md](docs/EXTENDING.md)
+- **设置页的组织**：五个子标题（音乐库 / 播放与音效 / 外观与系统 / 在线与扩展 / 关于），
+  每个子标题下的设置分块**按子标题顺序自上而下排列**（不并排、不会被裁掉）。
+  点子标题会平滑滚到对应那一块并把它**顶到最上面**，子标题自身高亮；
+  手动滚动时高亮跟着当前所在的那一块走。工具栏右侧有**设置内搜索**：
+  一个词同时匹配设置项标题与说明文字，命中的行以专辑色淡底标出并显示匹配数量，
+  回车在命中项之间循环跳转、`Esc` 清空 —— 它只作用于设置页，不会过滤资料库
 - **界面**：iOS/macOS 风格 —— 毛玻璃材质、分组列表、大标题收起、iOS 开关 / 分段控件 / 滑块、跟随封面的动态配色、正在播放全屏页
 - **导航**：侧边栏可以收起（标题栏按钮 / 侧栏头部按钮 / `Ctrl+B`），收起后由标题栏正中的
   **灵动岛**接管视图切换（平时只显示当前视图，指向它才展开全部文字）——两者不会同时出现。
@@ -144,6 +150,10 @@ node scripts/checks/check-styles.js     # 设计语言守卫：圆角/阴影是�
 npx electron scripts/preview.js docs/screenshots/01-library.png 104
                          # 把截图转成文本预览（结构图 + 色相图），无图形界面时也能审版面
 ```
+
+> 如果 `npm run smoke` 长时间**没有任何输出**（连开头的标题都不打印），通常是自动化配置目录
+> 被写坏了 —— 多见于「自检运行中强制结束 electron」。删掉 `%TEMP%\aria-dev-profile` 后重跑即可，
+> 目录会自动重建（首次会重新扫库，所以第一轮偏慢）。
 
 界面改动请先读 **[docs/DESIGN.md](docs/DESIGN.md)** —— 间距/圆角/阴影/动效的规则
 与例外都在那里，能自动检查的部分由 `check-styles` 兜住。
@@ -368,7 +378,7 @@ src/
                                selectors（可见曲目） grouping（专辑/艺人索引） player-controller
       ui/                      titlebar sidebar library-view browse-view media-wall
                                cover-grid track-list player-bar now-playing-panel lyrics-view
-                               queue-panel settings-view slider overlay artwork-node track-menu
+                               queue-panel settings-view slider overlay artwork-node track-menu search-box
       plugins/                 内置示例插件
 ```
 
@@ -402,7 +412,7 @@ export const myPlugin = {
 
 - Chromium 能解码的格式有限：`.mp3 .m4a .aac .flac .wav .ogg/.opus .webm`。`.wma` / `.ape` 不支持（想支持需要引入解码器，见 EXTENDING 的 `audioTap` 一节）。
 - 歌词偏移采用「正值让歌词提前」的约定（`最终时间 = 标签时间 − offset`），与多数播放器一致；若你的歌词源习惯相反，负值即可。
-- 在线补全默认关闭，且只做「歌词 + 封面」。所有网络请求都在主进程发出，渲染层 CSP 依然禁止联网；缓存位于 `%APPDATA%\Aria\online-cache`（设置页可一键清空）。
+- 在线补全只做「歌词 + 封面」：总开关与歌词默认开着（本地没有歌词就自动去 LRCLIB 取），封面默认不补、需在设置里单独打开。所有网络请求都在主进程发出，渲染层 CSP 依然禁止联网；缓存位于 `%APPDATA%\Aria\online-cache`（设置页可一键清空）。
 - 在线封面宁可空着也不放错：只有专辑名或艺人名能对上时才采用（低于阈值的匹配会被丢弃）。Deezer 在部分网络下不可达，此时会自动只用 iTunes。
 
 （「平移后新露出的格子不加载封面」这个回退已经修掉了：原因与修法见上面的「性能 → 平移之后，封面要跟着补上」。）
