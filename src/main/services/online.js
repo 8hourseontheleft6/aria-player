@@ -445,7 +445,15 @@ function createOnlineService (ctx) {
       const cached = await readBinary(ARTIST_CACHE, key)
       if (cached) {
         stats.artists.hit++
-        return cached
+        /*
+         * 必须自己映射一层：readBinary 返回的是 { buffer, mime }，
+         * 而渲染层判的是 `artistResult.data`（见 plugins/online-media.js）。
+         * 这里曾经直接 `return cached` —— 于是**缓存命中的那位艺人反而没有头像**：
+         * 第一次打开（未命中）有图，图一落盘，第二次打开就退回字母占位；
+         * 磁盘上早就有缓存的那批艺人则永远只有字母。
+         * 旁边的 fetchCover 一直是对的写法（见它的 cached 分支），这里漏了。
+         */
+        return { mime: cached.mime, data: cached.buffer, cached: true }
       }
       stats.artists.miss++
       // 先用维基百科（免密钥、有本人照片），取不到再试 Deezer

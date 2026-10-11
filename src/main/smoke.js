@@ -4182,11 +4182,17 @@ async function runSmoke ({ win, ctx }) {
      */
     const avatarSrcs = avatarHits.map((item) => item.src).filter(Boolean)
     const avatarDistinct = avatarSrcs.length === avatarHits.length && new Set(avatarSrcs).size === avatarSrcs.length
+    /*
+     * 断言**三位都必须出图**，而不是「有一位成功就算过」。
+     * 最初写成 `> 0` 时，Taylor Swift 那条路坏着、另外两位走 Deezer 成功，检查照样是绿的 ——
+     * 一条只会「部分通过」的检查，等于给故障留了后门。
+     */
     record('艺人头像：详情页把在线头像插进 <img> 并解码（端到端，含渲染尺寸与不串台）',
-      avatarHits.length > 0 && avatarAllSquare && avatarDistinct && avatarHits.every((item) => item.rendered[0] > 0),
+      avatarHits.length === avatarProbe.length && avatarAllSquare && avatarDistinct &&
+        avatarHits.every((item) => item.rendered[0] > 0),
       avatarProbe.map((item) => `${item.name}：img=${item.hasImg ? '有' : '无'} 解码=${item.decoded ? '成功' : '无'} ` +
         `原始=${item.natural ? item.natural.join('×') : '—'} 渲染=${item.rendered ? item.rendered.join('×') : '—'} 用时=${item.elapsedMs}ms`).join('；') +
-      `；命中 ${avatarHits.length}/${avatarProbe.length} 位，正方判定=${avatarAllSquare ? '通过' : '不通过'}，` +
+      `；出图 ${avatarHits.length}/${avatarProbe.length} 位（必须全中），正方判定=${avatarAllSquare ? '通过' : '不通过'}，` +
       `各不相同的图像=${avatarDistinct ? '是' : '否（有串台）'}`)
 
     // 媒体墙
@@ -5571,6 +5577,40 @@ async function runSmoke ({ win, ctx }) {
       artistImage.hasData
         ? `${artistImage.provider} 取得 ${artistImage.mime}`
         : `未取到图片（error=${artistImage.error || '无'}、没匹配上=${artistImage.noMatch}）→ 渲染层显示占位图标`)
+
+    /*
+     * 艺人头像的**热路径**（磁盘缓存命中）也必须带 `data`。
+     *
+     * 同一个艺人连取两次：第一次未命中 → 联网 → 写盘；第二次命中 `readBinary`。
+     * 这条盯的是一个真实事故：`fetchArtist` 命中时直接 `return cached`，
+     * 而 `readBinary` 返回的是 `{ buffer, mime }` —— **没有 `data`**；
+     * 渲染层判 `artistResult.data` 为假 → 退回字母占位。
+     * 症状极具欺骗性：**第一次打开有图，图一落盘，第二次打开反而变成字母**；
+     * 而本机磁盘上早有缓存的那 10 位艺人（Taylor Swift、Coldplay…）则永远只有字母。
+     *
+     * 为什么必须单独写一条：上面那条端到端检查跑的是**冷路径**（自检结束时会清空在线缓存，
+     * 所以每轮开头都是未命中），暖路径从来没被覆盖过 —— 这正是漏掉的那一半。
+     * 另外必须用 `remote.online.artist` 直连：渲染层的封面服务有自己的内存缓存，
+     * 会把第二次请求挡在 IPC 之前，那样就测不到主进程这条路了。
+     */
+    const artistCacheCheck = await evaluate(win, `
+      const get = () => window.__aria.remote.online.artist({ name: 'Ed Sheeran' })
+      const first = await get()
+      const second = await get()
+      const shape = (r) => ({
+        hasData: Boolean(r && r.data && r.data.byteLength > 1000),
+        mime: (r && r.mime) || '',
+        cached: Boolean(r && r.cached),
+        keys: r ? Object.keys(r).sort().join(',') : '',
+        error: (r && r.error) || ''
+      })
+      return { first: shape(first), second: shape(second) }
+    `)
+    record('在线艺人头像：磁盘缓存命中的那一次也必须带 data（渲染层按 .data 判定）',
+      artistCacheCheck.first.hasData && artistCacheCheck.second.hasData,
+      `第一次 keys=[${artistCacheCheck.first.keys}] 带data=${artistCacheCheck.first.hasData}；` +
+      `第二次 keys=[${artistCacheCheck.second.keys}] 带data=${artistCacheCheck.second.hasData} cached=${artistCacheCheck.second.cached}` +
+      `（命中时若只有 buffer/mime、没有 data，界面就会退回字母占位）`)
 
     const cacheStats = await online.getStats()
     record('在线缓存落盘', cacheStats.files > 0,
