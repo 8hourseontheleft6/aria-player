@@ -5087,6 +5087,38 @@ async function runSmoke ({ win, ctx }) {
       navActiveFollow.length === 5 && navActiveFollow.every((item) => item.want === item.active),
       navActiveFollow.map((item) => `${item.want}→${item.active}`).join('　'))
 
+    /* 设置内搜索的历史：必须是单独一份，不能把资料库搜索历史挤掉 */
+    const settingsSearchHistoryCheck = await evaluate(win, `
+      const settle = async (ms = 200) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      const libraryBefore = [...(store.get().settings.searchHistory || [])]
+      actions.setView('settings')
+      await settle(400)
+      const input = document.querySelector('.search--settings input')
+      input?.focus()
+      await settle(200)
+      await actions.commitSettingsSearch('歌词')
+      await settle(400)
+      const mine = [...(store.get().settings.settingsSearchHistory || [])]
+      const libraryAfter = [...(store.get().settings.searchHistory || [])]
+      // 清掉，免得影响后面的检查与重复运行
+      await actions.clearSettingsSearchHistory()
+      actions.setView('songs')
+      await settle(200)
+      return {
+        hasInput: Boolean(input),
+        first: mine[0] || '',
+        count: mine.length,
+        libraryUntouched: JSON.stringify(libraryBefore) === JSON.stringify(libraryAfter)
+      }
+    `)
+    record('设置内搜索的历史单独存（不污染资料库搜索历史）',
+      settingsSearchHistoryCheck.hasInput === true &&
+      settingsSearchHistoryCheck.first === '歌词' &&
+      settingsSearchHistoryCheck.libraryUntouched === true,
+      `搜索框存在=${settingsSearchHistoryCheck.hasInput}；提交后历史首条「${settingsSearchHistoryCheck.first}」（共 ${settingsSearchHistoryCheck.count} 条）；` +
+      `资料库搜索历史未被影响=${settingsSearchHistoryCheck.libraryUntouched}`)
+
     /* ---------- 系统集成 ---------- */
 
     const { createNoteIcon, createTransportIcon, WHITE, BLACK } = require('./util/raster')

@@ -224,7 +224,13 @@
 /* ------------------------------ 详情页头部 ------------------------------ */
 
 .browse-detail {
-  padding: 4px 24px 18px;
+  /* 与设置页卡片共用一套语言（第 3 项）：圆角 / 阴影 / 玻璃底。
+     左右仍保持 24px，与工具栏标题、下方曲目列表同一条左边线 */
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--bg-window) 52%, transparent);
+  box-shadow: var(--elev-1);
+  backdrop-filter: blur(var(--blur));
+  padding: 14px 24px 18px;
   flex: none;
   transition: max-height var(--dur) var(--ease-ios), opacity var(--dur-fast) var(--ease-ios),
     padding var(--dur) var(--ease-ios);
