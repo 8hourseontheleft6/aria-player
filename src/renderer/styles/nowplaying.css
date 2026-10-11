@@ -185,6 +185,12 @@ html[data-platform="darwin"] .now-playing__topbar {
   flex-direction: column;
   gap: 2px;
   padding: 0 4px;
+  /*
+   * Apple Music 的正在播放：标题/歌手/专辑在封面下**居中**。
+   * 这里原来只有内层容器居中（art 164、controls 222 都是居中的），块内文字却是左对齐，
+   * 于是看起来"封面居中、标题却靠左"。实测：art x=164、info x=83（居中）、文字 x=87（左贴）。
+   */
+  text-align: center;
 }
 
 .now-playing__title {
