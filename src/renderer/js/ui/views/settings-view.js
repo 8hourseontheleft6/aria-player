@@ -480,6 +480,11 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     sleepTimerId = setTimeout(() => {
       sleepTimerId = null
       player.pause?.()
+      /*
+       * 到点给一句提示：否则用户只会发现「音乐自己停了」，不知道是定时器干的。
+       * 用 bus 的 ui:toast（事件名见 bus.js），不额外引入依赖。
+       */
+      bus.emit('ui:toast', { message: '睡眠定时器：已暂停播放', type: 'info' })
       actions.setSetting({ sleepTimerMinutes: 0 })
     }, minutes * 60 * 1000)
   }
