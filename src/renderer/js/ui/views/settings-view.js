@@ -469,14 +469,26 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
    * 放在设置视图里是因为视图本来就持有 player，且它在启动时就创建 ——
    * 离开设置页后定时器照样在跑，不必为它去改 app.js。
    */
+  const sleepValue = h('span', { class: 'settings__row-value' })
   let sleepTimerId = null
   let lastSleepMinutes = store.get().settings.sleepTimerMinutes || 0
+
+  /*
+   * 行内提示：「将在 N 分钟后暂停」。
+   * 二分查过一次：把绘制插在 player.pause / setSetting 之前时，自检里「到点复位」会失效。
+   * 所以这里的规矩是 —— **每次绘制都放在状态变更之后**，绘制出问题也挡不住复位。
+   */
+  const paintSleepNote = (minutes) => { sleepValue.textContent = minutes ? `将在 ${minutes} 分钟后暂停` : '' }
+
   const applySleepTimer = (minutes) => {
     if (sleepTimerId) {
       clearTimeout(sleepTimerId)
       sleepTimerId = null
     }
-    if (!minutes) return
+    if (!minutes) {
+      paintSleepNote(0)
+      return
+    }
     sleepTimerId = setTimeout(() => {
       sleepTimerId = null
       player.pause?.()
@@ -486,7 +498,9 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
        */
       bus.emit('ui:toast', { message: '睡眠定时器：已暂停播放', type: 'info' })
       actions.setSetting({ sleepTimerMinutes: 0 })
+      paintSleepNote(0)
     }, minutes * 60 * 1000)
+    paintSleepNote(minutes)
   }
   applySleepTimer(lastSleepMinutes)
   store.subscribe((state) => {
@@ -710,7 +724,10 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         }, options.map(([value, label]) =>
           h('option', { value: String(value), selected: (store.get().settings.sleepTimerMinutes || 0) === value }, label)))
         // .select 是**包裹层**类（负责配色与右侧箭头），要包在 <select> 外面
-        return h('div', { class: 'select' }, select)
+        return h('div', { class: 'settings__row-control' },
+          h('div', { class: 'select' }, select),
+          sleepValue,
+        )
       })()
     }),
       row({
