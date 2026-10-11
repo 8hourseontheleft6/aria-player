@@ -143,8 +143,18 @@ async function runSmoke ({ win, ctx }) {
     if (summaryPrinted) return
     summaryPrinted = true
     const tail = tag ? '（' + tag + '）' : ''
-    console.log('\n=== 自检结束' + tail + '：' + (checks.length - failed.length) + '/' + checks.length + ' 通过 ===\n')
-    if (failed.length) for (const item of failed) console.log('  ✗ ' + item)
+    /*
+     * 自己从 checks 过滤，不要引用 failed —— 它在文件末尾才声明，
+     * 走 "提前退出 / 异常中断" 路径时还没初始化，引用它会抛
+     * Cannot access 'failed' before initialization，兜底就白加了。
+     */
+    const bad = checks.filter((check) => !check.ok)
+    console.log('\n=== 自检结束' + tail + '：' + (checks.length - bad.length) + '/' + checks.length + ' 通过 ===\n')
+    if (bad.length) {
+      console.log('未通过：')
+      for (const check of bad) console.log(`  · ${check.name}${check.detail ? ` — ${check.detail}` : ''}`)
+      console.log('')
+    }
   }
   process.on('exit', () => printSummary('提前退出'))
   process.on('uncaughtException', (error) => {
@@ -5364,11 +5374,6 @@ async function runSmoke ({ win, ctx }) {
 
   const failed = checks.filter((check) => !check.ok)
   printSummary('')
-  if (failed.length) {
-    console.log('未通过：')
-    for (const check of failed) console.log(`  · ${check.name}${check.detail ? ` — ${check.detail}` : ''}`)
-    console.log('')
-  }
   return failed.length === 0
 }
 
