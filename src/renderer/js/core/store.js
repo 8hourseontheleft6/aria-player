@@ -98,6 +98,7 @@ export function initialState () {
       showFps: false,
       searchScope: 'basic',
       searchHistory: [],
+      settingsSearchHistory: [],
       jumpToMatchedLyric: true,
       playOnSingleClick: false,
       audioOutputDevice: '',

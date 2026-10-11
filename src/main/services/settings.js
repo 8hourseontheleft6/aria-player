@@ -25,6 +25,12 @@ const DEFAULTS = {
   // 搜索：basic = 只搜歌曲信息（歌名/专辑/艺人），deep = 连歌词、年份、流派、文件名等一起搜
   searchScope: 'basic',
   searchHistory: [],
+  /*
+   * 设置页自己的搜索历史。刻意与上面的 searchHistory 分开 ——
+   * 那个是资料库搜索（歌名 / 专辑 / 艺人 / 歌词）的历史，两边词义完全不同，
+   * 混在一起会让「搜过的设置词」把歌曲页的历史挤掉。
+   */
+  settingsSearchHistory: [],
   // 从歌词搜索结果里点开歌曲时，是否自动跳到命中的那一句
   jumpToMatchedLyric: true,
   // 列表里单击歌曲就直接播放（默认关闭：单击只选中，双击才播放）

@@ -687,10 +687,13 @@
    匹配到的行本类高亮（吃专辑色，与全局语言一致），回车在匹配项间跳转。
    ========================================================================== */
 .settings-search-wrap {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  /* 上方 position: relative：最近搜索面板（.search-panel）是绝对定位，
+     要靠它定位到搜索框正下方并右对齐 */
 }
 
 /*

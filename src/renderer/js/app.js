@@ -510,6 +510,27 @@ async function main () {
       return actions.setSetting({ searchHistory: [] })
     },
 
+    /*
+     * 设置页的搜索历史（与资料库搜索历史分开存，见 settings.js 的注释）。
+     * 同样只在「真的用了一次搜索」时记录，避免被 "t"/"ta" 这种半截词塞满。
+     */
+    commitSettingsSearch (query) {
+      const trimmed = String(query || '').trim()
+      if (!trimmed) return null
+      const history = store.get().settings.settingsSearchHistory || []
+      const next = [trimmed, ...history.filter((item) => item !== trimmed)].slice(0, SEARCH_HISTORY_LIMIT)
+      return actions.setSetting({ settingsSearchHistory: next })
+    },
+
+    removeSettingsSearch (query) {
+      const history = store.get().settings.settingsSearchHistory || []
+      return actions.setSetting({ settingsSearchHistory: history.filter((item) => item !== query) })
+    },
+
+    clearSettingsSearchHistory () {
+      return actions.setSetting({ settingsSearchHistory: [] })
+    },
+
     /** 自检用：直接跑一次歌词搜索（不走防抖），并把结果写进 store */
     async searchLyricsNow (query = store.get().ui.query) {
       const result = await runLyricsSearch(String(query || ''))

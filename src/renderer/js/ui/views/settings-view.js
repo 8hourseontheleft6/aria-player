@@ -85,6 +85,23 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     title: '清空搜索',
     onClick: () => clearSearch()
   }, icon('close', { className: 'icon icon--stroke' }))
+  /* 最近搜索面板：与歌曲页同一套 .search-panel 样式，挂在搜索框下面 */
+  const settingsHistoryList = h('div', { class: 'search-panel__history' })
+  const settingsSearchPanel = h('div', { class: 'search-panel', hidden: true },
+    h('div', { class: 'search-panel__row' },
+      h('span', { class: 'search-panel__label', text: '最近搜索' }),
+      h('button', {
+        class: 'search-panel__clear',
+        type: 'button',
+        title: '清空搜索历史',
+        onClick: () => actions.clearSettingsSearchHistory()
+      }, '清空')
+    ),
+    settingsHistoryList
+  )
+  // 面板里的交互不能把输入框的焦点抢走，否则下拉一开就关
+  on(settingsSearchPanel, 'mousedown', (event) => event.preventDefault())
+
   const searchBox = h('div', { class: 'search search--settings' },
     icon('search', { className: 'icon icon--stroke' }),
     searchInput,
@@ -93,7 +110,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   )
   const toolbar = h('div', { class: 'view-toolbar' },
     h('div', { class: 'view-toolbar__title', text: '设置' }),
-    h('div', { class: 'settings-search-wrap' }, searchBox)
+    h('div', { class: 'settings-search-wrap' }, searchBox, settingsSearchPanel)
   )
 
   const scroll = h('div', { class: 'settings scroll view-body' })
@@ -206,6 +223,40 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     scroll.scrollBy({ top: delta - 16, behavior: 'smooth' })
   }
 
+  /*
+   * 渲染「最近搜索」。点一条就把它填进输入框并立刻搜（同时重新提到历史最前），
+   * 与歌曲页的交互一致；没有历史时整块隐藏，不占地方。
+   */
+  const renderSettingsHistory = () => {
+    const history = store.get().settings.settingsSearchHistory || []
+    settingsHistoryList.replaceChildren(...history.map((item) => h('div', { class: 'search-panel__item' },
+      h('button', {
+        class: 'search-panel__term',
+        type: 'button',
+        title: `搜索「${item}」`,
+        onClick: () => {
+          searchInput.value = item
+          searchBox.classList.add('has-value')
+          runSearch(item)
+          actions.commitSettingsSearch(item)
+          searchInput.focus()
+          settingsSearchPanel.hidden = true
+        }
+      }, icon('clock', { className: 'icon icon--stroke' }), h('span', { text: item })),
+      h('button', {
+        class: 'search-panel__remove',
+        type: 'button',
+        title: '从历史中移除',
+        onClick: () => { actions.removeSettingsSearch(item); renderSettingsHistory() }
+      }, icon('close', { className: 'icon icon--stroke' }))
+    )))
+    settingsHistoryList.hidden = history.length === 0
+    return history.length > 0
+  }
+
+  on(searchInput, 'focus', () => { settingsSearchPanel.hidden = !renderSettingsHistory() })
+  on(searchInput, 'blur', () => { settingsSearchPanel.hidden = true })
+
   let searchTimer = null
 
   /* 清空：输入框、匹配高亮、计数、清空按钮显隐一起复位 */
@@ -227,6 +278,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   on(searchInput, 'keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault()
+      actions.commitSettingsSearch(searchInput.value)
       if (!searchHits.length) { runSearch(searchInput.value); return }
       searchIndex = (searchIndex + 1) % searchHits.length
       scrollToHit(searchIndex)
