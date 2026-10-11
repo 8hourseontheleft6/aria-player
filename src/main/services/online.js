@@ -62,34 +62,60 @@ function createOnlineService (ctx) {
     return run
   }
 
-  async function requestJson (url, { timeout = 9000 } = {}) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeout)
-    try {
-      const response = await net.fetch(url, {
-        signal: controller.signal,
-        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }
-      })
-      if (response.status === 404) return { notFound: true }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      return { data: await response.json() }
-    } finally {
-      clearTimeout(timer)
+  /**
+   * 带**一次重试**的请求。
+   *
+   * 为什么要有：冷启动（DNS + TLS 握手）或网络抖动时，第一次请求可能整段卡住、
+   * 被我们自己的超时定时器 abort —— 报错就是 `This operation was aborted`。
+   * 没有重试的代价不只是「少一次歌词」：
+   *   · 用户第一次点开一首歌的歌词就静默失败（要等下次刷新才有）；
+   *   · 更狠的是 Deezer —— coverFromDeezer / artistFromDeezer 一旦失败就把
+   *     整个会话的 Deezer 停用（`deezerDisabled`），一次抖动会让封面与头像
+   *     退到备选源或直接没有。
+   *
+   * 只重试「连接层 / 超时 / 响应解析」这类失败；**HTTP 状态码错误不重试**
+   * —— 对方已经明确答复了，重试只是白等一轮。
+   */
+  async function request (url, { timeout = 9000, binary = false, retry = 1 } = {}) {
+    for (let attempt = 0; ; attempt++) {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeout)
+      try {
+        const response = await net.fetch(url, {
+          signal: controller.signal,
+          headers: binary
+            ? { 'User-Agent': USER_AGENT }
+            : { 'User-Agent': USER_AGENT, Accept: 'application/json' }
+        })
+        // 404 只对 JSON 有意义（「这首歌没收录」也会缓存）；二进制 404 当错误处理
+        if (response.status === 404 && !binary) return { notFound: true }
+        if (!response.ok) throw httpError(response.status)
+        if (binary) {
+          return {
+            buffer: Buffer.from(await response.arrayBuffer()),
+            mime: response.headers.get('content-type') || 'image/jpeg'
+          }
+        }
+        return { data: await response.json() }
+      } catch (err) {
+        if (err && err.http === true) throw err
+        if (attempt >= retry) throw err
+        console.warn(`[online] 第 ${attempt + 1} 次请求失败（${err && err.message ? err.message : err}），` +
+          `400ms 后重试一次：${url}`)
+        await new Promise((resolve) => setTimeout(resolve, 400))
+      } finally {
+        clearTimeout(timer)
+      }
     }
   }
 
-  async function requestBinary (url, { timeout = 12000 } = {}) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeout)
-    try {
-      const response = await net.fetch(url, { signal: controller.signal, headers: { 'User-Agent': USER_AGENT } })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const buffer = Buffer.from(await response.arrayBuffer())
-      return { buffer, mime: response.headers.get('content-type') || 'image/jpeg' }
-    } finally {
-      clearTimeout(timer)
-    }
+  /** HTTP 状态码错误：标记成不可重试 */
+  function httpError (status) {
+    return Object.assign(new Error(`HTTP ${status}`), { http: true })
   }
+
+  const requestJson = (url, options) => request(url, options)
+  const requestBinary = (url, options) => request(url, { timeout: 12000, ...options, binary: true })
 
   /* ---------------- 缓存 ---------------- */
 

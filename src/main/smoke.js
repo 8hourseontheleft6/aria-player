@@ -5423,6 +5423,36 @@ async function runSmoke ({ win, ctx }) {
           ? `《${sample.artist} — ${sample.title}》取得 ${lyricResult.text.split('\n').length} 行，来源 ${lyricResult.provider}${lyricResult.synced ? '（含时间轴）' : '（纯文本）'}`
           : '该曲目在 LRCLIB 没有收录（未命中也会缓存 24 小时）')
 
+    /*
+     * 超时 / 网络抖动必须**重试一次**，否则一次抖动就静默少一次歌词，
+     * 更狠的是 Deezer 那条路会把整个会话的 Deezer 都停用（deezerDisabled）。
+     *
+     * 用故障注入验，而不是只读代码：把 net.fetch 包一层，让**第一次**调用直接抛网络错误，
+     * 第二次放行。歌名用随机串，保证缓存 key 不命中 —— 否则请求根本不会发出去，
+     * 这条检查就成了空跑（看不见的检查比没有更糟）。
+     */
+    {
+      const electron = require('electron')
+      const realFetch = electron.net.fetch
+      const probeTerm = `自检重试用曲 ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      let fetchCalls = 0
+      electron.net.fetch = async (url, options) => {
+        fetchCalls++
+        if (fetchCalls === 1) throw new Error('自检注入的网络错误')
+        return realFetch.call(electron.net, url, options)
+      }
+      let retryResult
+      try {
+        retryResult = await online.fetchLyrics({ title: probeTerm, artist: probeTerm, album: '', duration: 0 })
+      } finally {
+        electron.net.fetch = realFetch
+      }
+      record('在线请求失败会重试一次（超时/网络抖动的兜底）',
+        fetchCalls >= 2 && !retryResult.error,
+        `注入第一次失败后：net.fetch 被调用 ${fetchCalls} 次（应为 2），` +
+        `结果 error=${retryResult.error || '无'}、${retryResult.text ? '取到歌词' : '没收录（随机歌名本来就查不到，属正常）'}`)
+    }
+
     // 封面补全：用一首「有正式专辑名」的曲目（未知专辑在 iTunes 上匹配不到）
     const knownAlbumTrack = libraryService.getTracks().find((track) =>
       /imagine dragons/i.test(track.artist) && track.album && track.album !== '未知专辑') ||
