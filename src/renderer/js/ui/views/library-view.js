@@ -162,7 +162,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     if (!deep) {
       searchHint.textContent = '当前只搜索歌名、专辑与艺人'
     } else if (!state.ui.query.trim()) {
-      searchHint.textContent = '还会搜索歌词文件，以及年份、流派、文件名、编码格式'
+      searchHint.textContent = '还会搜索歌词文件，以及年份、流派、文件名、所在文件夹、编码与码率、无损/有损'
     } else if (lyrics?.scanning) {
       searchHint.textContent = '正在搜索歌词…'
     } else if (lyrics && lyrics.error) {
@@ -170,7 +170,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     } else if (lyrics) {
       searchHint.textContent = `已扫描 ${lyrics.scanned} 份歌词，命中 ${lyrics.matched} 首（${lyrics.elapsedMs}ms）`
     } else {
-      searchHint.textContent = '还会搜索歌词文件，以及年份、流派、文件名、编码格式'
+      searchHint.textContent = '还会搜索歌词文件，以及年份、流派、文件名、所在文件夹、编码与码率、无损/有损'
     }
     searchInput.placeholder = deep ? '搜索歌词、年份、流派…' : '搜索歌名、专辑、艺人'
   }
