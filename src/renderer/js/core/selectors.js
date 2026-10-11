@@ -83,7 +83,7 @@ export function matchesBasic (track, parts) {
 }
 
 /**
- * 深度匹配：除歌曲信息之外，还包括年份、流派、文件名、所在文件夹、编码格式。
+ * 深度匹配：除歌曲信息之外，还包括年份、流派、文件名、所在文件夹、路径、编码格式、比特率、采样率、有无损。
  * 歌词不在这里 —— 歌词在 .lrc 文件里，由主进程搜完把 id 交回来（见 ui.searchLyrics）。
  */
 export function matchesExtended (track, parts) {
