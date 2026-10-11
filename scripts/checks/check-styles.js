@@ -243,7 +243,84 @@ for (const kind of ['color', 'duration', 'fontSize']) {
   }
 }
 
-/* ---------------- 6. 报告 ---------------- */
+/* ---------------- 6. 缓动只走令牌 ---------------- */
+/*
+ * 缓动只用 --ease-ios（常规手感）与 --ease-out（弹出感）。唯一的例外是 linear：
+ * 进度条、宽度指示器这类「匀速推进」的动画本来就该线性，写 ease 反而怪
+ * （历史上那 4 处 linear 都在 width 过渡上，是刻意的）。
+ * 所以这条允许 linear，但裸的 ease / ease-in / ease-out / ease-in-out /
+ * cubic-bezier(...) 一律报出来 —— 目前 0 处，可以零容忍。
+ */
+let checkedEasing = 0
+for (const file of cssFiles) {
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+  lines.forEach((line, index) => {
+    const text = line.trim()
+    if (text.startsWith('*') || text.startsWith('/*')) return
+    if (!/(transition|animation)\s*:/.test(line)) return
+    // 先去掉 var(--ease-*) 这类合法引用再找裸值
+    const rest = line.replace(/var\(--ease-[a-z-]+\)/g, '')
+    const hit = /\b(ease|ease-in|ease-out|ease-in-out|cubic-bezier)\b/.exec(rest)
+    if (!hit) return
+    checkedEasing++
+    problems.push(
+      `${rel(file)}:${index + 1}  缓动应使用 --ease-ios / --ease-out（只有匀速动画才用 linear）：裸值 ${hit[1]}`
+    )
+  })
+}
+
+/* ---------------- 7. 内联样式里不许写颜色 ---------------- */
+/*
+ * JS 里给元素写 style 时若带颜色，就绕过了令牌和「亮暗成对」检查 ——
+ * 另一个主题下必然失配，而且是这份检查看不见的地方。
+ * 目前一处都没有，所以零容忍。
+ */
+for (const file of jsFiles) {
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+  lines.forEach((line, index) => {
+    if (!/style:\s*\{/.test(line)) return
+    if (!/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/.test(line)) return
+    problems.push(
+      `${rel(file)}:${index + 1}  内联样式里不要写颜色，改用令牌（--label / --fill / --bg / --separator 等）`
+    )
+  })
+}
+
+/* ---------------- 8. 卡片语言 ---------------- */
+/*
+ * 「卡片」是全应用同一种材料：设置页卡片与专辑/艺人详情头部必须引用同一组令牌。
+ * 只要求**引用到令牌**，不限制具体数值 —— 半透明度按场景微调是允许的
+ * （现在一处 86%、一处 52%）。规则见 DESIGN.md「材料与层次 → 卡片语言」。
+ */
+const CARDS = [
+  ['settings.css', '.settings__card'],
+  ['browse.css', '.browse-detail']
+]
+const CARD_TOKENS = ['var(--radius-xl)', 'var(--elev-1)', '--bg-window', 'var(--blur)']
+let checkedCards = 0
+for (const [file, selector] of CARDS) {
+  const full = path.join(STYLES, file)
+  if (!fs.existsSync(full)) {
+    problems.push(`卡片语言检查：找不到 ${file}`)
+    continue
+  }
+  const bodies = ruleBodies(fs.readFileSync(full, 'utf8'), selector)
+  if (bodies.length === 0) {
+    problems.push(`卡片语言检查：${file} 里找不到 ${selector} 规则`)
+    continue
+  }
+  const effective = bodies[bodies.length - 1]
+  checkedCards++
+  for (const token of CARD_TOKENS) {
+    if (!effective.includes(token)) {
+      problems.push(
+        `src/renderer/styles/${file}  ${selector} 作为卡片应引用 ${token}（见 DESIGN.md「卡片语言」）`
+      )
+    }
+  }
+}
+
+/* ---------------- 9. 报告 ---------------- */
 for (const problem of problems) console.log(problem)
 
 console.log(

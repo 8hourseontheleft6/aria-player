@@ -256,7 +256,14 @@ html[data-reduce-motion='true'] .row:hover {
 ## 五、怎么检查
 
 ```bash
-npm run check:styles   # 圆角/阴影是否走令牌、var() 是否都有定义
+npm run check:styles   # 设计语言的机器守卫，共八条：
+                       #   1 圆角、2 阴影必须走令牌
+                       #   3 var() 必须已定义
+                       #   4 亮暗两套主题必须成对
+                       #   5 左右基准线必须同为 24px
+                       #   6 裸值棘轮（颜色/时长/字号总量只减不增）
+                       #   7 缓动只走 --ease-*（linear 例外：匀速动画）
+                       #   8 内联样式里不许写颜色；卡片必须引用同一组令牌
 npm run check          # 上面这条 + 未使用 import + 注入脚本语法
 npm run shots          # 重新生成 docs/screenshots（人工看）
 npm run smoke          # 交互是否仍然可用
