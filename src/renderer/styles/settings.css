@@ -693,31 +693,17 @@
   margin-left: auto;
 }
 
-.settings-search {
-  width: 230px;
-  height: 28px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--fill-tertiary);
-  color: var(--label-2);
-  font-size: var(--text-footnote);
-  outline: none;
-  transition:
-    background var(--dur-fast) var(--ease-ios),
-    box-shadow var(--dur-fast) var(--ease-ios);
+/*
+ * 设置页搜索框：外观完全复用 components.css 里的 .search
+ * （圆角矩形 + 放大镜 + 清空按钮），这里只定宽度与计数文案，
+ * 不再自造药丸输入框 —— 那与专辑/艺人页的搜索框不是一副面孔。
+ */
+.search--settings {
+  width: 260px;
+  min-width: 0;
 }
 
-.settings-search::placeholder {
-  color: var(--label-3);
-}
-
-.settings-search:focus {
-  background: var(--fill-secondary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tint) 36%, transparent);
-}
-
-.settings-search__count {
+.search--settings .search__count {
   font-size: var(--text-caption);
   color: var(--label-3);
   white-space: nowrap;

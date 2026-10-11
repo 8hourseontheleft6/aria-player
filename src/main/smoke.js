@@ -168,6 +168,12 @@ async function runSmoke ({ win, ctx }) {
     process.exit(1)
   })
 
+  /*
+   * 排查提示：如果自检长时间没有任何输出（连下面这行标题都没打印），
+   * 多半是自动化配置目录被写坏了 —— 常见于「自检运行中强制结束 electron」。
+   * 处理：删掉 %TEMP%\aria-dev-profile 后重跑即可（会自动重建并重新扫库）。
+   * 实测：某次强杀后自检连续卡在启动、日志停在 220 字节；删目录后立刻恢复。
+   */
   console.log('\n=== Aria 自检 ===\n')
 
   try {

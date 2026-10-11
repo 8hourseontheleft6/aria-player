@@ -64,18 +64,36 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   let navClickTimer = null
   const sectionNav = h('div', { class: 'settings-nav' })
 
-  /* 设置内搜索：输入关键词直达对应的设置项（第 6 步） */
+  /*
+   * 设置内搜索（第 6 步）
+   *
+   * 外观复用全局 `.search`：放大镜 + 输入框 + 有内容才出现的清空按钮，
+   * 与专辑页 / 艺人页的搜索框同一套（见 widgets/search-box.js）。
+   * 区别只在行为：这里是在当前页内匹配设置项并滚动定位，不写 ui.query ——
+   * ui.query 是过滤资料库的，写进去会把歌曲页/专辑页一起改掉。
+   */
   const searchInput = h('input', {
-    class: 'settings-search',
     type: 'search',
     placeholder: '搜索设置（如 歌词 / 封面 / 快捷键）',
     'aria-label': '搜索设置项',
-    spellcheck: false
+    spellcheck: 'false'
   })
-  const searchCount = h('span', { class: 'settings-search__count' })
+  const searchCount = h('span', { class: 'search__count' })
+  const searchClear = h('button', {
+    class: 'search__clear',
+    type: 'button',
+    title: '清空搜索',
+    onClick: () => clearSearch()
+  }, icon('close', { className: 'icon icon--stroke' }))
+  const searchBox = h('div', { class: 'search search--settings' },
+    icon('search', { className: 'icon icon--stroke' }),
+    searchInput,
+    searchCount,
+    searchClear
+  )
   const toolbar = h('div', { class: 'view-toolbar' },
     h('div', { class: 'view-toolbar__title', text: '设置' }),
-    h('div', { class: 'settings-search-wrap' }, searchInput, searchCount)
+    h('div', { class: 'settings-search-wrap' }, searchBox)
   )
 
   const scroll = h('div', { class: 'settings scroll view-body' })
@@ -189,7 +207,18 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   }
 
   let searchTimer = null
+
+  /* 清空：输入框、匹配高亮、计数、清空按钮显隐一起复位 */
+  const clearSearch = () => {
+    searchInput.value = ''
+    searchTimer = null
+    searchBox.classList.remove('has-value')
+    runSearch('')
+  }
+
   on(searchInput, 'input', () => {
+    // 清空按钮的显隐沿用全局规则：.search.has-value .search__clear
+    searchBox.classList.toggle('has-value', Boolean(searchInput.value))
     // 输入时不立刻跳，避免页面在打字过程中乱晃
     clearTimeout(searchTimer)
     searchTimer = setTimeout(() => runSearch(searchInput.value), 260)
@@ -202,9 +231,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       searchIndex = (searchIndex + 1) % searchHits.length
       scrollToHit(searchIndex)
     } else if (event.key === 'Escape') {
-      searchInput.value = ''
-      searchTimer = null
-      runSearch('')
+      clearSearch()
       searchInput.blur()
     }
   })
