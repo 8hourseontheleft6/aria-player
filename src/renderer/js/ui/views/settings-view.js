@@ -223,8 +223,20 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 分组命中时把它的所有行也算命中：整块亮起来，符合直觉。
      */
     const hit = new Set()
+    /*
+     * 可搜文本 = 行的文本 + 该行所有 ⓘ 的 aria-label。
+     * 说明文字只存在 aria-label 里（infoIcon 的写法），行的 textContent 只有一个 i ——
+     * 所以不看 aria-label 的话，「匹配说明文字」这句承诺是空的：
+     * 用户按说明里的词找（如「麦克风」）会一无所获。
+     */
+    const searchableOf = (row) => {
+      const tips = [...row.querySelectorAll('.settings__info')]
+        .map((node) => node.getAttribute('aria-label') || '')
+        .join(' ')
+      return ((row.textContent || '') + ' ' + tips).toLowerCase()
+    }
     for (const row of scroll.querySelectorAll('.settings__row')) {
-      if ((row.textContent || '').toLowerCase().includes(query)) hit.add(row)
+      if (searchableOf(row).includes(query)) hit.add(row)
     }
     for (const group of scroll.querySelectorAll('.settings__group')) {
       const title = (group.querySelector('.settings__group-title')?.textContent || '').toLowerCase()

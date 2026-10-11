@@ -5145,6 +5145,29 @@ async function runSmoke ({ win, ctx }) {
       `输入「封面缓存」→ 命中分组 ${groupSearchCheck.groups} 个、行 ${groupSearchCheck.rows} 行、计数「${groupSearchCheck.count}」；` +
       `清空后残留高亮 ${groupSearchCheck.cleared} 处（应为 0）`)
 
+    /* 说明文字也要能搜到（它存在 ⓘ 的 aria-label 里，不在行的 textContent 里） */
+    const tipSearchCheck = await evaluate(win, `
+      const settle = async (ms = 250) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      actions.setView('settings')
+      await settle(500)
+      const input = document.querySelector('.search--settings input')
+      input.value = '麦克风'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await settle(600)
+      const rows = [...document.querySelectorAll('.settings__row.is-search-hit')]
+      const titles = rows.map((row) => (row.querySelector('.settings__row-title') || {}).textContent || '').join(' | ')
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await settle(400)
+      actions.setView('songs')
+      await settle(200)
+      return { count: rows.length, titles }
+    `)
+    record('设置内搜索能按说明文字找到设置项（搜「麦克风」）',
+      tipSearchCheck.count >= 1,
+      `搜「麦克风」→ 命中 ${tipSearchCheck.count} 行：${tipSearchCheck.titles.slice(0, 80)}`)
+
     /* ---------- 系统集成 ---------- */
 
     const { createNoteIcon, createTransportIcon, WHITE, BLACK } = require('./util/raster')
