@@ -178,6 +178,12 @@
   color: var(--label-2);
   white-space: nowrap;
   transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+  /*
+   * Apple 的分段/分类标签是 13px medium。原来 12px / 400 —— 比正文(15)小三档又偏轻，
+   * 选中项的胶囊（专辑色底）也显得单薄。用现成令牌 --text-subhead(13px)，不引入裸值。
+   */
+  font-size: var(--text-subhead);
+  font-weight: 500;
 }
 
 .settings-nav__item:hover {
