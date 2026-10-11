@@ -480,7 +480,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     sleepTimerId = setTimeout(() => {
       sleepTimerId = null
       player.pause?.()
-      actions.setSetting('sleepTimerMinutes', 0)
+      actions.setSetting({ sleepTimerMinutes: 0 })
     }, minutes * 60 * 1000)
   }
   applySleepTimer(lastSleepMinutes)
@@ -701,7 +701,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         const options = [[0, '关闭'], [15, '15 分钟'], [30, '30 分钟'], [45, '45 分钟'], [60, '1 小时'], [90, '1.5 小时']]
         const select = h('select', {
           'aria-label': '睡眠定时器时长',
-          onChange: (event) => actions.setSetting('sleepTimerMinutes', Number(event.currentTarget.value))
+          onChange: (event) => actions.setSetting({ sleepTimerMinutes: Number(event.currentTarget.value) })
         }, options.map(([value, label]) =>
           h('option', { value: String(value), selected: (store.get().settings.sleepTimerMinutes || 0) === value }, label)))
         // .select 是**包裹层**类（负责配色与右侧箭头），要包在 <select> 外面

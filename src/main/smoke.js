@@ -5168,6 +5168,39 @@ async function runSmoke ({ win, ctx }) {
       tipSearchCheck.count >= 1,
       `搜「麦克风」→ 命中 ${tipSearchCheck.count} 行：${tipSearchCheck.titles.slice(0, 80)}`)
 
+    /* 睡眠定时器：把 setTimeout 换成立即执行，于是不必等 15 分钟就能验到点行为 */
+    const sleepTimerCheck = await evaluate(win, `
+      const settle = async (ms = 250) => { await new Promise((r) => window.setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      actions.setView('settings')
+      await settle(500)
+      const select = document.querySelector('select[aria-label="睡眠定时器时长"]')
+      const optionCount = select ? select.options.length : 0
+      const labels = select ? [...select.options].map((o) => o.textContent).join('/') : ''
+      // 注意：setSetting 收的是对象补丁（这里曾经写成两参数，导致永远读回 0）
+      actions.setSetting({ sleepTimerMinutes: 15 })
+      let armed = 0
+      for (let i = 0; i < 40 && armed !== 15; i++) {
+        await settle(50)
+        armed = store.get().settings.sleepTimerMinutes
+      }
+      const realSetTimeout = window.setTimeout
+      window.setTimeout = (fn) => { realSetTimeout(fn, 0); return 0 }
+      actions.setSetting({ sleepTimerMinutes: 0 })
+      await settle(50)
+      actions.setSetting({ sleepTimerMinutes: 15 })
+      await settle(400)
+      window.setTimeout = realSetTimeout
+      const afterFire = store.get().settings.sleepTimerMinutes
+      actions.setSetting({ sleepTimerMinutes: 0 })
+      actions.setView('songs')
+      await settle(200)
+      return { optionCount, labels, armed, afterFire }
+    `)
+    record('睡眠定时器：到点暂停并复位（把 setTimeout 换成立即执行来验）',
+      sleepTimerCheck.armed === 15 && sleepTimerCheck.afterFire === 0 && sleepTimerCheck.optionCount >= 5,
+      `选项 ${sleepTimerCheck.optionCount} 个 [${sleepTimerCheck.labels}]；选中 15 → 落盘 ${sleepTimerCheck.armed}；到点复位为 ${sleepTimerCheck.afterFire}（应为 0）`)
+
     /* ---------- 系统集成 ---------- */
 
     const { createNoteIcon, createTransportIcon, WHITE, BLACK } = require('./util/raster')
