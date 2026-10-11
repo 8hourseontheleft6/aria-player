@@ -43,10 +43,14 @@
 }
 
 .settings__card {
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
-  box-shadow: 0 0 0 0.5px var(--separator), var(--elev-1);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--bg-window) 86%, transparent);
+  box-shadow: var(--elev-1);
   overflow: hidden;
+  backdrop-filter: blur(var(--blur));
+  transition: box-shadow var(--dur) var(--ease-ios);
+  width: 100%;
+  max-width: none;
 }
 
 .settings__row {
@@ -465,10 +469,6 @@
 }
 
 /* 单列下卡片吃满整行 */
-.settings__card {
-  width: 100%;
-  max-width: none;
-}
 
 /*
  * 说明文字最多两行：之前长短不一（有的两行、有的四行），行高参差看着乱。
@@ -652,13 +652,6 @@
 }
 
 /* 标签框：与播放页卡片同一套圆角 / 阴影 / 模糊底 */
-.settings__card {
-  border-radius: var(--radius-xl);
-  box-shadow: var(--elev-1);
-  background: color-mix(in srgb, var(--bg-window) 86%, transparent);
-  backdrop-filter: blur(var(--blur));
-  transition: box-shadow var(--dur) var(--ease-ios);
-}
 
 /* 悬停轻微抬起，与媒体墙的悬停语言一致 */
 .settings__card:hover {

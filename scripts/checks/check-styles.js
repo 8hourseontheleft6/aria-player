@@ -309,7 +309,13 @@ for (const [file, selector] of CARDS) {
     problems.push(`卡片语言检查：${file} 里找不到 ${selector} 规则`)
     continue
   }
-  const effective = bodies[bodies.length - 1]
+  /*
+   * 看所有匹配声明体的**并集**，而不是「最后一条」：
+   * 共享选择器（`.settings__field, … , .settings__card { min-width: 0 }`）也会被匹配到，
+   * 它排在真正的卡片定义后面时，会把卡片定义顶掉 —— 这次合并重复规则时才暴露出来
+   * （当时四类 token 全被报缺失，是假失败）。
+   */
+  const effective = bodies.join('\n')
   checkedCards++
   for (const token of CARD_TOKENS) {
     if (!effective.includes(token)) {
