@@ -65,9 +65,17 @@
 1. **不要用 `node -e` 改文件**。PowerShell 对引号、反斜杠、模板字符串的转义规则
    和 JS 不一样，写着写着就把脚本喂坏了（本次踩了三次，每次都要重来）。
    一律：**写成脚本文件**，或者用编辑工具做**字面替换**。
-2. **不要用 PowerShell 改 JSON**。`Get-Content -Raw | ConvertFrom-Json` 会按 ANSI
-   读 UTF-8，中文变乱码、写回去就是截断的文件（真的把 `package.json` 写坏过一次）。
-   改 JSON 一律用 **Node**：`JSON.parse` → 改字段 → `JSON.stringify(p, null, 2)`。
+2. **不要用 PowerShell 的 `Get-Content` / `Set-Content` / `Out-File` 改任何文本文件**
+   （尤其 JSON 和含中文的源码）。两个坑会叠在一起：
+   · 5.1 下 `Get-Content -Raw` 默认按 **ANSI** 读，UTF-8 的中文当场变乱码，写回去文件就毁了；
+   · `-Encoding utf8` 会写 **BOM**，`package.json` 带 BOM 会让 npm 直接报 `JSON.parse` 失败。
+   这条规则**原来就写在这里**（只提了 JSON 与 ANSI），结果这次改版本号时两条又一起中招：
+   `Get-Content -Raw` 读出乱码 + `Set-Content -Encoding utf8` 写了 BOM，只能 `git checkout --` 回退重做。
+   所以现在写死：**改文件一律用 Node 脚本**
+   （`fs.readFileSync(p, 'utf8')` → 改 → `fs.writeFileSync(p, text, 'utf8')`），
+   或 `.NET` 的显式无 BOM UTF-8：
+   `[IO.File]::WriteAllText($p, $text, (New-Object Text.UTF8Encoding($false)))`。
+   改 JSON 用 `JSON.parse` → 改字段 → `JSON.stringify(p, null, 2)`。
 3. **PowerShell 里 `$name:` 会被当成盘符**。`"$f:$n"` 报错/出错值，写成 `"${f}:${n}"`。
 4. **改含模板字符串的代码，用 PowerShell 单引号字符串最稳**：单引号里反引号与 `$` 都是字面量，
    `${...}`、反引号都不会被 shell 吃掉（这条是踩了四次 `node -e` 之后总结的）。
