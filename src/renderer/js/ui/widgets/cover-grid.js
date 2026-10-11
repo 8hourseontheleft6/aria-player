@@ -65,7 +65,18 @@ export function createArtistRows ({ lazy, onOpen }) {
 
     for (const item of items) {
       const avatar = h('div', { class: 'artist-row__avatar' })
-      lazy.observe(avatar, item.artworkTrack, 'artist')
+      /*
+       * 艺人头像**按艺人名在线查**（伪曲目 artistOnly），不再用 item.artworkTrack。
+       *
+       * 列表里原来传的是该艺人某首歌的专辑封面 —— 碰到合作曲目就把另一位挂上去：
+       * 用户举例「搜 Ed Sheeran，头像却是 Taylor Swift」（他的曲目里混着 Taylor 的合作专辑），
+       * 截图里 阿肆 一度显示成一张菜的照片。
+       * 详情页早就是按名查的，列表一直漏着；现在两处走同一条路 —— 同一个 onlineKey，
+       * 所以同一张图在列表与详情之间是复用的（自检里有一条正是比对两处的 src）。
+       * 查不到就显示首字母占位（渲染层不回落专辑封面），与详情页的取舍一致。
+       */
+      avatar.dataset.initial = (item.name || '?').trim().charAt(0).toUpperCase()
+      lazy.observe(avatar, { artistOnly: true, artist: item.name }, 'artist')
 
       fragment.appendChild(h('button', {
         class: 'artist-row',

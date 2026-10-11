@@ -184,6 +184,8 @@
   place-items: center;
   color: var(--label-4);
   box-shadow: var(--elev-1);
+  /* 与详情页同理：给绝对定位的 img 当包含块（居中的 grid 子项里 height:100% 会被原图长宽比顶掉） */
+  position: relative;
 }
 
 .artist-row__avatar img {
@@ -191,6 +193,8 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  position: absolute;
+  inset: 0;
 }
 
 .artist-row__avatar .icon {
@@ -957,11 +961,15 @@ html[data-reduce-motion='true'] .wall-tile.is-featured:hover .wall-tile__art img
 }
 
 /*
- * 艺人详情没有在线头像时：藏掉通用人形图标，显示名字首字母（Apple 的占位做法）。
+ * 艺人**详情页与列表行**没有在线头像时：藏掉通用人形图标，显示名字首字母（Apple 的占位做法）。
  * :has() 在 Electron 43（Chromium 154）可用，代码里本来也在用 —— 只在**没有 img** 时生效，
  * 所以真头像加载出来时不受影响。
+ *
+ * 列表行也吃这套规则，是因为列表现在也走「按艺人名在线查」：查不到（或还没回来）时
+ * 显示首字母，比一排通用人形图标更像"这里本来有内容"，也和详情页一致。
  */
-.browse-detail__avatar:not(:has(img)) .icon {
+.browse-detail__avatar:not(:has(img)) .icon,
+.artist-row__avatar:not(:has(img)) .icon {
   display: none;
 }
 
@@ -969,6 +977,14 @@ html[data-reduce-motion='true'] .wall-tile.is-featured:hover .wall-tile__art img
   content: attr(data-initial);
   /* 按 Apple 通讯录的比例：首字母约占圆径的四分之一（圆径约 190px） */
   font-size: calc(var(--text-large-title) * 1.5);
+  font-weight: 600;
+  color: var(--label-3);
+}
+
+.artist-row__avatar:not(:has(img))::after {
+  content: attr(data-initial);
+  /* 行内头像 46px：首字母约占圆径的 40%，与详情页同一手感 */
+  font-size: var(--text-body);
   font-weight: 600;
   color: var(--label-3);
 }

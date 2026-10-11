@@ -194,9 +194,19 @@ async function runScreenshots ({ win }) {
         return true`)
       await sleep(1600)
     }],
-    ['11-artists.png', '艺人列表', async () => {
+    ['11-artists.png', '艺人列表（头像按艺人名在线查，等首批到位再拍）', async () => {
       await evaluate(win, `window.__aria.actions.setView('artists'); return true`)
-      await sleep(1400)
+      await sleep(600)
+      /*
+       * 艺人头像现在是**按艺人名在线查**的（不再借某首歌的专辑封面），
+       * 所以首屏会先显示首字母占位、再逐个换成照片 —— 不等一下就会拍到"一屏首字母"。
+       * 第一批之前要付一次维基超时，之后每位约 0.3s（服务端串行 + 350ms 最小间隔），
+       * 所以这里给 25s 预算，够 6 位到位即可。
+       */
+      await waitFor(win,
+        `[...document.querySelectorAll('.artist-row__avatar img')].filter((img) => img.complete && img.naturalWidth > 0).length >= 6`,
+        { timeout: 25000, label: '艺人列表头像' })
+      await sleep(600)
     }],
     ['13-artist-detail.png', '艺人详情', async () => {
       await evaluate(win, `

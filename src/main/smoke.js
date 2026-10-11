@@ -5612,6 +5612,52 @@ async function runSmoke ({ win, ctx }) {
       `第二次 keys=[${artistCacheCheck.second.keys}] 带data=${artistCacheCheck.second.hasData} cached=${artistCacheCheck.second.cached}` +
       `（命中时若只有 buffer/mime、没有 data，界面就会退回字母占位）`)
 
+    /*
+     * 艺人**列表行**的头像必须与**详情页**是同一张（都是按艺人名在线查来的），
+     * 不能是「该艺人某首歌的专辑封面」。
+     *
+     * 这条盯的是用户报的第二个现象：搜索/列表里 Ed Sheeran 显示成 Taylor Swift 的脸 ——
+     * 因为 artist.artworkTrack 会挑到合作曲目所在的那张专辑（grouping.js 的 pickArtworkTrack）。
+     * 两处都走 onlineKey（`o:艺人|`）→ 渲染层的 blob 是同一个 URL；
+     * 一旦列表退回专辑封面，src 就会变成另一个 blob，这条立刻红。
+     */
+    const artistRowVsDetail = await evaluate(win, `
+      const { actions } = window.__aria
+      const waitImg = async (rootSel, budget = 12000) => {
+        const deadline = performance.now() + budget
+        while (performance.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 250))
+          const img = document.querySelector(rootSel)
+          if (img && img.complete && img.naturalWidth > 0) return img
+        }
+        return null
+      }
+      actions.setView('artists')
+      await new Promise((r) => setTimeout(r, 400))
+      const rows = [...document.querySelectorAll('.artist-row')].slice(0, 3)
+      const out = []
+      for (const row of rows) {
+        const key = row.dataset.key || ''
+        const rowImg = row.querySelector('.artist-row__avatar img')
+        out.push({ key, rowSrc: rowImg ? rowImg.getAttribute('src') : '', rowDecoded: Boolean(rowImg && rowImg.complete && rowImg.naturalWidth > 0), detailSrc: '', matched: false })
+        if (!rowImg) continue
+        actions.openArtist(key)
+        const detailImg = await waitImg('.browse-detail__avatar img')
+        actions.closeDetail()
+        await new Promise((r) => setTimeout(r, 200))
+        const last = out[out.length - 1]
+        last.detailSrc = detailImg ? detailImg.getAttribute('src') : ''
+        last.matched = Boolean(detailImg && last.rowSrc && last.rowSrc === last.detailSrc)
+        if (last.matched) break
+      }
+      actions.setView('songs')
+      return out`)
+    const rowMatched = artistRowVsDetail.find((item) => item.matched)
+    record('艺人列表行的头像与详情页是同一张（按艺人名在线查，不是某首歌的专辑封面）',
+      Boolean(rowMatched),
+      artistRowVsDetail.map((item) => `${item.key}：行出图=${item.rowDecoded ? '是' : '否'} 与详情同图=${item.matched ? '是' : '否'}`).join('；') ||
+      '前三行都没取到头像')
+
     const cacheStats = await online.getStats()
     record('在线缓存落盘', cacheStats.files > 0,
       `${cacheStats.files} 个文件 · ${Math.round(cacheStats.size / 1024)} KB · ${cacheStats.cacheRoot}`)
