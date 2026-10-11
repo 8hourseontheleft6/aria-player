@@ -62,7 +62,11 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   // 是否发生过手动滚动（点击定位不算）
   let navUserScrolled = false
   let navClickTimer = null
-  const sectionNav = h('div', { class: 'settings-nav' })
+  const sectionNav = h('div', {
+    class: 'settings-nav',
+    role: 'group',
+    'aria-label': '设置分类'
+  })
 
   /*
    * 设置内搜索（第 6 步）
@@ -1237,6 +1241,9 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     const highlightSection = (label) => {
       for (const item of sectionNav.children) {
         item.classList.toggle('is-active', item.dataset.section === label)
+        // 无障碍：当前分类标出来，读屏和自动化都好判断
+        if (item.dataset.section === label) item.setAttribute('aria-current', 'true')
+        else item.removeAttribute('aria-current')
       }
     }
 
@@ -1262,7 +1269,27 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       scroll.scrollBy({ top: delta - 8, behavior: 'smooth' })
     }
 
-    sectionNav.replaceChildren(...SECTIONS.map((section) => h('button', {
+    /*
+   * 方向键在分类之间移动（Home/End 到首尾）：这类「一排互斥选项」的常规操作。
+   * 移动的同时按点击处理 —— 于是键盘也能像鼠标一样跳分类。
+   * 用事件委托绑在容器上：视图会重渲染、按钮会重建，绑容器就不必反复解绑。
+   */
+  on(sectionNav, 'keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    const items = [...sectionNav.children]
+    if (items.length === 0) return
+    const current = items.indexOf(document.activeElement)
+    let next = current < 0 ? 0 : current
+    if (event.key === 'ArrowLeft') next = current <= 0 ? items.length - 1 : current - 1
+    else if (event.key === 'ArrowRight') next = current >= items.length - 1 ? 0 : current + 1
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = items.length - 1
+    event.preventDefault()
+    items[next].focus()
+    applySection(items[next].dataset.section || activeSection, true)
+  })
+
+  sectionNav.replaceChildren(...SECTIONS.map((section) => h('button', {
       class: 'settings-nav__item',
       type: 'button',
       text: section.label,
