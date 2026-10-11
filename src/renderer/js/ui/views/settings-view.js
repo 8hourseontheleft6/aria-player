@@ -116,6 +116,14 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   const scroll = h('div', { class: 'settings scroll view-body' })
 
   /*
+   * 大标题与子标题行都放进滚动区（与歌曲/专辑页同构：标题是内容的一部分）。
+   * 之前只有 view-toolbar__title，而它默认 opacity:0、要工具栏「吸顶」才浮现，
+   * 设置页又不滚动 → 整页从头到尾看不到「设置」二字（看图才发现）。
+   */
+  const pageHeader = h('div', { class: 'view-header' },
+    h('h1', { class: 'view-header__title', text: '设置' })
+  )
+  /*
    * 设置的说明文字统一走这个悬浮提示：鼠标停在 ⓘ 上（或 Tab 聚焦）才显示。
    *
    * 之前每条设置下面都挂着一两行说明，整页又长又碎。说明本身有用，但属于
@@ -176,6 +184,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
    */
   const navVersion = h('span', { class: 'settings-nav__version', text: '' })
   navRow.appendChild(navVersion)
+
   remote.app.info().then((info) => {
     navVersion.textContent = `Aria ${info?.version || ''}`
   }).catch(() => {})
@@ -289,7 +298,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   })
 
 
-  element.append(toolbar, navRow, scroll, infoLayer)
+  /*
+   * 大标题放在工具栏与子标题行之间（eBay…不，是 iOS 设置页的顺序：标题 → 分类 → 内容）。
+   * 刻意不把它塞进滚动区：那样要挪动子标题行的父节点，自检立刻报「分类 0 个」——
+   * 只是个标题，不值得动结构。
+   */
+  element.append(toolbar, pageHeader, navRow, scroll, infoLayer)
   // 滚动时气泡会跟丢，直接收起来
   on(scroll, 'scroll', hideTip, { passive: true })
 
