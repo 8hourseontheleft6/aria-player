@@ -261,7 +261,10 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         artistRows.setItems(artists)
       }
       artistsMeta.textContent = `${artists.length} 位艺人`
-      artistsHeader.subtitleNode.textContent = `${artists.length} 位艺人`
+      // 与专辑页同构：搜索时副标题写清「匹配了什么、命中多少」
+      artistsHeader.subtitleNode.textContent = state.ui.query
+        ? `匹配「${state.ui.query}」的 ${artists.length} 位艺人`
+        : `${artists.length} 位艺人`
       return
     }
 
