@@ -54,7 +54,10 @@
    读 UTF-8，中文变乱码、写回去就是截断的文件（真的把 `package.json` 写坏过一次）。
    改 JSON 一律用 **Node**：`JSON.parse` → 改字段 → `JSON.stringify(p, null, 2)`。
 3. **PowerShell 里 `$name:` 会被当成盘符**。`"$f:$n"` 报错/出错值，写成 `"${f}:${n}"`。
-4. 改完立刻 `node --check <文件>`；`.js` 改完再跑 `node scripts/checks/check-injected.js`
+4. **改含模板字符串的代码，用 PowerShell 单引号字符串最稳**：单引号里反引号与 `$` 都是字面量，
+   `${...}`、反引号都不会被 shell 吃掉（这条是踩了四次 `node -e` 之后总结的）。
+   同理，改 JSON 用 Node、改代码用单引号字符串或脚本文件。
+5. 改完立刻 `node --check <文件>`；`.js` 改完再跑 `node scripts/checks/check-injected.js`
    （注入到渲染层的代码写在模板字符串里，多一个括号肉眼很难发现）。
 
 ## 四、代码约定（每一条都踩过）
