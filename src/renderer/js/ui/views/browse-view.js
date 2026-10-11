@@ -245,8 +245,11 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         })))
       }
       albumsMeta.textContent = `${albums.length} 张专辑`
+      // 命中 0 时给一句明确的回答，而不是「…的 0 张专辑」（读起来像故障）
       albumsHeader.subtitleNode.textContent = state.ui.query
-        ? `匹配「${state.ui.query}」的 ${albums.length} 张专辑`
+        ? (albums.length
+            ? `匹配「${state.ui.query}」的 ${albums.length} 张专辑`
+            : `没有匹配「${state.ui.query}」的专辑`)
         : `${albums.length} 张专辑 · ${state.library.tracks.length} 首歌曲`
       albumsScroll.scrollTop = 0
       return
@@ -263,7 +266,9 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
       artistsMeta.textContent = `${artists.length} 位艺人`
       // 与专辑页同构：搜索时副标题写清「匹配了什么、命中多少」
       artistsHeader.subtitleNode.textContent = state.ui.query
-        ? `匹配「${state.ui.query}」的 ${artists.length} 位艺人`
+        ? (artists.length
+            ? `匹配「${state.ui.query}」的 ${artists.length} 位艺人`
+            : `没有匹配「${state.ui.query}」的艺人`)
         : `${artists.length} 位艺人`
       return
     }

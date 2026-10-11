@@ -545,7 +545,9 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     if (state.ui.query) {
       const parts = normalizeForSearch(state.ui.query).split(/\s+/).filter(Boolean)
       headerSubtitle.textContent = parts.length
-        ? `匹配「${state.ui.query}」的 ${tracks.length} 首 · ${formatDurationLong(total)}`
+        ? (tracks.length
+            ? `匹配「${state.ui.query}」的 ${tracks.length} 首 · ${formatDurationLong(total)}`
+            : `没有匹配「${state.ui.query}」的歌曲`)
         : `${tracks.length} 首 · ${formatDurationLong(total)}`
     } else {
       headerSubtitle.textContent = `${tracks.length} 首 · ${formatDurationLong(total)}`
