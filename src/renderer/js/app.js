@@ -1399,8 +1399,16 @@ async function main () {
       }
 
       if (mod && event.key.toLowerCase() === 'f') {
-        actions.setView('songs')
-        libraryView.focusSearch()
+        /*
+         * 人在设置页时，「搜索」指的显然是设置项，而不是把他扔到歌曲页去。
+         * 设置页自己那只搜索框只作用于本页（不写 ui.query），所以就地聚焦即可；
+         * 其它视图维持原行为：切到歌曲页并聚焦资料库搜索。
+         */
+        if (store.get().ui.view === 'settings') settingsView.focusSearch()
+        else {
+          actions.setView('songs')
+          libraryView.focusSearch()
+        }
         event.preventDefault()
         return
       }

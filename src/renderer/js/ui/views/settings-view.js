@@ -1354,5 +1354,16 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
   })
 
   render()
-  return { element, render }
+  return {
+    element,
+    render,
+    /**
+     * 让 Ctrl+F 在设置页聚焦到设置内搜索（与歌曲页同一套肌肉记忆）。
+     * 这里的搜索只作用于本页，不会写 ui.query，所以不会连带过滤资料库。
+     */
+    focusSearch: () => {
+      searchInput.focus()
+      searchInput.select()
+    }
+  }
 }
