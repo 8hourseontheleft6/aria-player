@@ -185,30 +185,21 @@ PNG 也会不一样。想证明"渲染没变"，得用 `npm run audit` 的计算
 | 媒体墙的拖拽与缩放 | 中键与 Alt+左键两条路径都已实现（media-wall.js:625/626 的判定），滚轮缩放也在；自检侧已有 10 条媒体墙检查（方块数/密度/聚焦块/打开专辑/正方形/行节奏/二维画布/建 DOM 耗时等） |
 | m3u 导入 / 导出 | **确实没有**（全库无 m3u / 导入播放列表 / 导出播放列表，`showOpenDialog` 只用于添加音乐文件夹）—— 属"从没做过"的新能力，播放列表是它的天然归属 |
 
-## 十、待查（明确记下来，别当成已完成）
+## 十、已结案的坑（附根因，供以后遇到类似症状时对照）
 
-### sleepTimerMinutes 的持久化没验证成功
+### sleepTimerMinutes 存不进去（已修复）
 
-做睡眠定时器时加了这个设置项（settings.js 的 DEFAULTS、store.js 镜像、设置页一行下拉）。功能代码与文档都在，但**持久化这一步没验证通过**：
+**症状**：自检里写 `actions.setSetting({ sleepTimerMinutes: 15 })` 后读回一直是 0（等 300ms、改成最多 2 秒轮询都一样）。
 
-- 自检里调 `actions.setSetting('sleepTimerMinutes', 15)`，等 300ms 读回是 0；改成最多 2 秒的轮询后**仍然是 0**。
-- 也就是说：**设置页那个下拉到底能不能存下选择，目前不确定** —— 如果 setSetting 对新键不生效，那这个功能是坏的。
-- 与其留一条失败或可能误报的检查，我先把那条检查撤了（会误报的检查比没有更糟），但**不能把它当成做完了**。
+**根因有两层，第二层才是真的**：
 
-**2025 更新：已经查到确切原因了（修 store 层级之后仍然读不到 15，于是继续查）**
+1. `store.js` 里那行插错了层级 —— 我按锚点 `settingsSearchHistory: []` 插入时用了 2 空格缩进，而该锚点在 6 空格处，
+   于是键掉进了别的嵌套对象，`store.get().settings.sleepTimerMinutes` 是 `undefined`，被 `|| 0` 兜成 0。
+2. 更关键：`actions.setSetting` 收的是**对象补丁**（项目里一律 `actions.setSetting({ showFps: value })`），
+   而我这两处写成了 `(键, 值)`：`actions.setSetting('sleepTimerMinutes', 15)` —— 传进去的字符串被当成补丁，**什么都不会发生**。
+   所以功能是真坏的（下拉选什么都不存），自检也永远读回 0（它自己就没写成功）。
 
-`actions.setSetting` 的签名是**对象补丁**，不是 (键, 值)：
+**修法**：两处都改成 `actions.setSetting({ sleepTimerMinutes: … })`；自检用「把 `window.setTimeout` 临时换成立即执行」的办法验到点行为（不必等 15 分钟）。
+结果是 `164/164` 通过，读数从 0 变成 15。
 
-```js
-await actions.setSetting({ playlists })     // 项目里的正确用法
-```
-
-而我在两处都写成了两参数形式 —— **设置页那个下拉的 onChange，以及自检里**：
-
-```js
-actions.setSetting('sleepTimerMinutes', 15)   // ✗ 传进去的是个字符串，被当成补丁，什么都不会发生
-```
-
-所以：**功能确实是坏的**（下拉选了什么都不会存下），而不是"没验证"。同时这也解释了自检为什么永远读回 0 —— 它自己就没写成功。
-
-**下一轮第一件事（很具体）**：把设置页下拉的 onChange 改成 `actions.setSetting({ sleepTimerMinutes: Number(...) })`，自检里同样改法；然后恢复检查（把 `window.setTimeout` 换成立即执行，不必等 15 分钟）。
+**教训**：调用别人的 API 前先看一眼项目里已有的用法（`grep setSetting` 一下就能发现签名不同），比照着印象写快得多。
