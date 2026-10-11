@@ -1,0 +1,24 @@
+#!/bin/sh
+#
+# 提交信息守卫：剥掉开头的 BOM（U+FEFF）。
+#
+# 为什么需要：Windows PowerShell 5.1 的 `Out-File -Encoding utf8` 会写 UTF-8 BOM，
+# 用它写提交信息文件（`git commit -F`）就会把 BOM 带进提交标题 ——
+# `git log --oneline` 每一行前面多一个看不见的字符（本仓库曾有 39 条这样）。
+# 这个钩子把 BOM 就地剥掉，写消息的方式再怎么错也不会污染历史。
+#
+# 启用（每个克隆一次）：
+#   git config core.hooksPath scripts/git-hooks
+#
+# 这里是 sh，git 在 Windows 下用自带的 git-bash 执行，od/grep 都可用。
+
+msg_file="$1"
+[ -f "$msg_file" ] || exit 0
+
+# 头三个字节是 EF BB BF 就跳过它重写
+if [ "$(head -c 3 "$msg_file" | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+  tail -c +4 "$msg_file" > "$msg_file.bomtmp" && mv "$msg_file.bomtmp" "$msg_file"
+  echo "[commit-msg] 已剥掉提交信息开头的 BOM（别再用 Out-File -Encoding utf8 写消息文件）"
+fi
+
+exit 0
