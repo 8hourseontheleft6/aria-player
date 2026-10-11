@@ -13,6 +13,16 @@ export function artworkKey (track) {
   if (!track) return null
   if (track.artworkFile) return `f:${track.artworkFile}`
   if (track.artworkEmbedded) return `e:${track.albumArtist}|${track.album}|${track.artist}`
+  /*
+   * 艺人头像的伪曲目（artistOnly：只有艺人名）也要有自己的 key。
+   *
+   * 没有 key 就返回 null 时，懒加载那边的去重是「节点上的 artKey === 这次的 key」，
+   * 而所有伪曲目的 key 都是空串 —— 于是插上第一张头像之后，换到另一位歌手时
+   * 判断为「图就是这个条目的」直接返回，圆里一直留着上一位的脸（自检里
+   * 「各不相同的图像」这条抓到的就是它：三位艺人拿到的是同一个 blob URL）。
+   * 给了 key，节点复用时的去重、缓存、串台判断才都成立。
+   */
+  if (track.artistOnly) return `artist:${track.artist || track.albumArtist || ''}`
   return null
 }
 

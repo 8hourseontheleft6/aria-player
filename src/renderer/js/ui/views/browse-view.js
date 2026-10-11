@@ -311,11 +311,10 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         // 艺人头像走**在线按名查**（伪曲目 artistOnly）：不再拿合作曲目的专辑封面顶替，
         // 查不到就显示占位图标（见 plugins/online-media.js 的 artworkProvider）
         /*
-     * 无在线头像时用**首字母**占位（Apple 在通讯录/音乐里就是这么做的），比一个通用人形图标
-     * 更像"这里本来有内容"。样式侧用 :has() 判断有没有真的 img，只在没图时才显示。
-     */
-    artistAvatar.dataset.initial = (artist.name || '?').trim().charAt(0).toUpperCase()
-    lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
+         * 无在线头像时用**首字母**占位（Apple 在通讯录/音乐里就是这么做的），比一个通用人形图标
+         * 更像"这里本来有内容"。样式侧用 :has() 判断有没有真的 img，只在没图时才显示。
+         */
+        artistAvatar.dataset.initial = (artist.name || '?').trim().charAt(0).toUpperCase()
         artistGrid.setItems(artist.albumList.map((album) => ({
           key: album.key,
           title: album.name,
@@ -326,6 +325,17 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
         artistAlbumStrip.style.display = artist.albumList.length > 1 ? '' : 'none'
         artistTrackList.setTracks(artist.tracks)
       }
+
+      /*
+       * 头像这一行放在**上面的 if 之外**：每次显示这位艺人的详情都重新观察一次。
+       *
+       * 踩过的坑（实机「点进详情还是没有照片」）：它原本写在
+       * `if (currentDetailKey !== 'artist:…')` 里面 —— 同一位歌手第二次点进来时
+       * key 没变、这一行根本不执行；于是"旧版本失败过一次"的歌手在升级到修好的版本后
+       * **永远不会重试**。observe() 自带 artKey 去重（图就是这个条目的就直接返回），
+       * 所以重复调用没有额外开销。
+       */
+      lazy.observe(artistAvatar, { artistOnly: true, artist: artist.name }, 'artist')
       return
     }
 

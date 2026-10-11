@@ -260,6 +260,55 @@ PNG 也会不一样。想证明"渲染没变"，得用 `npm run audit` 的计算
 
 ## 十、已结案的坑（附根因，供以后遇到类似症状时对照）
 
+### 艺人头像永远出不来：一个功能坏在四处，而自检一直是绿的
+
+**症状**：用户反馈「歌词都能搜到，艺人头像还是搜不出来，一直是首字母占位」。
+设置里 `onlineArtists` 是开着的，而主进程那条在线头像自检（`online.fetchArtist`）**始终通过**。
+
+**四个根因，缺一不可**（后三个在备用分支 `wip/artist-avatar-online` 里早就修过，但**从没合进主线**）：
+
+1. **渲染层根本没请求**（真正的主因）：`artwork-node.js` 的 `paint()` 里
+   `if (!key) { replaceArt(node, null, ''); return }` —— 伪曲目（`artistOnly`，只有艺人名、没有 id）
+   的 `artworkKey()` 返回 null，于是**在所有请求之前就返回了**。主进程再正常也没用。
+   改成 `if (!artKey && !track?.artistOnly)` 放行（`resolveUrl` 对没有本地 key 的曲目本来就是走 providers）。
+2. **维基解析少剥了一层**：`requestJson` 返回的是 `{ data }`，而 `artistFromWikipedia` 直接当 JSON 用
+   （`payload.query.pages`）→ 永远解析不到图，静默回落到 Deezer。
+3. **缓存目录名**：艺人缓存当年换到 `artists2` 就是为了绕开被污染的 notFound 负缓存，主线用的还是 `artists`。
+   统一回 `ARTIST_CACHE = 'artists2'`（用户磁盘上那份还留着 9 张好图，正好复用）。
+4. **图片被裁成一条**：容器是 `display: grid; place-items: center` 的圆，居中的 grid 子项里
+   `height: 100%` 会被**原始长宽比**顶掉 —— 1801×2560 的照片渲染成 **140×199**，圆里只露中间一条。
+   `align-self/justify-self: stretch` **也没用**。隔离实验（同一份规则 + 一张 1801×2560 的图）：
+   `现状 140×199 · 拉伸 140×199 · 绝对定位 + 容器 position: relative → 140×140 ✓`。
+
+**顺带揪出的两个「换歌手照片不换」的串台**：
+5. `artworkKey()` 对伪曲目返回 null → 懒加载的去重是「节点上的 artKey === 这次的 key」，
+   而所有伪曲目都是空串 → 插上第一张之后，**换到另一位歌手会被判定「图就是这个条目的」直接返回**。
+   给伪曲目一个真 key（`artist:<名字>`）之后，去重 / 缓存 / 串台判断才都成立。
+6. 头像加载原本写在 `if (currentDetailKey !== 'artist:…')` 里 → 同一位歌手第二次点进详情不重新观察，
+   「旧版本失败过」的歌手永不重试。挪到 if 之外（`observe()` 自带 artKey 去重，重复调用无额外开销）。
+
+**为什么自检没抓到**：原有的「在线艺人头像」检查是在**主进程**里直接调 `online.fetchArtist` ——
+它只覆盖链路的后半段，而故障在**渲染层没发起请求**这前半段。
+现在补了从界面出发的端到端检查（打开艺人详情 → 等 `<img>` 出现 → 断言解码成功、渲染尺寸接近正方、
+**三位艺人的图像各不相同**），这条新检查当场就抓出了第 4、5 两处。
+一句话教训：**检查要覆盖「用户看到的那条链路」，而不是「我们最容易测的那一半」。**
+
+### 检查自己踩自己的坑：`settle()` 用了正准备替换掉的 `setTimeout`
+
+**症状**：睡眠定时器那条自检报「到点复位为 15（应为 0）」，看起来像功能坏了，而且连续复现两次。
+
+**根因**：这条检查为了不等 15 分钟，把渲染层的 `window.setTimeout` 换成立即执行；
+但它的等待函数是 `settle = (ms) => new Promise((r) => window.setTimeout(r, ms))` ——
+**内部用的正是被替换掉的那个 `window.setTimeout`**，于是 `await settle(400)` 实际不等待。
+装定时器的那次 store 订阅只要晚一个任务跑，就落到「已还原真 setTimeout」之后：
+定时器被用**真的** 15 分钟延时装上、永远不到点 → 假失败。
+
+**修法**：假定时器**一直装到断言完成**，窗口内的等待一律用提前存下的 `realSetTimeout`
+（`const sleepReal = (ms) => new Promise((r) => realSetTimeout(r, ms))`），并放进 `try/finally` 保证还原。
+
+**教训**：用替换全局 API 的方式做故障注入时，检查自己的辅助函数必须**绕开被替换的那个入口** ——
+否则「注入」变成「静默失效」，症状还会伪装成功能回归。
+
 ### 在线请求没有重试：一次超时就让歌词/封面/Deezer 一起退化
 
 **症状**：`npm run smoke` 里「在线歌词（LRCLIB）」报 `请求失败：This operation was aborted`、

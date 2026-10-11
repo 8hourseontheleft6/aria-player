@@ -4128,6 +4128,67 @@ async function runSmoke ({ win, ctx }) {
     record('艺人详情与返回', Boolean(artistView.detailKey) && artistView.name.length > 0 && artistView.backVisible && artistView.detailAfterBack === null,
       `《${artistView.name}》横向专辑 ${artistView.strip} 张，返回后详情状态已清空`)
 
+    /*
+     * 艺人头像的**端到端**检查 —— 之前的检查只测了一半，所以漏掉了真实故障。
+     *
+     * 已有的「在线艺人头像」检查是在主进程里直接调 online.fetchArtist，它一直是绿的；
+     * 而界面上永远没有照片，因为真正断掉的是**渲染层根本没发起请求**
+     * （懒加载对伪曲目 artistOnly 早退，见 artwork-node.js 的 paint）：主进程再正常也没用。
+     * 所以这条从界面出发：打开艺人详情 → 等 <img> 出现 → 断言**解码成功**
+     * （naturalWidth > 0）且**渲染尺寸非零且接近正方**（历史上有过「有图但被裁成一条 140x199」）。
+     * 用曲目最多的前三位艺人当候选，避免依赖某一位特定歌手在维基/Deezer 上有没有条目。
+     */
+    const avatarProbe = await evaluate(win, `
+      const { actions } = window.__aria
+      const candidates = actions.artists().slice()
+        .sort((a, b) => b.trackCount - a.trackCount)
+        .slice(0, 3)
+        .map((artist) => ({ key: artist.key, name: artist.name }))
+      const tries = []
+      for (const item of candidates) {
+        actions.setView('artists')
+        await new Promise((r) => setTimeout(r, 300))
+        const startedAt = performance.now()
+        actions.openArtist(item.key)
+        const deadline = startedAt + 15000
+        let img = null
+        while (performance.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 250))
+          img = document.querySelector('.browse-detail__avatar img')
+          if (img && img.complete && img.naturalWidth > 0) break
+        }
+        const rect = img ? img.getBoundingClientRect() : null
+        tries.push({
+          name: item.name,
+          hasImg: Boolean(img),
+          natural: img ? [img.naturalWidth, img.naturalHeight] : null,
+          rendered: rect ? [Math.round(rect.width), Math.round(rect.height)] : null,
+          decoded: Boolean(img && img.complete && img.naturalWidth > 0),
+          // 每张在线头像都是独立的 blob URL：用它判断「换歌手时照片到底有没有换」
+          src: img ? String(img.getAttribute('src') || '') : '',
+          elapsedMs: Math.round(performance.now() - startedAt)
+        })
+      }
+      actions.closeDetail()
+      actions.setView('songs')
+      return tries`)
+    // 三位候选都试（不提前 break）：这样能同时看出「第一位要等维基超时、后面几位走 Deezer 很快」的差别
+    const avatarHits = avatarProbe.filter((item) => item.decoded)
+    const avatarAllSquare = avatarHits.every((item) => Math.abs(item.rendered[0] / item.rendered[1] - 1) < 0.15)
+    /*
+     * 照片不许串台：每位艺人拿到的 blob URL 必须各不相同。
+     * 这条盯的是另一类真实故障 —— 头像节点是复用的，换成另一位歌手时如果没重新取图，
+     * 圆里会一直留着上一位的脸（分支历史里修过这个：`换了歌手，照片还是上一位的`）。
+     */
+    const avatarSrcs = avatarHits.map((item) => item.src).filter(Boolean)
+    const avatarDistinct = avatarSrcs.length === avatarHits.length && new Set(avatarSrcs).size === avatarSrcs.length
+    record('艺人头像：详情页把在线头像插进 <img> 并解码（端到端，含渲染尺寸与不串台）',
+      avatarHits.length > 0 && avatarAllSquare && avatarDistinct && avatarHits.every((item) => item.rendered[0] > 0),
+      avatarProbe.map((item) => `${item.name}：img=${item.hasImg ? '有' : '无'} 解码=${item.decoded ? '成功' : '无'} ` +
+        `原始=${item.natural ? item.natural.join('×') : '—'} 渲染=${item.rendered ? item.rendered.join('×') : '—'} 用时=${item.elapsedMs}ms`).join('；') +
+      `；命中 ${avatarHits.length}/${avatarProbe.length} 位，正方判定=${avatarAllSquare ? '通过' : '不通过'}，` +
+      `各不相同的图像=${avatarDistinct ? '是' : '否（有串台）'}`)
+
     // 媒体墙
     const wallView = await evaluate(win, `
       const { actions, store } = window.__aria
@@ -5191,29 +5252,35 @@ async function runSmoke ({ win, ctx }) {
         armed = store.get().settings.sleepTimerMinutes
       }
       const realSetTimeout = window.setTimeout
-      window.setTimeout = (fn) => { realSetTimeout(fn, 0); return 0 }
-      actions.setSetting({ sleepTimerMinutes: 0 })
-      await settle(50)
-      actions.setSetting({ sleepTimerMinutes: 15 })
-      await settle(400)
-      window.setTimeout = realSetTimeout
       /*
-       * 复位要绕一圈 IPC + 主进程 250ms 防抖，必须等它落定再断言。
-       * 原来只 await settle(400) 就读值 —— 机器一忙就假失败（报「到点复位为 15」），
-       * 而这条假失败看起来像真回归，白追了两轮。按项目里其它检查的做法改成轮询。
+       * 关键：假 setTimeout 要**一直装着**，直到断言完成；而且这段窗口里只能用真定时器等待。
+       *
+       * 原来这里是「settle(400) 之后立刻还原」，但上面的 settle 内部用的正是 window.setTimeout ——
+       * 被替换成「0ms 后执行」之后，那句 settle(400) 实际上**不等待**。于是：
+       * 装定时器的那次 store 订阅只要晚一个任务跑，就落到还原之后，定时器被用**真的**
+       * 15 分钟延时装上、永远不到点，断言就报「到点复位为 15」。
+       * 机器一忙就必现（头像检查让渲染层多解码两张图之后，这里连续两次踩到），
+       * 而它看起来完全像功能坏了 —— 这条检查自己踩了自己的坑。
        */
-      /*
-       * 断言 store 值复位为 0（这是「到点复位」的核心行为），但要给它足够时间：
-       * 复位要经主进程 250ms 防抖 + 一次 IPC，机器一忙就可能超过 2 秒 ——
-       * 所以轮询预算给到 5 秒。（中途试过改断言行内文字，结果 querySelector
-       * 命中了别的行的同名元素，反而误判 —— 已改回 store 值。）
-       */
-      const sleepNote = (document.querySelector('.settings__row-value') || {}).textContent || ''
-      let afterFire = store.get().settings.sleepTimerMinutes
-      for (let i = 0; i < 100 && afterFire !== 0; i++) {
-        await settle(50)
-        afterFire = store.get().settings.sleepTimerMinutes
+      const sleepReal = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms))
+      let afterFire = 15
+      try {
+        window.setTimeout = (fn) => { realSetTimeout(fn, 0); return 0 }
+        actions.setSetting({ sleepTimerMinutes: 0 })
+        await sleepReal(50)
+        actions.setSetting({ sleepTimerMinutes: 15 })
+        /*
+         * 复位要绕一圈 IPC + 主进程 250ms 防抖，必须等它落定再断言（轮询预算 5 秒）。
+         * 断言的是 store 值复位为 0 —— 这是「到点复位」的核心行为。
+         */
+        for (let i = 0; i < 100 && afterFire !== 0; i++) {
+          await sleepReal(50)
+          afterFire = store.get().settings.sleepTimerMinutes
+        }
+      } finally {
+        window.setTimeout = realSetTimeout
       }
+      const sleepNote = (document.querySelector('.settings__row-value') || {}).textContent || ''
       actions.setSetting({ sleepTimerMinutes: 0 })
       actions.setView('songs')
       await settle(200)
@@ -5447,10 +5514,16 @@ async function runSmoke ({ win, ctx }) {
       } finally {
         electron.net.fetch = realFetch
       }
+      /*
+       * 断言的是「**重试真的发生了**」，不是「第二次一定成功」——
+       * 第二次的结果取决于对方（实测就撞到过 LRCLIB 返回 HTTP 503）。
+       * 只要：调用次数 ≥ 2，且最终错误不是我们注入的那条（说明第二次确实发出去了）。
+       * 这条最初写成「结果不能有 error」，被服务器的 503 判成失败 —— 又是一条会误报的检查。
+       */
       record('在线请求失败会重试一次（超时/网络抖动的兜底）',
-        fetchCalls >= 2 && !retryResult.error,
-        `注入第一次失败后：net.fetch 被调用 ${fetchCalls} 次（应为 2），` +
-        `结果 error=${retryResult.error || '无'}、${retryResult.text ? '取到歌词' : '没收录（随机歌名本来就查不到，属正常）'}`)
+        fetchCalls >= 2 && retryResult.error !== '自检注入的网络错误',
+        `注入第一次失败后：net.fetch 被调用 ${fetchCalls} 次（应为 2；若第二次撞上 429/5xx 会再多一次），` +
+        `最终 error=${retryResult.error || '无'}、${retryResult.text ? '取到歌词' : '没收录（随机歌名本来就查不到，属正常）'}`)
     }
 
     // 封面补全：用一首「有正式专辑名」的曲目（未知专辑在 iTunes 上匹配不到）

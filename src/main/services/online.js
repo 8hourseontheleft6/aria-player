@@ -31,6 +31,17 @@ function createOnlineService (ctx) {
 
   let queue = Promise.resolve()
   let lastRequestAt = 0
+  /*
+   * 艺人头像的缓存目录特意带版本号。
+   *
+   * 原因：beta.5 那版维基解析写错（漏了 requestJson 的 { data: ... } 包装层），
+   * 于是每个艺人都被写进一条 notFound，而 notFound 在 TTL 内会被原样返回 ——
+   * 升级到修好的版本后头像依然取不到（用户反馈过「还是没有照片」）。
+   * 换目录名就能让这些被污染的负缓存彻底失效；这个接口以后再改语义，同样换个后缀。
+   */
+  const ARTIST_CACHE = 'artists2'
+  /** 维基在部分网络下会被中间设备劫持成 HTML / 直接挂住：首次连接失败就整场会话不再尝试 */
+  let wikiDisabled = false
   /** Deezer 在部分网络下完全不可达：首次连接失败就整场会话不再尝试 */
   let deezerDisabled = false
   const stats = { lyrics: { hit: 0, miss: 0, error: 0 }, covers: { hit: 0, miss: 0, error: 0 }, artists: { hit: 0, miss: 0, error: 0 } }
@@ -98,7 +109,7 @@ function createOnlineService (ctx) {
         }
         return { data: await response.json() }
       } catch (err) {
-        if (err && err.http === true) throw err
+        if (err && err.http === true && err.retryable !== true) throw err
         if (attempt >= retry) throw err
         console.warn(`[online] 第 ${attempt + 1} 次请求失败（${err && err.message ? err.message : err}），` +
           `400ms 后重试一次：${url}`)
@@ -109,9 +120,14 @@ function createOnlineService (ctx) {
     }
   }
 
-  /** HTTP 状态码错误：标记成不可重试 */
+  /**
+   * HTTP 状态码错误。
+   * 429（限流）与 5xx（服务端暂时不可用）属于「过一会儿再试」那一类，允许重试；
+   * 其它 4xx 是对方明确拒绝（参数错、没权限），重试只是白等一轮。
+   */
   function httpError (status) {
-    return Object.assign(new Error(`HTTP ${status}`), { http: true })
+    const retryable = status === 429 || status >= 500
+    return Object.assign(new Error(`HTTP ${status}`), { http: true, retryable })
   }
 
   const requestJson = (url, options) => request(url, options)
@@ -374,8 +390,16 @@ function createOnlineService (ctx) {
    * 名字对不上就不用（搜到的页面标题必须能和艺人名互相包含），宁缺勿错。
    */
   async function artistFromWikipedia (name) {
+    if (wikiDisabled) return null
+    /*
+     * requestJson 的返回是 { data: <解析后的 JSON> }，外面包了一层 ——
+     * 这里曾经直接把它当 JSON 用（payload.query.pages），于是**请求 200 成功、
+     * 响应里就有照片地址，却永远解析不到图**，表现就是「艺人一个头像都没有」。
+     * 现在 raw() 两种形状都兼容，免得以后再踩。
+     */
+    const raw = (payload) => (payload && payload.data !== undefined ? payload.data : payload)
     const pick = (payload) => {
-      const pages = payload?.query?.pages
+      const pages = raw(payload)?.query?.pages
       if (!pages) return null
       const first = Object.values(pages)[0]
       return first?.original?.source || first?.thumbnail?.source || null
@@ -387,7 +411,7 @@ function createOnlineService (ctx) {
       let url = pick(direct)
       if (!url) {
         const search = await ask(`list=search&srsearch=${encodeURIComponent(name)}&srlimit=1`)
-        const title = search?.query?.search?.[0]?.title
+        const title = raw(search)?.query?.search?.[0]?.title
         if (!title) return null
         const want = normalize(name)
         const got = normalize(title)
@@ -397,7 +421,16 @@ function createOnlineService (ctx) {
       if (!url) return null
       return { url, provider: 'Wikipedia', matched: name }
     } catch (err) {
-      console.warn('[online] 维基百科艺人头像失败:', err.message)
+      /*
+       * 连接层失败（超时 / 响应被中间设备换成了 HTML）通常不是偶发：本次会话就别再试了。
+       * 与 Deezer 那条 `deezerDisabled` 对称。
+       *
+       * 实测代价：本机维基请求是**挂住**到 8s 超时才失败的，而每次都要先试维基、
+       * 再回落 Deezer —— 于是每打开一位艺人的详情都要等 ~9s 才出照片。
+       * 第一次失败后打上这个标记，后面的人直接走 Deezer（~1s）。
+       */
+      wikiDisabled = true
+      console.warn('[online] 维基百科艺人头像失败，本次会话不再尝试:', err.message)
       return null
     }
   }
@@ -409,7 +442,7 @@ function createOnlineService (ctx) {
     const key = normalize(name)
     if (!key) return { error: 'empty key' }
     try {
-      const cached = await readBinary('artists', key)
+      const cached = await readBinary(ARTIST_CACHE, key)
       if (cached) {
         stats.artists.hit++
         return cached
@@ -418,11 +451,11 @@ function createOnlineService (ctx) {
       // 先用维基百科（免密钥、有本人照片），取不到再试 Deezer
       const source = (await artistFromWikipedia(name)) || (await artistFromDeezer(name))
       if (!source) {
-        await writeJson('artists', key, { notFound: true, at: Date.now() })
+        await writeJson(ARTIST_CACHE, key, { notFound: true, at: Date.now() })
         return { data: null }
       }
       const image = await schedule(() => requestBinary(source.url))
-      await writeBinary('artists', key, image.buffer, image.mime)
+      await writeBinary(ARTIST_CACHE, key, image.buffer, image.mime)
       return { mime: image.mime, data: image.buffer, provider: source.provider, matched: source.matched }
     } catch (err) {
       stats.artists.error++

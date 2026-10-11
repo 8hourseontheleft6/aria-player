@@ -287,6 +287,8 @@
   place-items: center;
   color: var(--label-4);
   box-shadow: var(--shadow-artwork);
+  /* 给下面绝对定位的 img 当包含块（理由见 .browse-detail__avatar img 那段） */
+  position: relative;
 }
 
 .browse-detail__avatar {
@@ -300,14 +302,28 @@
   place-items: center;
   color: var(--label-4);
   box-shadow: var(--shadow-artwork);
+  position: relative;
 }
 
+/*
+ * 详情页的封面与头像都必须**绝对定位铺满容器**，不能只写 width/height: 100%。
+ *
+ * 两个容器都是 `display: grid; place-items: center` 的方块：居中的 grid 子项里
+ * `height: 100%` 会被图片的**原始长宽比**顶掉 —— 实测 1801×2560 的照片
+ * 在 140 的圆里渲染成 140×199，圆里只露出中间一条（用户看到的「照片被裁坏了」）。
+ * 也试过 `align-self/justify-self: stretch`：没用，仍是 140×199。
+ * 隔离实验（同一份规则、1801×2560 的图）实测三种写法：
+ *   现状 140×199 · 拉伸 140×199 · **绝对定位 + 容器 position: relative → 140×140 ✓**
+ * 容器已有 overflow: hidden + border-radius，所以铺满后自然被裁成方/圆。
+ */
 .browse-detail__cover img,
 .browse-detail__avatar img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  position: absolute;
+  inset: 0;
 }
 
 .browse-detail__cover .icon,

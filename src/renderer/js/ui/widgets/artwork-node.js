@@ -87,15 +87,25 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
 
   async function paint (node, track) {
     const key = artworkKey(track)
-    node.dataset.artKey = key || ''
-    if (!key) {
+    /*
+     * 没有本地封面 key 有两种情况，**必须分开**（艺人头像就是卡在这一行）：
+     *   · 普通曲目确实没有封面 → 显示占位图标即可，不用请求；
+     *   · **伪曲目**（艺人头像 artistOnly：只有艺人名、没有 id）→ 恰恰要走去在线图源。
+     * 两种都 return 的话，艺人头像永远不会请求、也不会插进 <img> ——
+     * 主程序那边能取到图（自检里那条在线头像检查一直是绿的），界面上却永远是占位，
+     * 因为**渲染层根本没问过**。artwork.resolveUrl 对没有 key 的曲目本来就是走
+     * providers（见 core/artwork.js），所以这里放行即可。
+     */
+    const artKey = key || ''
+    node.dataset.artKey = artKey
+    if (!artKey && !track?.artistOnly) {
       // 换成「没有封面」的条目前，要把上一位的图清掉，否则会留着上一张图
       replaceArt(node, null, '')
       return
     }
     const url = await artwork.resolveUrl(track)
     // 节点可能已经被回收给别的条目了
-    if (!url || node.dataset.artKey !== key) return
+    if (!url || node.dataset.artKey !== artKey) return
     /*
      * 这里以前是 `if (node.querySelector('img')) return` —— 也就是「节点里已经有图就不管」。
      * 但同一个节点会被复用给不同的条目（最典型：搜索完 Taylor Swift 再看别的歌手，
@@ -105,7 +115,7 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
      */
     // 必须把 key 盖到图上：下次 observe 靠它判断「这张图是不是就是这个条目的」，
     // 否则同一行每次重渲染都会被当成旧图重新加载（列表扫描期间就是持续闪烁）
-    replaceArt(node, url, key)
+    replaceArt(node, url, artKey)
     pending.delete(node)
   }
 
