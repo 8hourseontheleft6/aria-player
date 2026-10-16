@@ -4,7 +4,7 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
 
 ![tech](https://img.shields.io/badge/Electron-43-0a84ff) ![tech](https://img.shields.io/badge/渲染层-原生%20ESM-5e5ce6)
 
-> 版本见 `package.json`（当前 `0.1.0-beta.32`）：开发中，尚未发布正式版本，接口与数据结构仍可能变动。
+> 版本见 `package.json`：开发中，尚未发布正式版本，接口与数据结构仍可能变动。
 
 ## 界面
 

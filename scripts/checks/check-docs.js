@@ -50,6 +50,32 @@ for (const file of docs) {
   }
 }
 
+/* ---- 文档里"当前版本是 X"这类声明必须和 package.json 一致 ---- *
+ *
+ * 起因：README 第 7 行写着「版本见 `package.json`（当前 `0.1.0-beta.32`）」——
+ * 而 package.json 已经是 0.1.0-beta.46，**落后 14 个版本**。
+ * 这和"截图停在旧版本"是同一类问题：文档里的数字没人会主动去核对，只能交给脚本。
+ *
+ * 判据刻意收窄到**带"当前"字样的版本声明**：
+ * 规范里引用历史提交信息（例如"反例：`chore(打包): 0.1.0-beta.42`"）是合法的，
+ * 一刀切去比 package.json 会把那些真实的历史记录也判红。
+ */
+let versionClaims = 0
+const currentVersion = pkg.version
+for (const file of docs) {
+  const rel = path.relative(ROOT, file).replace(/\\/g, '/')
+  const source = fs.readFileSync(file, 'utf8')
+  for (const match of source.matchAll(/当前[^`\n]{0,12}`(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)`/g)) {
+    versionClaims++
+    if (match[1] !== currentVersion) {
+      problems.push(`${rel}  写着「当前 \`${match[1]}\`」，但 package.json 是 ${currentVersion} —— 版本声明已经脱节`)
+    }
+  }
+}
+
 for (const problem of problems) console.log(problem)
-console.log(`\n检查了 ${docs.length} 份文档：本地链接 ${checked} 条、脚本引用 ${scriptRefs} 处，问题 ${problems.length} 处`)
+console.log(
+  `\n检查了 ${docs.length} 份文档：本地链接 ${checked} 条、脚本引用 ${scriptRefs} 处、` +
+  `版本声明 ${versionClaims} 处，问题 ${problems.length} 处`
+)
 if (problems.length > 0) process.exit(1)
