@@ -131,7 +131,38 @@ async function runSmoke ({ win, ctx }) {
   const record = (name, ok, detail = '') => {
     checks.push({ name, ok, detail })
     console.log(`${ok ? '  ✓' : '  ✗'} ${name}${detail ? ` — ${detail}` : ''}`)
+    lastProgressAt = Date.now()
+    lastCheckName = name
   }
+
+  /*
+   * 看门狗：整轮多久没有新结果就自己报错退出。
+   *
+   * 为什么需要：这条链路里有几处**平台/网络调用**在环境不好时会一直不返回
+   * （实测过 enumerateDevices、setSinkId、以及带在线歌词搜索的那条检查），
+   * 表现就是"日志停在某一行、进程还在、CPU 不动"，一挂就是十几分钟到一整夜 ——
+   * 彻夜跑最怕的正是这个：挂死等于整夜没有任何验证结果，而且看起来像"还在跑"。
+   *
+   * 已经给两处调用单独加了超时，但没法穷尽；所以在外面再兜一层：
+   * 超过阈值没有新结果就打印**最后跑完的那条检查**并退出（兜底总结会由 process.on('exit') 打出来）。
+   * 阈值可用 ARIA_SMOKE_WATCHDOG_MS 覆盖（自检那条验证就靠它把 6 分钟压成几秒）。
+   */
+  /*
+   * 阈值默认 10 分钟：全新档案的**全量扫描**本身就要几分钟（实测 2~4 分钟），
+   * 那是合法等待、不能误杀；而真正的卡死是"十几分钟到一整夜不动"，10 分钟足够兜住。
+   */
+  const watchdogMs = Number(process.env.ARIA_SMOKE_WATCHDOG_MS || 10 * 60 * 1000)
+  let lastProgressAt = Date.now()
+  let lastCheckName = '（还没跑完第一条）'
+  const watchdog = setInterval(() => {
+    const idle = Date.now() - lastProgressAt
+    if (idle < watchdogMs) return
+    console.log(`\n[smoke] 看门狗：${Math.round(idle / 1000)} 秒没有新结果，判定卡死并退出。`)
+    console.log(`[smoke] 最后跑完的检查是「${lastCheckName}」—— 下一条卡住了（多半是等一个不返回的平台/网络调用）。`)
+    printSummary('看门狗判定卡死')
+    process.exit(1)
+  }, Math.min(30_000, Math.max(500, Math.floor(watchdogMs / 4))))
+  if (typeof watchdog.unref === 'function') watchdog.unref()
 
   /*
    * 兜底总结：无论流程怎么中断，都要留下结论。
@@ -5060,6 +5091,104 @@ async function runSmoke ({ win, ctx }) {
     record('艺人列表', artistView.rows > 0, `${artistView.rows} 位艺人`)
     record('艺人详情与返回', Boolean(artistView.detailKey) && artistView.name.length > 0 && artistView.backVisible && artistView.detailAfterBack === null,
       `《${artistView.name}》横向专辑 ${artistView.strip} 张，返回后详情状态已清空`)
+
+    /*
+     * 横向专辑条：鼠标滚轮应当能横着滚。
+     *
+     * 横向容器默认只认 Shift+滚轮 / 触控板横向手势，鼠标用户会以为"这排滚不动"
+     * （卡片在右边缘被截断时尤其明显）。同时要保证**到两端不再拦截** ——
+     * 否则鼠标停在卡片上时整个页面都滚不动，那是一种更难受的卡住。
+     */
+    const stripWheel = await evaluate(win, `
+      const settle = async (ms = 350) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      actions.setView('artists')
+      await settle(750)
+      /*
+       * 挑一个**专辑多到需要横向滚**的艺人。
+       * 第一版是"点前 12 行看看"—— 但艺人列表按拼音排且是虚拟滚动的，
+       * Taylor Swift 这种专辑多的根本不在 DOM 里，于是报"没找到可滚动的专辑条"。
+       * 现在直接从曲库按艺人统计专辑数（不猜 actions.artists() 的字段名），
+       * 找到对应的 key 再打开；万一匹配不上，退回"点几行看看"。
+       */
+      const byArtist = new Map()
+      for (const track of store.get().library.tracks) {
+        const name = track.albumArtist || track.artist
+        if (!name) continue
+        if (!byArtist.has(name)) byArtist.set(name, new Set())
+        byArtist.get(name).add(track.album || track.title)
+      }
+      const busiest = [...byArtist.entries()].sort((a, b) => b[1].size - a[1].size)[0]
+      let strip = null
+      let picked = ''
+      if (busiest) {
+        const entry = (actions.artists() || []).find((a) => (a.name || a.artist) === busiest[0])
+        if (entry) {
+          actions.openArtist(entry.key)
+          await settle(800)
+          const candidate = document.querySelector('.album-strip')
+          if (candidate && candidate.scrollWidth > candidate.clientWidth + 20) {
+            strip = candidate
+            picked = document.querySelector('.browse-detail__title')?.textContent || busiest[0]
+          }
+        }
+      }
+      if (!strip) {
+        actions.closeDetail()
+        await settle(300)
+        for (const row of [...document.querySelectorAll('.artist-row')].slice(0, 12)) {
+          row.click()
+          await settle(700)
+          const candidate = document.querySelector('.album-strip')
+          if (candidate && candidate.scrollWidth > candidate.clientWidth + 20) {
+            strip = candidate
+            picked = document.querySelector('.browse-detail__title')?.textContent || ''
+            break
+          }
+          document.querySelector('.browse-back')?.click()
+          await settle(320)
+        }
+      }
+      if (!strip) {
+        actions.setView('songs')
+        return { error: '没找到可横向滚动的专辑条' }
+      }
+      const max = strip.scrollWidth - strip.clientWidth
+      const wheel = (dy) => {
+        const event = new WheelEvent('wheel', { deltaY: dy, bubbles: true, cancelable: true })
+        strip.dispatchEvent(event)
+        return event.defaultPrevented
+      }
+      strip.scrollLeft = 0
+      await settle(150)
+      const before = strip.scrollLeft
+      const preventedMid = wheel(120)
+      await settle(120)
+      const afterOne = strip.scrollLeft
+      strip.scrollLeft = strip.scrollWidth
+      await settle(150)
+      const atEnd = strip.scrollLeft
+      const preventedEnd = wheel(120)
+      await settle(120)
+      const endStayed = strip.scrollLeft
+      strip.scrollLeft = 0
+      document.querySelector('.browse-back')?.click()
+      await settle(320)
+      actions.setView('songs')
+      return { picked, before, afterOne, preventedMid, atEnd, max, preventedEnd, endStayed }
+    `)
+    record('横向专辑条：鼠标滚轮能横着滚，到两端不再拦截（页面照常滚）',
+      !stripWheel.error &&
+      stripWheel.afterOne - stripWheel.before >= 100 &&
+      stripWheel.preventedMid === true &&
+      stripWheel.atEnd >= stripWheel.max - 2 &&
+      stripWheel.preventedEnd === false &&
+      stripWheel.endStayed === stripWheel.atEnd,
+      stripWheel.error
+        ? `测量失败：${stripWheel.error}`
+        : `《${stripWheel.picked}》的专辑条（可滚 ${stripWheel.max}px）：滚一格 ${stripWheel.before} → ${stripWheel.afterOne}` +
+          `（拦截=${stripWheel.preventedMid}）；顶到最右 ${stripWheel.atEnd} 后再滚一格` +
+          `（拦截=${stripWheel.preventedEnd}、位置不变=${stripWheel.endStayed === stripWheel.atEnd}）`)
 
     /*
      * 艺人头像的**端到端**检查 —— 之前的检查只测了一半，所以漏掉了真实故障。

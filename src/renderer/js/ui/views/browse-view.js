@@ -162,6 +162,31 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   }, icon('shuffleAll', { className: 'icon icon--stroke' }), '随机播放')
 
   const artistAlbumStrip = h('div', { class: 'album-strip scroll' })
+  /*
+   * 鼠标滚轮直接横着滚这排专辑卡。
+   *
+   * 横向容器默认只认 Shift+滚轮或触控板的横向手势，**鼠标用户会以为这排滚不动** ——
+   * 卡片在右边缘被截断时尤其明显（截图里就是这样）。把纵向 deltaY 映射成横向滚动；
+   * 到两端就**不** preventDefault，把滚动交回外层页面（否则鼠标在卡片上时页面滚不动，
+   * 那是一种更难受的卡住）。已经在横向滚（deltaX 更大）的手势不重复处理。
+   */
+  on(artistAlbumStrip, 'wheel', (event) => {
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
+    const max = artistAlbumStrip.scrollWidth - artistAlbumStrip.clientWidth
+    if (max <= 0) return
+    const target = artistAlbumStrip.scrollLeft + event.deltaY
+    const clamped = Math.max(0, Math.min(max, target))
+    /*
+     * 到两端就 return（不 preventDefault），让滚动交回外层页面。
+     * 比较必须带容差：`scrollWidth/clientWidth` 是**整数**（浏览器取整过），
+     * `scrollLeft` 是**浮点**（实测 7034.28564453125）—— 直接用 === 会在末端
+     * 差零点几像素而判定"还没到头"，于是照样拦截，页面就滚不动了。
+     * 这个坑是自检那条「横向专辑条」抓出来的（读数里"拦截=true、位置不变=true"）。
+     */
+    if (Math.abs(clamped - artistAlbumStrip.scrollLeft) < 0.5) return
+    event.preventDefault()
+    artistAlbumStrip.scrollLeft = clamped
+  }, { passive: false })
   const artistGrid = createCoverGrid({
     lazy,
     className: 'cover-grid--strip',
