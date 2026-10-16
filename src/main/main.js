@@ -174,6 +174,14 @@ async function bootstrap () {
     if (!win.isDestroyed()) win.webContents.send('media:command', command)
   })
 
+  /*
+   * macOS 的菜单栏：不装的话 Electron 会挂一份默认英文菜单（Electron / Edit / View…），
+   * 既没有中文也没有播放控制。非 mac 什么都不做 —— Windows / Linux 走
+   * Menu.setApplicationMenu(null)（见 window.js），自绘标题栏才是它们的菜单。
+   * menu.js 内部整段 try/catch：装菜单失败只退默认菜单，绝不挡启动。
+   */
+  require('./menu').applyMacMenu(ctx)
+
   const library = ctx.get('library')
   const watcher = ctx.get('watcher')
   await library.init()

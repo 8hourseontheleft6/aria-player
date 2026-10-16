@@ -102,6 +102,7 @@ npm run dist:mac        # = electron-builder --mac --publish never
 | --- | --- | --- |
 | 1 | 启动、窗口外观 | 无边框但**保留原生红黄绿三个圆点**（左上角），标题栏文字不压在圆点上 |
 | 2 | 首次扫描音乐资料库 | 设置 → 音乐文件夹 → 添加；扫完歌曲数正确 |
+| 2b | **菜单栏**（屏幕最上方） | 有「Aria / 播放 / 编辑 / 显示 / 窗口」五栏（中文）。点「播放 → 播放 / 暂停」能控制播放；「Aria → 关于 Aria」能看到版本 |
 | 3 | 播放 / 暂停 / 上一首下一首 / 进度拖动 | 声音正常，进度随手 |
 | 4 | 歌词 | 本地 `.lrc` 或在线（LRCLIB）都能出；滚动跟随 |
 | 5 | 封面与艺人头像 | 网格里出封面；艺人页出照片（不是字母占位） |
@@ -125,7 +126,6 @@ npm run dist:mac        # = electron-builder --mac --publish never
 ---
 
 ## 六、macOS 上已知的取舍（不是 bug）
-
 | 现象 | 说明 |
 | --- | --- |
 | 系统媒体键（键盘上的 ⏯）可能没反应 | 未签名的应用在 macOS 上不一定能接管媒体键；菜单栏图标里的控制一定可用 |
@@ -134,3 +134,18 @@ npm run dist:mac        # = electron-builder --mac --publish never
 | 没有「正在播放」的系统级集成（锁屏/控制中心） | 需要原生模块，本次移植不做 |
 | Dock 上没有进度条 | 只在设置里做了任务栏/Dock 进度的地方保持一致 |
 | 窗口圆角、阴影 | 由系统提供（`titleBarStyle: 'hiddenInset'`），应用只负责标题栏内容 |
+| 菜单栏里没有「帮助」 | 没有可指向的在线文档（本地应用、不上架）。要现场排查就走「显示 → 开发者工具」 |
+
+---
+
+## 七、mac 相关的代码都在哪（给以后维护的人）
+
+| 位置 | 干什么 |
+| --- | --- |
+| `src/main/window.js` | `titleBarStyle: 'hiddenInset'`、红黄绿位置（`trafficLightPosition`）、非 mac 才 `Menu.setApplicationMenu(null)` |
+| `src/main/menu.js` | **菜单栏**（Aria / 播放 / 编辑 / 显示 / 窗口）。播放指令走 `ctx.emit('player:command', …)`，与托盘、媒体键同一条链路；整段 try/catch，装不上就退默认菜单，绝不影响启动 |
+| `scripts/checks/check-menu-roles.js` | 守住菜单：role 白名单从 `node_modules/electron/electron.d.ts` 读，顺手拦住「应用功能占用 ⌘Q / ⌘M」 |
+| `scripts/mac-adhoc-sign.js` | 打包时对 `.app` 做 ad-hoc 签名（Apple Silicon 必需） |
+| `src/renderer/js/core/format.js` | `keyHint()` / `reservedKeyHint()`：界面上的 ⌘ / ⌥ 文案只在这里定义 |
+| `src/main/tray.js` | 菜单栏图标用 template image（mac 上会自动适配深浅色） |
+| `main.js` 的 `app.on('activate')` / `window-all-closed` | 关闭窗口不退出、点 Dock 图标能回来（mac 的常规行为） |
