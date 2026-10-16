@@ -3480,6 +3480,80 @@ async function runSmoke ({ win, ctx }) {
       (invented.length ? `；**造出了新键**：${invented.map((i) => i.title + ':' + i.added.join(',')).join('、')}` : '') +
       `；设置回到原样=${wiringAfter.settings === switchWiring.settingsAtStart}`)
 
+    /* ---------- 弹层：同一时刻只有一层、Esc 能关、反复开关不泄漏 ----------
+     *
+     * 三条都是**不变量**，不需要枚举有哪些弹层：
+     *   ① 没打开任何东西时，#layer-root 的子节点数 = 基线；
+     *   ② 从别处再开一层，前一层必须已经被关掉（同时只有一层）；
+     *   ③ 反复开合若干次后必须回到基线 —— 这是"泄漏"的直接证据
+     *      （每次 open 都往同一个 root 里 append，忘了 remove 就会越堆越多）。
+     * Esc 用**真实按键**（sendInputEvent），因为 app.js 的处理器挂在 document 上，
+     * 而我想验的正是"真按 Esc 会怎样"。
+     */
+    const layerBaseline = await evaluate(win, `
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      actions.setView('songs')
+      await settle(800)
+      const root = document.getElementById('layer-root')
+      const openRowMenu = async (index) => {
+        const rows = [...document.querySelectorAll('.track-row')]
+        const button = rows[index] ? rows[index].querySelector('.track-row__more') : null
+        if (!button) return false
+        button.click()
+        await settle(500)
+        return true
+      }
+      const baseline = root.childElementCount
+      const openedFirst = await openRowMenu(0)
+      const afterFirst = root.childElementCount
+      const openedSecond = await openRowMenu(1)
+      const afterSecond = root.childElementCount
+      return { baseline, openedFirst, openedSecond, afterFirst, afterSecond, classes: [...root.children].map((n) => n.className) }
+    `)
+    // 真按 Esc：应当把还开着的那一层关掉
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+    await sleep(500)
+    const layerAfterEsc = await evaluate(win, `
+      const root = document.getElementById('layer-root')
+      return { count: root.childElementCount, open: document.querySelectorAll('.menu, .popover').length }
+    `)
+    // 反复开合：不泄漏
+    const layerLeak = await evaluate(win, `
+      const settle = async (ms = 320) => { await new Promise((r) => setTimeout(r, ms)) }
+      const root = document.getElementById('layer-root')
+      for (let i = 0; i < 8; i++) {
+        const rows = [...document.querySelectorAll('.track-row')]
+        const button = rows[i % 4] ? rows[i % 4].querySelector('.track-row__more') : null
+        if (button) {
+          button.click()
+          await settle(420)
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+          await settle(380)
+        }
+      }
+      await settle(400)
+      return { count: root.childElementCount, open: document.querySelectorAll('.menu, .popover').length }
+    `)
+    /*
+     * 断言一律**相对实测基线**，不用绝对值：
+     * #layer-root 里常驻着拖放层、帧率层、提示层（实测基线 3），
+     * 第一版拿"基线应当为 0、开一层应当是 1"去判，三条正确的行为全被判红。
+     */
+    const base = layerBaseline.baseline
+    record('弹层：同时只有一层、Esc 能关、反复开合不泄漏',
+      base >= 1 &&
+      layerBaseline.openedFirst === true && layerBaseline.afterFirst === base + 1 &&
+      layerBaseline.openedSecond === true && layerBaseline.afterSecond === base + 1 &&
+      layerAfterEsc.count === base && layerAfterEsc.open === 0 &&
+      layerLeak.count === base && layerLeak.open === 0,
+      `基线 ${base} 个子节点（常驻：${layerBaseline.classes.slice(0, 3).join('、')}）；` +
+      `开第一层后 ${layerBaseline.afterFirst}（= 基线+1）；` +
+      `再从另一行开一层后 ${layerBaseline.afterSecond}（仍然是基线+1 —— 前一层已关）；` +
+      `真按 Esc 后剩 ${layerAfterEsc.count} 个（= 基线）、DOM 里 .menu/.popover ${layerAfterEsc.open} 个；` +
+      `反复开合 8 次后剩 ${layerLeak.count} 个（= 基线，无泄漏）`)
+
     /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
      *
      * 用户给了批注截图："中间有一个很明显的条，改一下" —— 说的是标题栏与内容之间那条硬边：
