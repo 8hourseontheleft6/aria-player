@@ -3671,6 +3671,53 @@ async function runSmoke ({ win, ctx }) {
       `播放 → ${emptyPlayFeedback.play.missing ? '没找到按钮' : JSON.stringify(emptyPlayFeedback.play.toasts)}；` +
       `随机播放 → ${emptyPlayFeedback.shuffle.missing ? '没找到按钮' : JSON.stringify(emptyPlayFeedback.shuffle.toasts)}`)
 
+    /* ---------- 禁用了的控件，必须真的看起来禁用 ----------
+     *
+     * 起因：看设置页截图时怀疑「均衡器预设」药丸在自动模式下没变灰 —— 量了原图才发现
+     * 它最深像素 (145,145,146)、同一行标题是 (8,8,8)，45% 不透明度其实生效了
+     * （又是缩小预览造成的错觉，今晚第四次）。
+     * 但这条不变量本身值得钉住，它是"界面诚实"的最后一环：
+     * **能点就亮、点不动就灰**，否则用户会一直去点一个不会响应的东西。
+     * 判据用应用自己的约定：禁用 = 不透明度 < 1
+     * （.switch.is-disabled 与 .pill-select:disabled 都是 opacity 0.45）。
+     */
+    const disabledLook = await evaluate(win, `
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      const collect = () => [...document.querySelectorAll('button, [role="switch"], .pill-select, .segmented__item, input, select')]
+        .filter((node) => node.getClientRects().length > 0)
+        .filter((node) => node.disabled || node.classList.contains('is-disabled') || node.getAttribute('aria-disabled') === 'true')
+        .map((node) => ({
+          what: node.tagName + '.' + (node.getAttribute('class') || '').split(/\\s+/).slice(0, 2).join('.'),
+          opacity: parseFloat(getComputedStyle(node).opacity),
+          cursor: getComputedStyle(node).cursor
+        }))
+      const results = {}
+      actions.setView('settings')
+      await settle(800)
+      const onlineTab = [...document.querySelectorAll('.settings-nav__item')].find((n) => (n.textContent || '').includes('在线'))
+      if (onlineTab) onlineTab.click()
+      await actions.setSetting({ onlineFeatures: false })
+      await settle(800)
+      results.online = collect()
+      const libTab = [...document.querySelectorAll('.settings-nav__item')].find((n) => (n.textContent || '').includes('音乐库'))
+      if (libTab) libTab.click()
+      await actions.setSetting({ equalizer: { enabled: false, auto: true, preset: 'flat' } })
+      await settle(800)
+      results.eq = collect()
+      await actions.setSetting({ onlineFeatures: true })
+      actions.setView('songs')
+      await settle(500)
+      return results
+    `)
+    const allDisabled = [...disabledLook.online, ...disabledLook.eq]
+    const notDimmed = allDisabled.filter((item) => !(item.opacity < 1))
+    record('禁用了的控件都真的变灰了（不透明度 < 1）',
+      disabledLook.online.length >= 2 && disabledLook.eq.length >= 1 && notDimmed.length === 0,
+      `在线页禁用 ${disabledLook.online.length} 个（${disabledLook.online.map((item) => `${item.what}@${item.opacity}`).join('、')}）；` +
+      `音乐库页禁用 ${disabledLook.eq.length} 个（${disabledLook.eq.map((item) => `${item.what}@${item.opacity}`).join('、')}）` +
+      (notDimmed.length ? `；**没变灰的**：${notDimmed.map((item) => item.what).join('、')}` : ''))
+
     /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
      *
      * 用户给了批注截图："中间有一个很明显的条，改一下" —— 说的是标题栏与内容之间那条硬边：
