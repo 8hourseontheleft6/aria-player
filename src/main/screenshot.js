@@ -9,7 +9,9 @@
  */
 
 const fsp = require('node:fs/promises')
+const fs = require('node:fs')
 const path = require('node:path')
+const { nativeImage } = require('electron')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const OUTPUT_DIR = path.join(__dirname, '..', '..', 'docs', 'screenshots')
@@ -1015,6 +1017,38 @@ async function runScreenshots ({ win }) {
     await sleep(180)
     const image = await win.webContents.capturePage()
     const target = path.join(OUTPUT_DIR, file)
+    /*
+     * 每张都与**上一版**比一比，把差异打出来。
+     *
+     * 起因：我一度每轮都提交 33 张截图，却说不清那些微小差异是噪声还是真改动。
+     * 实测噪声地平线（同一份代码连跑两次，用 Python 逐像素比）：
+     *   · 非画布图 ≤0.003% 的像素不同，但**最大通道差能到 89~123** ——
+     *     少数像素差很多（多半是字形栅格化抖动），所以只看百分比会误判，两个数都要看；
+     *   · 含示波器画布的图必然差 4~5%（音频驱动、逐帧不同），那是预期的。
+     * 这条只打印结论、不参与判定，用来回答"这次改动到底动了界面没有"。
+     */
+    const previous = fs.existsSync(target) ? nativeImage.createFromPath(target) : null
+    let deltaText = '（首次生成）'
+    if (previous && !previous.isEmpty()) {
+      const before = previous.toBitmap()
+      const after = image.toBitmap()
+      if (before.length === after.length && before.length > 0) {
+        let changed = 0
+        let worst = 0
+        for (let i = 0; i < after.length; i += 4) {
+          const d = Math.max(
+            Math.abs(after[i] - before[i]),
+            Math.abs(after[i + 1] - before[i + 1]),
+            Math.abs(after[i + 2] - before[i + 2])
+          )
+          if (d > 0) changed++
+          if (d > worst) worst = d
+        }
+        deltaText = `Δ ${(changed / (after.length / 4) * 100).toFixed(3)}%（最大通道差 ${worst}）`
+      } else {
+        deltaText = '（尺寸与上一版不同）'
+      }
+    }
     await fsp.writeFile(target, image.toPNG())
 
     /*
@@ -1079,7 +1113,7 @@ async function runScreenshots ({ win }) {
      * 自检里改验"材质元素是否真的接上"（机制层面，不会假通过）。
      */
     written.push(`${file}（${label}）`)
-    console.log(`  ✓ ${file} — ${label}`)
+    console.log(`  ✓ ${file} — ${label}  ${deltaText}`)
   }
 
   // 示例播放列表只在截图里出现，拍完就删掉，免得留在自动化档案里；
