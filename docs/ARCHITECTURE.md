@@ -26,7 +26,7 @@ aria-player/
 │   │   │   ├── background.js       最小化后释放后台占用，回前台恢复
 │   │   │   └── tray.js             托盘、系统媒体键、任务栏进度
 │   │   ├── util/                   纯函数工具（文件、mime、位图、文本编码）
-│   │   ├── smoke.js                自检（145 项，含注入渲染层的代码片段）
+│   │   ├── smoke.js                自检（条数跑 `npm run smoke` 看；含注入渲染层的代码片段）
 │   │   ├── screenshot.js           截图（npm run shots）
 │   │   ├── perf.js                 帧率诊断（npm run perf）
 │   │   └── visual-audit.js         视觉审计（npm run audit）

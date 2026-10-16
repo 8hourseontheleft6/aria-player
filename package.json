@@ -11,7 +11,7 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "smoke": "electron . --smoke",
-    "check": "node scripts/checks/check-imports.js && node scripts/checks/check-injected.js && node scripts/checks/check-styles.js && node scripts/checks/check-contrast.js && node scripts/checks/check-shots.js && node scripts/checks/check-mac-source-zip.js && node scripts/checks/check-docs.js && node scripts/checks/check-menu-roles.js && node scripts/checks/check-mac-config.js && node --check src/main/main.js",
+    "check": "node scripts/checks/check-imports.js && node scripts/checks/check-injected.js && node scripts/checks/check-styles.js && node scripts/checks/check-contrast.js && node scripts/checks/check-shots.js && node scripts/checks/check-architecture.js && node scripts/checks/check-mac-source-zip.js && node scripts/checks/check-docs.js && node scripts/checks/check-menu-roles.js && node scripts/checks/check-mac-config.js && node --check src/main/main.js",
     "check:styles": "node scripts/checks/check-styles.js",
     "check:contrast": "node scripts/checks/check-contrast.js",
     "check:shots": "node scripts/checks/check-shots.js",
@@ -23,7 +23,8 @@
     "dist": "electron-builder --win --x64",
     "dist:portable": "electron-builder --win portable --x64",
     "dist:mac": "electron-builder --mac --publish never",
-    "dist:mac:arm64": "electron-builder --mac --arm64 --publish never"
+    "dist:mac:arm64": "electron-builder --mac --arm64 --publish never",
+    "check:arch": "node scripts/checks/check-architecture.js"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"
