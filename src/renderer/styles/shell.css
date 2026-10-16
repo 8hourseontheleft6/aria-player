@@ -17,6 +17,59 @@
   grid-template-columns: 0 minmax(0, 1fr);
 }
 
+/*
+ * 标题栏那一条要跟下面的材质接上。
+ *
+ * 网格是两行：第 1 行标题栏（--titlebar-h），第 2 行才是侧栏与内容；材质只画在第 2 行上，
+ * 于是 y = --titlebar-h 处出现一条硬边（用户批注截图："中间有一个很明显的条，改一下"）。
+ *
+ * 这里在标题栏内部放两块**真实元素**补齐：左块刚好盖住侧栏那一段、右块铺满其余部分，
+ * 材质**照抄**对应元素（包括 backdrop-filter —— 只补背景的话接缝只是变淡：实测 Δ 从 8 降到 5）。
+ *
+ * 为什么不是伪元素：先写成 `.app::before/::after`，浅色下正常，深色下出图时
+ * 整条带子仍是裸背景（Δ=13~16/255）—— 伪元素上的 backdrop-filter 在部分合成路径里不生效。
+ * 两块互不重叠（半透明材质叠两次会变深），并且只在标题栏这一条高度内，第 2 行不受影响。
+ */
+.titlebar__materials {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.titlebar__material {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+
+.titlebar__material--side {
+  left: 0;
+  width: var(--sidebar-w);
+  background: var(--bg-sidebar);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  transition: width var(--dur) var(--ease-ios);
+}
+
+.titlebar__material--main {
+  left: var(--sidebar-w);
+  right: 0;
+  background: var(--bg-content);
+  backdrop-filter: blur(calc(var(--blur) * 0.6));
+  -webkit-backdrop-filter: blur(calc(var(--blur) * 0.6));
+  transition: left var(--dur) var(--ease-ios);
+}
+
+/* 侧栏收起：左块归零、右块从最左边开始 —— 与网格的 grid-template-columns 同步 */
+.app.is-sidebar-hidden .titlebar__material--side {
+  width: 0;
+}
+
+.app.is-sidebar-hidden .titlebar__material--main {
+  left: 0;
+}
+
 html[data-platform="darwin"] {
   --titlebar-h: 46px;
 }

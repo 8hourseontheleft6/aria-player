@@ -3306,6 +3306,77 @@ async function runSmoke ({ win, ctx }) {
         ? `：${overflowAudit.noTitleGroups.join('、')}（例如 ${overflowAudit.noTitleSample.join('、')}）`
         : '（都能看到全文）'))
 
+    /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
+     *
+     * 用户给了批注截图："中间有一个很明显的条，改一下" —— 说的是标题栏与内容之间那条硬边：
+     * 网格第 1 行（标题栏）露出的是裸背景，第 2 行才开始有侧栏/内容材质，于是 y=--titlebar-h 处
+     * 出现一条横线。现在标题栏内部有两块材质元素把它接上（.titlebar__material--side/--main）。
+     *
+     * ⚠️ 为什么这条守卫量的是**机制**而不是像素：
+     * 我先写了像素版本（截图读相邻行色差），它给出"浅色 1/255、深色 2/255"的**假通过** ——
+     * 同一张 PNG 用 Python 量深色是 15/255。逐层排查发现 capturePage() 的 toBitmap()
+     * 与随后 toPNG() 写出的像素**不一致**（getSize() 是 DIP、位图和 PNG 是物理像素、
+     * getScaleFactors() 又返回 [1]，几种推算都自相矛盾）。既然读不准，就不该把它留在流水线里
+     * —— 一个会说谎的守卫比没有守卫更糟。这里改成验证"材质确实接上了"，像素层面
+     * 用 docs/CONVENTIONS.md 里记的手工配方（Python + 写出的 PNG）复核。
+     */
+    const seamCheck = await evaluate(win, `
+      const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      actions.setView('songs')
+      await settle(700)
+      const read = () => {
+        const app = document.querySelector('.app')
+        const sidebar = document.querySelector('.sidebar')
+        const stage = document.querySelector('.stage')
+        const side = document.querySelector('.titlebar__material--side')
+        const main = document.querySelector('.titlebar__material--main')
+        const titlebar = document.querySelector('.titlebar')
+        const box = (node) => (node ? node.getBoundingClientRect() : null)
+        const style = (node) => (node ? getComputedStyle(node) : null)
+        return {
+          titlebarH: box(titlebar)?.height || 0,
+          sidebarW: box(sidebar)?.width || 0,
+          sidebarVisible: store.get().ui.sidebarVisible,
+          hasSide: Boolean(side),
+          hasMain: Boolean(main),
+          materialH: box(side)?.height || 0,
+          sideW: box(side)?.width || 0,
+          mainLeft: box(main)?.left || 0,
+          sideBg: style(side)?.backgroundColor || '',
+          sidebarBg: style(sidebar)?.backgroundColor || '',
+          sideFilter: style(side)?.backdropFilter || '',
+          sidebarFilter: style(sidebar)?.backdropFilter || '',
+          mainBg: style(main)?.backgroundColor || '',
+          stageBg: style(stage)?.backgroundColor || '',
+          mainFilter: style(main)?.backdropFilter || '',
+          stageFilter: style(stage)?.backdropFilter || '',
+          // 标题栏内容（按钮、标题）必须在材质之上
+          contentZ: style(document.querySelector('.titlebar__left'))?.zIndex || 'auto',
+          appClass: app.className
+        }
+      }
+      const light = read()
+      await actions.setSetting({ theme: 'dark' })
+      await settle()
+      const dark = read()
+      await actions.setSetting({ theme: 'system' })
+      await settle()
+      return { light, dark }
+    `)
+    const seamOk = (state) => state.hasSide && state.hasMain &&
+      Math.abs(state.materialH - state.titlebarH) <= 1 &&
+      Math.abs(state.sideW - state.sidebarW) <= 1 &&
+      Math.abs(state.mainLeft - state.sidebarW) <= 1 &&
+      state.sideBg === state.sidebarBg && state.sideFilter === state.sidebarFilter &&
+      state.mainBg === state.stageBg && state.mainFilter === state.stageFilter
+    record('标题栏材质与下方两栏接得上（用户批注的那条"很明显的条"）',
+      seamOk(seamCheck.light) && seamOk(seamCheck.dark),
+      `浅色：标题栏 ${seamCheck.light.titlebarH}px、材质高 ${seamCheck.light.materialH}px；` +
+      `侧栏宽 ${seamCheck.light.sidebarW}px、材质左块宽 ${seamCheck.light.sideW}px、右块左缘 ${seamCheck.light.mainLeft}px；` +
+      `左块材质=${seamCheck.light.sideBg}/${seamCheck.light.sideFilter}（侧栏自身 ${seamCheck.light.sidebarBg}/${seamCheck.light.sidebarFilter}）；` +
+      `深色：侧栏材质=${seamCheck.dark.sideBg}、内容材质=${seamCheck.dark.mainBg}（内容栏自身 ${seamCheck.dark.stageBg}）`)
+
     /* ---------- 键盘焦点可见（WCAG 2.4.7） ----------
      *
      * 用**真实的 Tab 键**走一遍（sendInputEvent），而不是 .focus() ——

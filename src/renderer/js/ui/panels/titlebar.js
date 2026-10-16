@@ -161,7 +161,26 @@ export function createTitlebar ({ store, bus, actions }) {
     ))
   }
 
+  /*
+   * 标题栏下面那层「材质补条」。
+   *
+   * 网格是两行：第 1 行标题栏，第 2 行才是侧栏与内容；材质只画在第 2 行的元素上，
+   * 于是 y = --titlebar-h 处出现一条硬边（用户批注截图："中间有一个很明显的条，改一下"）。
+   * 这里在标题栏内部补两块**真实元素**，把两侧材质接上去：
+   *   · 左块宽度 = 侧栏宽度，用侧栏的材质（blur(34px) saturate(180%)）；
+   *   · 右块铺满其余宽度，用内容的材质（blur(blur*0.6)）。
+   *
+   * 为什么不用伪元素：一开始写在 `.app::before/::after` 上，浅色下正常，
+   * 深色下**在出图那条采集路径里整条带子仍是裸背景**（实测 Δ=13~16/255）——
+   * 伪元素上的 backdrop-filter 在部分合成路径下不生效，换成真实元素才稳。
+   * z-index: -1 让它们待在标题栏自身内容（z-index 由 .titlebar 的 20 提供）之下。
+   */
+  const materialSide = h('div', { class: 'titlebar__material titlebar__material--side' })
+  const materialMain = h('div', { class: 'titlebar__material titlebar__material--main' })
+  const materialLayer = h('div', { class: 'titlebar__materials' }, materialSide, materialMain)
+
   const element = h('header', { class: 'titlebar' },
+    materialLayer,
     h('div', { class: 'titlebar__left' }, sidebarToggle, appName),
     h('div', { class: 'titlebar__spacer' }),
     island,

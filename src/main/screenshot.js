@@ -982,6 +982,16 @@ async function runScreenshots ({ win }) {
     const image = await win.webContents.capturePage()
     const target = path.join(OUTPUT_DIR, file)
     await fsp.writeFile(target, image.toPNG())
+    /*
+     * 这里**故意不**做像素级的"标题栏接缝"自检。
+     *
+     * 试过：capturePage() 的 toBitmap() 与随后 toPNG() 写出的像素对不上
+     * （getSize() 是 DIP、位图/PNG 是物理像素、getScaleFactors() 又返回 [1]，
+     * 几种推算互相矛盾），读出来会给出"没有台阶"的**假结论** ——
+     * 而同一张 PNG 用 Python 量，深色主题下是 15/255 的真台阶。
+     * 会撒谎的检查比没有检查更糟，所以像素复核走文档里的手工配方（见 docs/CONVENTIONS.md），
+     * 自检里改验"材质元素是否真的接上"（机制层面，不会假通过）。
+     */
     written.push(`${file}（${label}）`)
     console.log(`  ✓ ${file} — ${label}`)
   }
