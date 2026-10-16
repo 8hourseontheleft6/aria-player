@@ -429,6 +429,42 @@ async function runScreenshots ({ win }) {
         }))
         return true`)
       await sleep(900)
+    }],
+    /*
+     * macOS 标题栏的**模拟**核对（本机没有 Mac，这是能在 Windows 上做到的最接近的验证）。
+     *
+     * 做法：把 `data-platform` 切成 darwin（CSS 里有两条 darwin 规则：标题栏高度 46px、
+     * 左侧给红黄绿留 84px），并摘掉自绘的窗口按钮 —— 真机上这一步由 titlebar.js 按 isMac 跳过。
+     * 这不是真机截图，只用来确认 mac 分支的布局没崩：标题不压在圆点区域、右侧控件不溢出、
+     * 内容区仍从侧栏右边开始。真机外观仍需要朋友那边确认。
+     */
+    ['21-mac-titlebar-emulated.png', 'macOS 标题栏（模拟 data-platform=darwin，非真机截图）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('songs')
+        document.documentElement.dataset.platform = 'darwin'
+        document.querySelectorAll('.win-controls').forEach((node) => node.remove())
+        // 上一条截图（设置页提示浮窗）留下的 fixed 浮层会飘到这张图上：鼠标没真的移开，它不会自己收
+        document.querySelectorAll('.setting-tip').forEach((node) => node.remove())
+        await new Promise((r) => setTimeout(r, 800))
+        return true`)
+      await sleep(400)
+      await evaluate(win, `
+        console.log('[mac-emu] ' + JSON.stringify((() => {
+          const box = (sel) => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } }
+          const app = document.querySelector('.titlebar__app')
+          return {
+            platform: document.documentElement.dataset.platform,
+            titlebarH: getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h').trim(),
+            titlebar: box('.titlebar'),
+            titlebarApp: box('.titlebar__app'),
+            winControls: document.querySelectorAll('.win-controls').length,
+            stage: box('.stage'),
+            appTitleUnderTrafficLights: app ? Math.round(app.getBoundingClientRect().left) < 84 : null,
+            overflowX: document.documentElement.scrollWidth - window.innerWidth
+          }
+        })())); return true`)
+      await sleep(300)
     }]
   ]
 
