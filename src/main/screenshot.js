@@ -629,6 +629,36 @@ async function runScreenshots ({ win }) {
       await sleep(600)
       await visualizerProbe()
       await sleep(200)
+    }],
+    /*
+     * 设置 → 外观：这一节之前**没有任何截图覆盖**，而新增的「音频可视化」一行就在这里。
+     */
+    ['28-settings-appearance.png', '设置 · 外观（含「音频可视化」一行）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('settings')
+        await new Promise((r) => setTimeout(r, 800))
+        const head = [...document.querySelectorAll('.settings__group-title')]
+          .find((n) => (n.textContent || '').trim() === '外观')
+        head?.scrollIntoView({ block: 'start' })
+        await new Promise((r) => setTimeout(r, 500))
+        return true`)
+      await sleep(400)
+      await evaluate(win, `
+        console.log('[settings-appearance] ' + JSON.stringify((() => {
+          const rows = [...document.querySelectorAll('.settings__row')]
+          const row = rows.find((r) => (r.querySelector('.settings__row-title')?.textContent || '').includes('音频可视化'))
+          const seg = row ? row.querySelector('.segmented') : null
+          const themeRow = rows.find((r) => (r.querySelector('.settings__row-title')?.textContent || '').trim() === '主题')
+          return {
+            found: Boolean(row),
+            options: seg ? [...seg.querySelectorAll('.segmented__item')].map((b) => b.textContent) : [],
+            selected: seg ? (seg.querySelector('.is-selected')?.textContent || '') : '',
+            themeSelected: themeRow ? (themeRow.querySelector('.segmented .is-selected')?.textContent || '') : null,
+            visibleRows: rows.filter((r) => r.getBoundingClientRect().top > 0 && r.getBoundingClientRect().bottom < window.innerHeight).length
+          }
+        })())); return true`)
+      await sleep(200)
     }]
   ]
 
@@ -648,8 +678,14 @@ async function runScreenshots ({ win }) {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
       // 悬停提示 / 气泡不是视图的一部分，拍图时不该出现
       document.querySelectorAll('.setting-tip, .tooltip, .popover, .menu').forEach((n) => n.remove())
-      // 平台模拟与主题复位（darwin 模拟的那几张会自己再设一次）
+      // 平台模拟与主题复位（darwin 模拟、深色那几张会自己再设一次）
       document.documentElement.dataset.platform = 'win32'
+      /*
+       * 主题、可视化样式这些**存在设置里**，会跨图泄漏：
+       * 实测 27-visualizer-dark 把主题设成深色之后，紧跟的 28-settings-appearance 也跟着变深色
+       * （探针里 themeSelected="深色" 就是这个原因）。这里 await 一次复位，让顺序确定下来。
+       */
+      await actions.setSetting({ theme: 'system', visualizerStyle: 'bars' })
       actions.setView('songs')
       actions.setSource({ type: 'all', value: null })
       actions.clearSelection()
