@@ -541,8 +541,58 @@ async function runScreenshots ({ win }) {
 
   const written = []
   for (const [file, label, prepare] of shots) {
+    /*
+     * 每张之前先"清场"。
+     *
+     * 起因是一次前后对比：同一张 21-mac-titlebar-emulated.png，改动前拍到的是**设置页 + 残留的 tooltip**、
+     * 改动后拍到的是歌曲页 —— 整图 22.97% 的像素不同，看着像"改动把界面弄坏了"，
+     * 其实只是上一张留下的状态串味了（视图、悬停提示、打开的浮层、滚动位置都会留）。
+     * 出图不一致，前后对比就不可信；所以每张开始前统一复位，再由 prepare 明确设置它要的样子。
+     */
+    await evaluate(win, `
+      const { actions, store } = window.__aria
+      // 关掉可能开着的菜单 / 弹层（应用自己的 Esc 处理逻辑，最省事也最接近真实）
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      // 悬停提示 / 气泡不是视图的一部分，拍图时不该出现
+      document.querySelectorAll('.setting-tip, .tooltip, .popover, .menu').forEach((n) => n.remove())
+      // 平台模拟与主题复位（darwin 模拟的那几张会自己再设一次）
+      document.documentElement.dataset.platform = 'win32'
+      actions.setView('songs')
+      actions.setSource({ type: 'all', value: null })
+      actions.clearSelection()
+      if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
+      // 滚动位置复位，免得上一张卷到中间的列表影响这一张
+      document.querySelectorAll('.scroll, .tracklist, .library-scroll, .content').forEach((n) => { n.scrollTop = 0 })
+      return true`)
+    /*
+     * 把**真实光标**挪到左上角：:hover 由真实指针位置决定，合成事件赶不走它。
+     * 这样"悬停状态"这一项就是确定的。
+     * 说清楚它没能解决什么：连拍两次后仍有 4 张差 0.2–0.3%，定位到的差异只有两处 ——
+     * 专辑封面那一小块（内嵌图 / 在线取图的渲染时机不同）与进度条位置（播放进度差），
+     * 都属于固有噪声，不是悬停造成的。
+     */
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: 2, y: 2 })
+    await sleep(220)
+
     await prepare()
-    await sleep(350)
+    /*
+     * 等动画/过渡真的停下再拍。
+     *
+     * 这些画面里有灵动岛展开、面板入场、工具条浮出等过渡；原来固定睡 350ms，
+     * 机器一忙就不够 —— 同一张图两次不同（实测 16-sidebar-hidden / 17-playlist /
+     * 18-island-dark / 19-selection 会差 0.1–0.3%，看着像"改动动了界面"，其实只是拍早了）。
+     * 用 Web Animations API 问"还有没有在跑的动画"，比猜一个更长的睡眠可靠。
+     */
+    {
+      const deadline = Date.now() + 2500
+      for (;;) {
+        const running = await evaluate(win, `
+          return document.getAnimations().filter((a) => a.playState === 'running').length`)
+        if (!running || Date.now() > deadline) break
+        await sleep(80)
+      }
+    }
+    await sleep(180)
     const image = await win.webContents.capturePage()
     const target = path.join(OUTPUT_DIR, file)
     await fsp.writeFile(target, image.toPNG())
