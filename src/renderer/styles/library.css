@@ -848,7 +848,14 @@ html[data-reduce-motion='true'] .online-result:hover {
   z-index: 45;
   display: flex;
   flex-direction: column;
-  background: var(--bg-bar);
+  /*
+   * 队列是**弹层**，按 DESIGN.md「材料与层次」应当用 --bg-popover（≈98% 不透明），
+   * 而不是 --bg-bar（≈78%）。用 --bg-bar 的后果在截图里一眼可见：
+   * 面板后面的「随机播放 / 播放」按钮和专辑列的文字全都透出来，
+   * 看起来就是"两块内容重在一起"（用户此前抱怨过的同类现象）。
+   * 毛玻璃留着（与菜单、选择器那些弹层一致），但底色换成弹层那一档。
+   */
+  background: var(--bg-popover);
   backdrop-filter: blur(var(--blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   border-left: 0.5px solid var(--separator);
