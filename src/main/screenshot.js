@@ -956,6 +956,15 @@ async function runScreenshots ({ win }) {
      * 搜不到东西时的空状态（专辑页）。这一条是补漏的证据：
      * 专辑 / 艺人页以前没有空状态，搜不到时只有页头一行副标题、下面一片空白。
      */
+    ['37-search-no-match-wall.png', '搜索无结果 · 媒体墙的空状态', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('wall')
+        actions.setQuery('zzz这个词肯定搜不到qqq')
+        await new Promise((r) => setTimeout(r, 1100))
+        return true`)
+      await sleep(1000)
+    }],
     ['35-search-no-match.png', '搜索无结果 · 专辑页的空状态', async () => {
       await evaluate(win, `
         const { actions } = window.__aria

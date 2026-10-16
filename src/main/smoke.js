@@ -3599,6 +3599,10 @@ async function runSmoke ({ win, ctx }) {
       actions.setView('artists')
       await settle(800)
       results.push(read('artists', '.artist-row'))
+      // 媒体墙也会被搜索过滤（0 张专辑时以前是一块空白表面，与专辑/艺人页同一类缺口）
+      actions.setView('wall')
+      await settle(900)
+      results.push(read('wall', '.wall-tile'))
       actions.setQuery('')
       actions.setView('songs')
       await settle(700)
@@ -3608,8 +3612,8 @@ async function runSmoke ({ win, ctx }) {
       !item.hasEmpty || item.rows !== 0 || !item.echoes || item.textLength < 10)
     // 三个视图的文案本来就不同（歌曲线长、专辑/艺人线短）—— 如果三处完全一样，多半又在看同一块
     const emptyTexts = new Set(emptyStates.results.map((item) => item.sample))
-    record('搜不到东西时：三个视图都给出空状态、回显关键词、不留残余行',
-      emptyStates.results.length === 3 && emptyBad.length === 0 && emptyTexts.size >= 2,
+    record('搜不到东西时：四个视图都给出空状态、回显关键词、不留残余行',
+      emptyStates.results.length === 4 && emptyBad.length === 0 && emptyTexts.size >= 2,
       emptyStates.results.map((item) =>
         `${item.view}: 空状态=${item.hasEmpty}、行数=${item.rows}、回显关键词=${item.echoes}、` +
         `文案长度=${item.textLength}（${item.sample}…）`

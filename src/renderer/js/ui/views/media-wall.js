@@ -216,11 +216,18 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
   const grid = h('div', { class: 'media-wall' })
   const viewport = h('div', { class: 'wall-viewport' }, grid)
 
+  /*
+   * 空状态：一张专辑都没有时（搜不到、或者资料库还是空的），
+   * 以前这面墙就是一块空白表面 —— 与专辑 / 艺人页同一类缺口（那两页也是这轮补的）。
+   * 用同一套 .empty 组件与同样的措辞，视觉上与其它视图保持一致。
+   */
+  const emptyNode = h('div', { class: 'empty hidden' })
+
   // 右下角位置指示器：内容比视口大时才出现
   const minimapViewport = h('div', { class: 'wall-minimap__viewport' })
   const minimap = h('div', { class: 'wall-minimap', hidden: true }, minimapViewport)
 
-  const element = h('div', { class: 'content-inner view-root' }, toolbar, header, viewport, minimap)
+  const element = h('div', { class: 'content-inner view-root' }, toolbar, header, viewport, emptyNode, minimap)
 
   /* ================================================================ */
   /* 2D 画布：平移、惯性、橡皮筋、位置指示器                            */
@@ -1237,6 +1244,31 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
       list.every((album, index) => album.key === albumList[index]?.key)
     const rebuilt = list !== albumList && !sameContent
     albumList = list
+
+    /* 空状态：0 张专辑时给出解释（搜不到 / 还没加文件夹），否则藏起来 */
+    if (!list.length) {
+      const state = store.get()
+      clear(emptyNode)
+      if (!state.library.folders.length) {
+        emptyNode.append(
+          icon('folder', { className: 'icon icon--stroke empty__icon' }),
+          h('div', { class: 'empty__title', text: '还没有音乐文件夹' }),
+          h('div', { class: 'empty__text', text: '添加一个包含音乐的文件夹，Aria 会递归扫描并读取歌曲信息（封面、歌词都会一起读取）。' }),
+          h('button', { class: 'btn btn--primary', type: 'button', onClick: () => actions.addFolder() }, icon('plus'), '添加音乐文件夹')
+        )
+      } else {
+        emptyNode.append(
+          icon('search', { className: 'icon icon--stroke empty__icon' }),
+          h('div', { class: 'empty__title', text: '没有匹配的专辑' }),
+          h('div', { class: 'empty__text', text: `没有找到与「${state.ui.query}」相关的专辑，换个关键词试试。` })
+        )
+      }
+      emptyNode.classList.remove('hidden')
+      grid.style.display = 'none'
+    } else {
+      emptyNode.classList.add('hidden')
+      grid.style.display = ''
+    }
 
     if (rebuilt) {
       // 用户正在看这面墙：重建也要保住他的视角（首次构建没有 previous，才回左上角）
