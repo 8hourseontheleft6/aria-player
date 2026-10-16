@@ -3220,6 +3220,16 @@ async function runSmoke ({ win, ctx }) {
           // 只看"自己直接装文字"的元素，别把外层容器算进来（容器的 scrollWidth 会被子元素影响）
           const ownText = [...node.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())
           if (!ownText) continue
+          /*
+           * 跳过**正在动画中**的元素。
+           *
+           * 「.island__label」靠 max-width 0 → 64px 做展开动画；量到一半时它是 24px 宽、
+           * 内容（媒体墙）比它宽，于是被判成"硬裁" —— 那是**正常行为**，不是缺陷。
+           * 一个会在正常行为上报警的检查比没有检查更糟（本项目反复吃过这个亏），
+           * 所以动画期间直接不参与判定。
+           */
+          if (typeof node.getAnimations === 'function' &&
+              node.getAnimations().some((animation) => animation.playState === 'running')) continue
           const overflowX = node.scrollWidth - node.clientWidth
           const overflowY = node.scrollHeight - node.clientHeight
           const hasEllipsis = style.textOverflow === 'ellipsis'
@@ -3618,6 +3628,48 @@ async function runSmoke ({ win, ctx }) {
         `${item.view}: 空状态=${item.hasEmpty}、行数=${item.rows}、回显关键词=${item.echoes}、` +
         `文案长度=${item.textLength}（${item.sample}…）`
       ).join('；'))
+
+    /* ---------- 没东西可播时，播放按钮必须说一句话 ----------
+     *
+     * 这是"界面诚实"的另一半：
+     *   · 上一轮做的是「点不动就禁用」（依赖总闸的子开关）；
+     *   · 这一半是「能点、但没有作用对象时，必须给解释」。
+     * playAll / shuffleAll 现在就是这么做的（toast「列表里还没有歌曲」），
+     * 实测它们作用于 visibleTracks()（**被筛过的集合**，不是整个资料库）——
+     * 所以筛空之后点它们不会静默无效。这条守卫把该行为钉住。
+     */
+    const emptyPlayFeedback = await evaluate(win, `
+      const settle = async (ms = 550) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      const clearToasts = () => document.querySelectorAll('.toast').forEach((n) => n.remove())
+      clearToasts()
+      actions.setView('songs')
+      await settle(700)
+      actions.setQuery('zzz这个词肯定搜不到qqq')
+      await settle(900)
+      const clickAndRead = async (label) => {
+        const button = [...document.querySelectorAll('button')]
+          .find((n) => (n.textContent || '').trim() === label && n.getClientRects().length > 0)
+        if (!button) return { missing: true, toasts: [] }
+        button.click()
+        await settle(600)
+        const toasts = [...document.querySelectorAll('.toast')].map((n) => (n.textContent || '').trim())
+        clearToasts()
+        return { missing: false, toasts }
+      }
+      const play = await clickAndRead('播放')
+      const shuffle = await clickAndRead('随机播放')
+      const queueBefore = window.__aria.store.get().playback.queue.length
+      actions.setQuery('')
+      await settle(600)
+      return { play, shuffle, queueBefore }
+    `)
+    const saidSomething = (result) =>
+      result && !result.missing && result.toasts.length > 0 && result.toasts.every((text) => text.length > 0)
+    record('筛空之后点「播放 / 随机播放」：会弹出说明，不是静默无效',
+      saidSomething(emptyPlayFeedback.play) && saidSomething(emptyPlayFeedback.shuffle),
+      `播放 → ${emptyPlayFeedback.play.missing ? '没找到按钮' : JSON.stringify(emptyPlayFeedback.play.toasts)}；` +
+      `随机播放 → ${emptyPlayFeedback.shuffle.missing ? '没找到按钮' : JSON.stringify(emptyPlayFeedback.shuffle.toasts)}`)
 
     /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
      *
