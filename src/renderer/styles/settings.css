@@ -350,8 +350,12 @@
 .settings__source-error {
   padding: 1px 6px;
   border-radius: var(--radius-xs);
-  background: rgba(255, 69, 58, 0.18);
-  color: #ff453a;
+  /*
+   * 用 --danger，不写死 #ff453a：那个值只是**深色**主题的红（浅色主题是 #ff3b30），
+   * 写死等于在浅色下用了深色的红 —— 正是裸值守卫说的那种"只把当前主题调好"。
+   */
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
   font-size: var(--text-caption);
 }
 

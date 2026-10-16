@@ -225,8 +225,14 @@ for (const [file, selector] of BASELINE) {
  * 这三处都是「控件本身很小、用 --text-caption(11px) 会散架」的刻意写法，
  * 所以同步基准；同一次里 .knob__letter 的 17px 已改成 var(--text-headline)、
  * 两处裸红 #ff453a 已改成 var(--danger)（那两个才是真错：亮色主题下红色不对）。
+ *
+ * 2026-10 再降一次：色 44 → 42。逐条过了一遍全部 44 处，绝大多数（34 处，都在 browse.css）
+ * 是刻意画在封面图上的白字 / 黑遮罩 / mask 里的 #000 —— 它们**不该**跟着主题走。
+ * 只有 .settings__source-error 那一处是真错：写死的 #ff453a 只是深色主题的红
+ * （浅色主题是 #ff3b30），于是浅色下用了深色的红。已改成 var(--danger) + color-mix 底，
+ * 因此基准跟着降 2。
  */
-const NAKED_BASELINE = { color: 44, duration: 9, fontSize: 8 }
+const NAKED_BASELINE = { color: 42, duration: 9, fontSize: 8 }
 
 const naked = { color: 0, duration: 0, fontSize: 0 }
 for (const file of cssFiles) {

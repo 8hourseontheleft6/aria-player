@@ -3457,8 +3457,35 @@ async function runSmoke ({ win, ctx }) {
       `设置页里的原生 <select> 数量=${uiRound2.nativeSelects}（应为 0）；` +
       `深色：字 ${uiRound2.darkPill?.color} / 底 ${uiRound2.darkPill?.background}（可读=${uiRound2.darkReadable}）；` +
       `浅色：字 ${uiRound2.lightPill?.color} / 底 ${uiRound2.lightPill?.background}（可读=${uiRound2.lightReadable}）`)
-    record('设置里列出系统媒体键（清单来自主进程注册表）',
-      uiRound2.hasMediaGroup === true &&
+
+    /*
+     * 「音源脚本出错」那个小徽章用的是 --danger，而不是写死的 #ff453a。
+     * 写死的那种只在深色主题下对（浅色主题的 --danger 是 #ff3b30），
+     * 属于裸值守卫说的"只把当前主题调好"。
+     * 这里不造一个真的坏脚本来验（那要写用户的音乐文件夹），而是挂一个同类的元素读它的计算色 ——
+     * 修复前是 rgb(255, 69, 58)，修复后应当是浅色主题的 --danger = rgb(255, 59, 48)。
+     */
+    const dangerProbe = await evaluate(win, `
+      const { actions, store } = window.__aria
+      await actions.setSetting({ theme: 'light' })
+      await new Promise((r) => setTimeout(r, 600))
+      const node = document.createElement('span')
+      node.className = 'settings__source-error'
+      document.body.appendChild(node)
+      const style = getComputedStyle(node)
+      const dangerToken = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim()
+      const result = { color: style.color, background: style.backgroundColor, token: dangerToken }
+      node.remove()
+      await actions.setSetting({ theme: 'system' })
+      await new Promise((r) => setTimeout(r, 400))
+      return result
+    `)
+    record('主题色不写死：音源出错徽章用 --danger（浅色主题下也应当是浅色的那个红）',
+      dangerProbe.color === 'rgb(255, 59, 48)' && dangerProbe.token === '#ff3b30' &&
+      !dangerProbe.background.includes('255, 69, 58'),
+      `浅色主题下 .settings__source-error 的字色 = ${dangerProbe.color}（--danger 令牌 = ${dangerProbe.token}）、` +
+      `底 = ${dangerProbe.background}；修复前字色会是深色主题的 rgb(255, 69, 58)`)
+    record('设置里列出系统媒体键（清单来自主进程注册表）',      uiRound2.hasMediaGroup === true &&
       uiRound2.declaredKeys.length === 4 &&
       uiRound2.mediaRowsOpen.length >= 4,
       `有「系统媒体键」分组=${uiRound2.hasMediaGroup}；主进程注册 ${uiRound2.declaredKeys.length} 个（${uiRound2.declaredKeys.join(', ')}）；` +
