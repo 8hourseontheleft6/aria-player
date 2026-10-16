@@ -76,6 +76,29 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
   let running = false
   let lastStyle = getStyle()
   let idleFrames = 0
+  let suppressed = false
+
+  /**
+   * 「减少动画」的判断与应用其它地方保持同一套（见 ui/views/media-wall.js）：
+   * 先问设置，再看 html 上的 data-reduce-motion。
+   *
+   * 为什么示波器也要听它的：那个开关的承诺是「关闭所有过渡与弹簧动画」，
+   * 而示波器是**持续**动画 —— 开着它却让底部一直动，等于当面食言。
+   */
+  function reduceMotion () {
+    return store.get().settings.reduceMotion === true ||
+      document.documentElement.dataset.reduceMotion === 'true'
+  }
+
+  function paintButton () {
+    if (suppressed) {
+      button.disabled = true
+      button.title = '音频可视化已暂停：设置 → 外观 里的「减少动画」开着'
+      return
+    }
+    button.disabled = false
+    button.title = `音频可视化：${visualizerStyleLabel(getStyle())}（点击切换）`
+  }
 
   function ensureAnalyser () {
     if (analyser) return true
@@ -185,11 +208,21 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     if (!running) return
     frame = requestAnimationFrame(tick)
 
+    // 「减少动画」开着：整条不画（只在状态切换的那一帧清一次，不是每帧都清）
+    const nowSuppressed = reduceMotion()
+    if (nowSuppressed !== suppressed) {
+      suppressed = nowSuppressed
+      strip.dataset.suppressed = suppressed ? 'true' : 'false'
+      clear()
+      paintButton()
+    }
+    if (suppressed) return
+
     const style = getStyle()
     if (style !== lastStyle) {
       lastStyle = style
       strip.dataset.style = style
-      button.title = `音频可视化：${visualizerStyleLabel(style)}（点击切换）`
+      paintButton()
       clear()
     }
     // 关闭：不建接入点、不画
@@ -224,8 +257,10 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     if (running) return
     running = true
     lastStyle = getStyle()
+    suppressed = reduceMotion()
     strip.dataset.style = lastStyle
-    button.title = `音频可视化：${visualizerStyleLabel(lastStyle)}（点击切换）`
+    strip.dataset.suppressed = suppressed ? 'true' : 'false'
+    paintButton()
     resize()
     // 面板刚打开时布局可能还没定下来，下一帧再量一次
     requestAnimationFrame(resize)
@@ -244,6 +279,8 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
   observer?.observe(canvas)
 
   strip.dataset.style = lastStyle
+  strip.dataset.suppressed = 'false'
+  paintButton()
 
   return {
     element: strip,

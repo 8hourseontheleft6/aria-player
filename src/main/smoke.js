@@ -932,6 +932,35 @@ async function runSmoke ({ win, ctx }) {
         restored: store.get().settings.visualizerStyle
       }
 
+      /*
+       * 「减少动画」开着时示波器必须停：那条开关承诺的是关掉所有动画，
+       * 而示波器是持续动画 —— 开着它却让底部一直动，等于当面食言。
+       * 顺带验证按钮被禁用（否则用户点了没反应、只会以为坏了）。
+       */
+      await actions.setSetting({ reduceMotion: true })
+      await settle(500)
+      actions.openNowPlaying({ lyrics: true })
+      await settle(1200)
+      const reducedProbe = (() => {
+        const node = document.querySelector('.visualizer__canvas')
+        const strip = document.querySelector('.visualizer')
+        const ctx = node.getContext('2d')
+        const data = ctx.getImageData(0, 0, node.width, node.height).data
+        let painted = 0
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 8) painted++
+        const button = [...document.querySelectorAll('.now-playing__topbar .btn')].find((b) => (b.title || '').includes('音频可视化') || (b.title || '').includes('减少动画'))
+        return {
+          paintedPct: (painted / (node.width * node.height)) * 100,
+          suppressed: strip.dataset.suppressed,
+          buttonDisabled: button ? button.disabled : null,
+          buttonTitle: button ? button.title : ''
+        }
+      })()
+      actions.closeNowPlaying()
+      await settle(400)
+      await actions.setSetting({ reduceMotion: false })
+      await settle(300)
+
       return {
         exists: Boolean(first && canvas()),
         pointerEvents: cs.pointerEvents,
@@ -946,6 +975,7 @@ async function runSmoke ({ win, ctx }) {
         offState,
         afterCycle,
         settingsRowCheck,
+        reducedProbe,
         runningAfterClose: Boolean(document.querySelector('.visualizer')) && store.get().ui.nowPlayingOpen === false
       }
     `)
@@ -979,6 +1009,18 @@ async function runSmoke ({ win, ctx }) {
       `点「波形」后 style=${visualizerCheck.settingsRowCheck.styleFromSettings}、` +
       `点「关闭」后 style=${visualizerCheck.settingsRowCheck.styleAfterOff}、` +
       `最后复原为 ${visualizerCheck.settingsRowCheck.restored}`)
+
+    /*
+     * 「减少动画」开着时示波器必须停住（它是持续动画，而那个开关承诺关掉所有动画），
+     * 并且顶栏那颗按钮要变成禁用 —— 否则用户点了没反应，只会以为坏了。
+     */
+    record('开着「减少动画」时示波器停住，切换按钮也禁用',
+      visualizerCheck.reducedProbe.paintedPct < 0.05 &&
+      visualizerCheck.reducedProbe.suppressed === 'true' &&
+      visualizerCheck.reducedProbe.buttonDisabled === true,
+      `画布残留 ${visualizerCheck.reducedProbe.paintedPct.toFixed(2)}%、` +
+      `dataset.suppressed=${visualizerCheck.reducedProbe.suppressed}、` +
+      `按钮禁用=${visualizerCheck.reducedProbe.buttonDisabled}、提示「${visualizerCheck.reducedProbe.buttonTitle}」`)
 
     const matchDetailCheck = await evaluate(win, `
       const { actions, store } = window.__aria

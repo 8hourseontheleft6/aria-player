@@ -636,7 +636,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
        */
       row({
         title: '音频可视化',
-        sub: '正在播放页底部那条示波器。也可以直接在正在播放页点顶栏那颗波形图标循环切换。选「关闭」时不创建 WebAudio 接入点，播放路径保持原生。',
+        sub: '正在播放页底部那条示波器。也可以直接在正在播放页点顶栏那颗波形图标循环切换。选「关闭」时不创建 WebAudio 接入点，播放路径保持原生；上面开着「减少动画」时它也会停住不动（那条开关的承诺是关掉所有动画）。',
         control: segmented(visualizerChoices(), settings.visualizerStyle || 'bars',
           (style) => actions.setSetting({ visualizerStyle: style }))
       })
