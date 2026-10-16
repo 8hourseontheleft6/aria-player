@@ -193,6 +193,25 @@ async function runSmoke ({ win, ctx }) {
       'window.__aria.store.get().library.loaded === true && window.__aria.store.get().library.tracks.length > 0',
       { label: '资料库加载', timeout: 180000 })
 
+    /*
+     * 再等**扫描真的结束**（主进程的权威状态，不靠渲染层事件）。
+     *
+     * 只等 loaded + 有曲目是不够的：全新档案第一次启动时曲目是"边扫边出现"的，
+     * 后面的检查会在主进程还在解析 810 个文件时开跑 —— 实测表现就是
+     * 「搜索面板那两条」假红（展开动画与异步落盘的等待预算被扫描吃掉，
+     * 量到的按钮矩形还是 0×0）。等待扫描结束比把超时调大更根治，也让整轮更可复现。
+     */
+    {
+      const libraryService = ctx.get('library')
+      const deadline = Date.now() + 240000
+      let stats = libraryService.getStats()
+      while (stats.scanning && Date.now() < deadline) {
+        await sleep(500)
+        stats = libraryService.getStats()
+      }
+      console.log(`[smoke] 扫描已结束：${stats.count} 首（仍在扫描=${stats.scanning}）`)
+    }
+
     const library = await evaluate(win, `
       const state = window.__aria.store.get()
       return {

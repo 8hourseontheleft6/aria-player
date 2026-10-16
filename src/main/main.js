@@ -95,8 +95,15 @@ const automationFlag = AUTOMATION_FLAGS.find((flag) => process.argv.includes(fla
 if (automationFlag) {
   // 四个模式共用同一份自动化目录：第一次跑要做一次全量扫描，
   // 之后（含换了模式）都能直接复用扫描结果与封面缓存，跑起来快得多
-  app.setPath('userData', path.join(app.getPath('temp'), 'aria-dev-profile'))
-  console.log(`[main] 自动化模式 ${automationFlag}：使用独立用户数据目录，不影响你自己的设置与缓存`)
+  /*
+   * 想换一份干净的档案时，不必去删系统的临时目录 —— 设 ARIA_USER_DATA 指到别处即可：
+   *   ARIA_USER_DATA=<某个目录> npm run smoke
+   * 两个用处：① 档案被写坏（自检中途被杀）时换一个，而不是删除目录外的东西；
+   *          ② 需要并行/隔离跑两轮时互不干扰。
+   */
+  const automationProfile = process.env.ARIA_USER_DATA || path.join(app.getPath('temp'), 'aria-dev-profile')
+  app.setPath('userData', automationProfile)
+  console.log(`[main] 自动化模式 ${automationFlag}：使用独立用户数据目录 ${automationProfile}，不影响你自己的设置与缓存`)
 }
 
 // 自定义协议必须在 app ready 之前声明
