@@ -7,6 +7,11 @@ Thumbs.db
 
 *.err
 
+# 临时脚本与提交信息文件（我是用 `Out-File tmp-msg.txt` 写提交信息，
+# 有一次 `git add -A` 把它一起提交了 —— 这类文件名一律不进仓库）
+tmp-*
+.tmp-*
+
 # �û��ṩ�ľ������ο����������Ϊ docs/equalizer-data.json
 
 # 打包产物（npm run dist）
