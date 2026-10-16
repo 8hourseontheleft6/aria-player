@@ -13,7 +13,7 @@
 import { createBus, EVENTS } from './core/bus.js'
 import { createStore, initialState } from './core/store.js'
 import { remote, isElectron } from './core/remote.js'
-import { normalizeForSearch } from './core/format.js'
+import { normalizeForSearch, isMacOS } from './core/format.js'
 import { createAudioEngine } from './core/audio-engine.js'
 import { matchPreset, matchByMetadata, PRESETS } from './core/equalizer-presets.js'
 import { analyzeTrack, cachedAnalysis, analyzeBuffer, classifyStyle } from './core/style-analyzer.js'
@@ -1422,6 +1422,14 @@ async function main () {
       if (isTextInput(event.target) && !mod) return
 
       if (mod) {
+        /*
+         * macOS 上 ⌘Q 是「退出应用」、⌘M 是「最小化」，都是**系统保留键**。
+         * 这两个功能（播放队列 / 静音）原来直接占用它们并 preventDefault()，
+         * 后果是：按 ⌘M 想最小化，结果被静音；⌘Q 想退出，却先去开关了队列。
+         * 所以 mac 上这两个功能改走 ⌥⌘Q / ⌥⌘M —— 不带 ⌥ 时直接放行，交给系统菜单。
+         */
+        const mac = isMacOS()
+        const reservedTaken = mac && !event.altKey
         switch (event.key) {
           case 'ArrowRight':
             player.next()
@@ -1446,6 +1454,7 @@ async function main () {
             return
           case 'q':
           case 'Q':
+            if (reservedTaken) return
             actions.toggleQueue()
             event.preventDefault()
             return
@@ -1456,6 +1465,7 @@ async function main () {
             return
           case 'm':
           case 'M':
+            if (reservedTaken) return
             player.toggleMute()
             event.preventDefault()
             return

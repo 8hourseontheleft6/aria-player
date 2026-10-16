@@ -33,6 +33,16 @@ export function keyHint (combo) {
   return isMacOS() ? `⌘${combo}` : `Ctrl+${combo}`
 }
 
+/**
+ * 与 macOS **系统保留键**冲突的那几个功能用这个：
+ * ⌘Q 是「退出」、⌘M 是「最小化」，不能让应用抢走（用户按 ⌘M 想最小化，结果被静音了）。
+ * 所以 macOS 上这两个功能改走 ⌥⌘ 变体；其它平台没有这个冲突，仍用 Ctrl+。
+ * 目前用于「播放队列」与「静音」，改绑定时记得同时改这里和 app.js 的按键分支。
+ */
+export function reservedKeyHint (combo) {
+  return isMacOS() ? `⌥⌘${combo}` : `Ctrl+${combo}`
+}
+
 /** 秒 -> "3:45" / "1:02:33" */
 export function formatDuration (seconds, { forceHours = false } = {}) {
   if (!Number.isFinite(seconds) || seconds < 0) return forceHours ? '0:00:00' : '0:00'

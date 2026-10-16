@@ -3,7 +3,7 @@
 import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { remote } from '../../core/remote.js'
-import { formatDurationLong, formatRelativeTime, formatRate, formatBytes, modLabel, altLabel } from '../../core/format.js'
+import { formatDurationLong, formatRelativeTime, formatRate, formatBytes, modLabel, altLabel, reservedKeyHint } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
 import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
@@ -31,11 +31,11 @@ function shortcutRows () {
     ['← / →', '快退 / 快进 5 秒（正在播放页）'],
     ['← / →', '设置页：在分类之间切换（键盘也能跳分类）'],
     [`${mod} + L`, '打开正在播放与歌词'],
-    [`${mod} + Q`, '播放队列'],
+    [reservedKeyHint('Q'), '播放队列'],
     [`${mod} + B`, '显示 / 隐藏边栏'],
     [`${mod} + O`, '添加音乐文件夹'],
     [`${mod} + F`, '搜索（设置页聚焦设置内搜索，其它页聚焦资料库搜索）'],
-    [`${mod} + M`, '静音'],
+    [reservedKeyHint('M'), '静音'],
     ['M', '切换播放模式'],
     ['[ / ]', '播放速度 -0.05× / +0.05×'],
     ['中键拖动', '媒体墙：任意方向移动整面墙'],
