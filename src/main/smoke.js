@@ -5628,6 +5628,48 @@ async function runSmoke ({ win, ctx }) {
         `文案「${toastProbe.text.slice(0, 70)}…」`)
     }
 
+    /*
+     * macOS 的 open-file（双击音频 / 拖到 Dock 图标）：本机触发不了那个 Electron 事件，
+     * 所以用**注入的假 app** 直接驱动桥，验证「攒批 → 一次性交给导入链路」这段我们自己的逻辑。
+     * 真正没被测到的只剩「Electron 会按时把事件送进来」，那是文档保证的部分。
+     */
+    {
+      const { createOpenFilesBridge } = require('./open-files')
+      const batches = []
+      const listeners = {}
+      const fakeApp = { on: (name, handler) => { listeners[name] = handler } }
+      // 手动控制定时器，避免依赖真实时间
+      const timers = { pending: [], set: (fn) => { timers.pending.push(fn); return timers.pending.length }, clear: () => {} }
+      const bridge = createOpenFilesBridge({ onPaths: (paths) => batches.push(paths), timers })
+      bridge.attach(fakeApp)
+      const fire = (filePath) => listeners['open-file']({ preventDefault: () => { fire.prevented = true } }, filePath)
+
+      // ready 之前到的路径先攒着，不能直接交出去（那时 library 还没就绪）
+      fire('/Users/me/Music/a.mp3')
+      fire('/Users/me/Music/b.flac')
+      const pendingBeforeReady = bridge.pending.length
+      const batchesBeforeReady = batches.length
+
+      bridge.ready()
+      timers.pending.splice(0).forEach((fn) => fn())   // 触发攒批的 flush
+      const firstBatch = batches[0] || []
+
+      // ready 之后连续三个文件 → 合并成一批（不然会弹三次确认框）
+      fire('/Users/me/Desktop/1.mp3')
+      fire('/Users/me/Desktop/2.mp3')
+      fire('/Users/me/Desktop/3.mp3')
+      timers.pending.splice(0).forEach((fn) => fn())
+      const secondBatch = batches[batches.length - 1] || []
+
+      record('macOS open-file：冷启动先攒着，就绪后合并成一批交给导入链路',
+        batchesBeforeReady === 0 && pendingBeforeReady === 2 &&
+        firstBatch.length === 2 && firstBatch[1] === '/Users/me/Music/b.flac' &&
+        batches.length === 2 && secondBatch.length === 3 && fire.prevented === true,
+        `ready 前收到 2 个：交出去 ${batchesBeforeReady} 批、攒着 ${pendingBeforeReady} 个；` +
+        `ready 后第一批 ${firstBatch.length} 个；再连来 3 个 → 合并成 ${secondBatch.length} 个一批；` +
+        `事件被 preventDefault=${fire.prevented === true}`)
+    }
+
     /* ---------- 在线补全 ---------- */
 
     const online = ctx.get('online')

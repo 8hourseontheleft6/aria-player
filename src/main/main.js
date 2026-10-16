@@ -16,6 +16,26 @@ const { createWatcherService } = require('./services/watcher')
 const { createBackgroundService } = require('./services/background')
 const { registerIpc } = require('./ipc')
 const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = require('./window')
+const { createOpenFilesBridge } = require('./open-files')
+
+/*
+ * macOS：把文件拖到 Dock 图标 / 在 Finder 里双击音频 → 走「拖进窗口」那条完全相同的导入链路。
+ * 监听必须**尽早**注册（双击文件冷启动时事件在 ready 之前就到达），所以放在文件顶部；
+ * 只在 darwin 上挂 —— Windows / Linux 没有这个事件，行为一个字都不变。
+ * 冷启动期间到达的路径由桥先攒着（见 open-files.js），等 bootstrap 里交出处理函数后再一次送进来。
+ */
+let deliverOpenedPaths = null
+const openFiles = createOpenFilesBridge({
+  onPaths: (paths) => {
+    if (!deliverOpenedPaths) {
+      // 理论上到不了这里（bootstrap 里是「先设处理函数、再 ready」），留个日志以防万一
+      console.warn('[open-file] 还没有接收方，忽略', paths)
+      return
+    }
+    deliverOpenedPaths(paths)
+  }
+})
+if (process.platform === 'darwin') openFiles.attach(app)
 
 // 播放器需要程序化播放（自动下一曲），不要求用户手势
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
@@ -185,6 +205,19 @@ async function bootstrap () {
   const library = ctx.get('library')
   const watcher = ctx.get('watcher')
   await library.init()
+
+  /*
+   * macOS 的 open-file：窗口与资料库都就绪了，把双击 / 拖到 Dock 的路径交给
+   * `resolveDrop` —— 与「拖进窗口」完全同一条链路（文件夹会弹确认、库内的歌直接播、
+   * 库外的问要不要把所在文件夹加进来）。先设处理函数再 ready()，冷启动攒下的路径
+   * 会在 ready() 那一刻一次性送进来。
+   */
+  if (process.platform === 'darwin') {
+    deliverOpenedPaths = (paths) => {
+      library.resolveDrop(paths).catch((err) => console.warn('[open-file] 导入失败:', err && err.message))
+    }
+    openFiles.ready()
+  }
 
   /** 监听目录 / 开关的指纹，只有它变了才需要重建 watcher */
   let watchSignature = `${settings.get().watchFolders !== false}|${library.getFolders().join('\u0000')}`
