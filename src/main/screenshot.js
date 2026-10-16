@@ -249,6 +249,34 @@ async function runScreenshots ({ win }) {
       await evaluate(win, `window.__aria.actions.setQuery(''); window.__aria.actions.setView('settings'); return true`)
       await sleep(900)
     }],
+    /*
+     * 这两张是 README 的深色主题表格里引用的（07 深色正在播放、08 深色歌曲列表）。
+     * 它们一度从这份清单里丢掉了 —— 文件还在、README 还在引用，但出图工具不再重写它们，
+     * 于是那两张图**停留在旧版本**（文件时间比其它图早六天）。
+     * 代价是真金白银：我拿 08 当"当前深色渲染"排查了一小时，
+     * 得出的"深色下标题栏还有一条硬边"其实是六天前的旧渲染（当时还没有标题栏材质元素）。
+     * 教训写进 docs/CONVENTIONS.md：截图是产物，清单丢一条 = README 那张图永远停在旧版本。
+     */
+    ['07-now-playing-dark.png', '深色 · 正在播放', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        actions.setView('songs')
+        if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
+        actions.openNowPlaying({ lyrics: true })
+        await actions.setSetting({ theme: 'dark', visualizerStyle: 'bars' })
+        return true`)
+      await sleep(1400)
+    }],
+    ['08-library-dark.png', '深色 · 歌曲列表', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        actions.closeNowPlaying()
+        if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
+        actions.setView('songs')
+        await actions.setSetting({ theme: 'dark' })
+        return true`)
+      await sleep(1200)
+    }],
     ['09-albums.png', '专辑网格', async () => {
       await evaluate(win, `window.__aria.actions.setView('albums'); return true`)
       await sleep(1600)
@@ -921,6 +949,12 @@ async function runScreenshots ({ win }) {
 
   const written = []
   for (const [file, label, prepare] of shots) {
+    // 接缝探针要用的几何量（只在 ARIA_SEAM_PROBE 时用到；顺手取一次，代价可忽略）
+    const seamProbeGeometry = await evaluate(win, `
+      return {
+        titlebarHeight: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h')) || 0,
+        windowWidth: window.innerWidth || 1
+      }`)
     /*
      * 每张之前先"清场"。
      *
@@ -982,6 +1016,58 @@ async function runScreenshots ({ win }) {
     const image = await win.webContents.capturePage()
     const target = path.join(OUTPUT_DIR, file)
     await fsp.writeFile(target, image.toPNG())
+
+    /*
+     * 只打印、不断言的诊断（ARIA_SEAM_PROBE=1 时才跑，只对资料库那两张）。
+     *
+     * 为什么需要它：读像素这件事踩过坑 —— capturePage() 的 toBitmap() 与写出的 PNG
+     * 给出相反结论（"干净" vs 深色 15/255 的真台阶），而 getSize()、位图字节数、
+     * getScaleFactors() 三者互相矛盾，几种"推算行距"的写法都能自洽地算错。
+     * 这里把三种读法的尺寸并排打出来，并**写一份 PNG 再读回来**量接缝 ——
+     * 与 Python 读同一个文件的读数对照，就知道哪种可信。它只打印，不会让谁"通过"。
+     */
+    if (process.env.ARIA_SEAM_PROBE && /library/.test(file)) {
+      const { nativeImage } = require('electron')
+      const roundtripPath = path.join(OUTPUT_DIR, '..', '..', '.tmp', 'seam-probe.png')
+      await fsp.writeFile(roundtripPath, image.toPNG())
+      const back = nativeImage.createFromPath(roundtripPath)
+      const describe = (img, label) => {
+        const buffer = img.toBitmap()
+        const size = img.getSize()
+        return `${label}[getSize ${size.width}×${size.height}, 位图 ${Math.round(buffer.length / 4)} 像素, ` +
+          `按字节推宽 ${Math.round(buffer.length / 4 / size.height)}]`
+      }
+      const measure = (img, label) => {
+        const buffer = img.toBitmap()
+        const size = img.getSize()
+        const width = Math.round(buffer.length / 4 / size.height)
+        const geometry = seamProbeGeometry
+        const scale = width / (geometry.windowWidth || 1)
+        const titlebarPx = Math.round(geometry.titlebarHeight * scale)
+        const rowAt = (x, y) => {
+          const offset = (y * width + x) * 4
+          return [buffer[offset + 2], buffer[offset + 1], buffer[offset]]
+        }
+        const results = []
+        for (const fraction of [0.08, 0.2, 0.4, 0.6, 0.85]) {
+          const x = Math.round(width * fraction)
+          let worst = 0
+          for (let y = Math.max(1, titlebarPx - 10); y <= Math.min(size.height - 1, titlebarPx + 10); y++) {
+            const a = rowAt(x, y - 1)
+            const b = rowAt(x, y)
+            worst = Math.max(worst, Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]))
+          }
+          results.push(worst)
+        }
+        const min = Math.min(...results)
+        const max = Math.max(...results)
+        return `${label}接缝处：各列最大 ${max}/255、最轻的一列 ${min}/255（行距宽 ${width}、标题栏在第 ${titlebarPx} 行）`
+      }
+      console.log(`  [seam-probe] ${describe(image, '直接 ')} | ${describe(back, '回读 ')}`)
+      console.log(`  [seam-probe] ${measure(image, '直接 ')}`)
+      console.log(`  [seam-probe] ${measure(back, '回读 ')}`)
+      console.log(`  [seam-probe] 已写出 .tmp/seam-probe.png（用 Python 读同一个文件对照）`)
+    }
     /*
      * 这里**故意不**做像素级的"标题栏接缝"自检。
      *

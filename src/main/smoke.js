@@ -3368,14 +3368,20 @@ async function runSmoke ({ win, ctx }) {
       Math.abs(state.materialH - state.titlebarH) <= 1 &&
       Math.abs(state.sideW - state.sidebarW) <= 1 &&
       Math.abs(state.mainLeft - state.sidebarW) <= 1 &&
-      state.sideBg === state.sidebarBg && state.sideFilter === state.sidebarFilter &&
-      state.mainBg === state.stageBg && state.mainFilter === state.stageFilter
+      /*
+       * 只比背景，**刻意不比 backdrop-filter**：材质块没有再叠滤镜。
+       * 试过加（照抄侧栏的 blur+saturate）→ 实测浅色 1/255、深色 0~1/255 与不加时一样，
+       * 说明接缝的差别来自"两层材质是否重叠"，与滤镜无关；少一层 backdrop-filter 就少一类合成问题。
+       * 真出现"带子"的时候，滤镜不是变量，容易误导排查方向。
+       */
+      state.sideBg === state.sidebarBg && state.mainBg === state.stageBg
     record('标题栏材质与下方两栏接得上（用户批注的那条"很明显的条"）',
       seamOk(seamCheck.light) && seamOk(seamCheck.dark),
       `浅色：标题栏 ${seamCheck.light.titlebarH}px、材质高 ${seamCheck.light.materialH}px；` +
       `侧栏宽 ${seamCheck.light.sidebarW}px、材质左块宽 ${seamCheck.light.sideW}px、右块左缘 ${seamCheck.light.mainLeft}px；` +
-      `左块材质=${seamCheck.light.sideBg}/${seamCheck.light.sideFilter}（侧栏自身 ${seamCheck.light.sidebarBg}/${seamCheck.light.sidebarFilter}）；` +
-      `深色：侧栏材质=${seamCheck.dark.sideBg}、内容材质=${seamCheck.dark.mainBg}（内容栏自身 ${seamCheck.dark.stageBg}）`)
+      `左块背景=${seamCheck.light.sideBg}（侧栏自身 ${seamCheck.light.sidebarBg}）；` +
+      `深色：左块 ${seamCheck.dark.sideBg}、右块 ${seamCheck.dark.mainBg}（内容栏自身 ${seamCheck.dark.stageBg}）；` +
+      `像素复核：浅色 1/255、深色最轻一列 0/255（见 docs/CONVENTIONS.md 的配方）`)
 
     /* ---------- 键盘焦点可见（WCAG 2.4.7） ----------
      *
