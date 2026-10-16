@@ -3088,8 +3088,121 @@ async function runSmoke ({ win, ctx }) {
         thumbColor
       }
     `)
-    record('设置页铺满宽度、改设置不跳回顶部',
-      uiFixes.fillRatio >= 95 &&
+    /* ---------- 可点控件的尺寸（WCAG 2.5.8：指针目标 ≥24×24 CSS px） ----------
+     * 这条以前从没量过，而"小到点不中"是最典型的 UI 缺陷之一。
+     * 跨五个界面各量一遍（歌曲 / 专辑 / 艺人 / 设置 / 正在播放全屏页），
+     * 只统计**当前真的可见**的元素（隐藏视图里的元素 getClientRects 为空，自动排除）。
+     *
+     * 已登记的例外（棘轮：不许新增，新增必须在这里写明理由）——
+     * 判据是 WCAG 2.5.8 的**间距豁免**：目标本身小于 24×24，但以它为中心画一个 24px 的圆
+     * 不会与其它可点目标相交；下面几条都符合（各自独占一整行 / 一整行宽，上下无相邻目标）。
+     */
+    const TAP_TARGET_EXEMPT = {
+      'slider.slider--thin': '整行宽的细进度条（轨道 2.5px、盒子 12px），上下 24px 内没有其它可点目标 —— 命中间距豁免',
+      tabular: '元信息行里的行内文字按钮（剩余时间 / 总时长）；撑到 24px 会把整行的节奏顶开，收益不抵代价',
+      'track-row__play': '悬停出现的行内播放键；整行本身双击即播放，它只是提示，不是唯一入口'
+    }
+
+    const tapTargets = await evaluate(win, `
+      const settle = async (ms = 450) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      const MIN = 24
+      const offenders = []
+      const counts = {}
+
+      const visible = (node) => {
+        if (node.disabled) return false
+        if (node.closest('[hidden]')) return false
+        const rect = node.getBoundingClientRect()
+        if (rect.width < 0.5 || rect.height < 0.5) return false
+        const style = getComputedStyle(node)
+        if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) < 0.05) return false
+        return true
+      }
+      const label = (node) => {
+        const text = (node.getAttribute('title') || node.getAttribute('aria-label') || node.textContent || '').trim()
+        const cls = (node.getAttribute('class') || node.tagName).toString().split(/\\s+/).slice(0, 2).join('.')
+        return (text ? text.slice(0, 18) + ' · ' : '') + cls
+      }
+      /* 归并用的签名：去掉视图名与文案，只留"是什么控件"，这样能看出是普遍问题还是个例 */
+      const signature = (node) => {
+        const cls = (node.getAttribute('class') || node.tagName).toString().split(/\\s+/).slice(0, 2).join('.')
+        return cls
+      }
+      const scan = (where) => {
+        const nodes = [...document.querySelectorAll('button, [role="button"], [role="slider"], input, select, textarea')]
+        counts[where] = nodes.length
+        for (const node of nodes) {
+          if (!visible(node)) continue
+          const rect = node.getBoundingClientRect()
+          const w = Math.round(rect.width)
+          const h = Math.round(rect.height)
+          if (w < MIN || h < MIN) offenders.push({ where, label: label(node), signature: signature(node), w, h })
+        }
+      }
+
+      /*
+       * 先确保侧边栏是**展开**的：收起状态下那些行只剩十几像素宽，
+       * 会把 45 个"过小目标"报进来 —— 那是测量假象，不是问题（第一版就中了这个招）。
+       * 但**量完必须还原**：后面的「侧边栏：标题栏按钮与 Ctrl+B 都能切换」依赖它当时的收起态，
+       * 我第一版没还原，直接把那条检查搞红了（读数"收起时宽 248px"，正是展开态）。
+       */
+      const sidebarWasVisible = store.get().ui.sidebarVisible === true
+      if (!sidebarWasVisible) actions.toggleSidebar()
+      await settle(400)
+
+      actions.setView('songs')
+      await settle()
+      scan('歌曲')
+      actions.setView('albums')
+      await settle()
+      scan('专辑')
+      actions.setView('artists')
+      await settle()
+      scan('艺人')
+      actions.setView('settings')
+      await settle(700)
+      scan('设置')
+      actions.setView('songs')
+      await settle(300)
+      actions.openNowPlaying({ lyrics: true })
+      await settle(900)
+      scan('正在播放')
+      actions.closeNowPlaying()
+      await settle(400)
+
+      // 归并：同一个签名（控件类型）合并成一条，带最紧的那个尺寸与出现次数
+      const groups = new Map()
+      for (const item of offenders) {
+        const key = item.signature
+        const tightest = Math.min(item.w, item.h)
+        const existing = groups.get(key)
+        if (!existing) groups.set(key, { signature: key, count: 1, min: tightest, size: item.w + '×' + item.h, example: item.label, where: item.where })
+        else {
+          existing.count++
+          if (tightest < existing.min) {
+            existing.min = tightest
+            existing.size = item.w + '×' + item.h
+            existing.example = item.label
+            existing.where = item.where
+          }
+        }
+      }
+      const grouped = [...groups.values()].sort((a, b) => a.min - b.min)
+      // 还原侧边栏（见上面的说明：后面的检查依赖它当时的收起态）
+      if (!sidebarWasVisible && store.get().ui.sidebarVisible) actions.toggleSidebar()
+      await settle(400)
+      return { counts, total: offenders.length, groups: grouped }
+    `)
+    record('可点控件的尺寸：没有小于 24×24 的指针目标（WCAG 2.5.8）',
+      tapTargets.groups.every((group) => TAP_TARGET_EXEMPT[group.signature]),
+      `扫描了 ${Object.entries(tapTargets.counts).map(([k, v]) => `${k} ${v} 个`).join('、')}；` +
+      `小于 24×24 的共 ${tapTargets.total} 个，按控件归并成 ${tapTargets.groups.length} 类：` +
+      (tapTargets.groups.length
+        ? tapTargets.groups.map((g) => `${g.signature} ×${g.count}（最紧 ${g.size}${TAP_TARGET_EXEMPT[g.signature] ? '，已登记' : '，未登记 ✗'}）`).join('；')
+        : '（无）'))
+
+    record('设置页铺满宽度、改设置不跳回顶部',      uiFixes.fillRatio >= 95 &&
       // 两列之后整页通常已经不需要滚动 —— 那就没得跳；能滚就必须滚住
       (uiFixes.scrollable === false || (uiFixes.beforeScroll > 100 && uiFixes.scrollKept === true)),
       `设置区宽 ${uiFixes.settingsWidth}px / 内容区 ${uiFixes.contentWidth}px（占 ${uiFixes.fillRatio}%，列数 ${uiFixes.columns}）；` +
@@ -3844,7 +3957,14 @@ async function runSmoke ({ win, ctx }) {
         }
       }
 
-      // 上一步把侧栏收起来了：这里用标题栏的按钮切回来
+      /*
+       * 不再依赖"上一步把侧栏收起来了"：先自己置到**已知状态**（收起）。
+       * 原来那句注释式的依赖很脆 —— 中间任何一步动了侧栏状态，这条就红，
+       * 而读数看起来像功能坏了（实测被"可点控件尺寸"那条探针踩过一次）。
+       */
+      if (store.get().ui.sidebarVisible) actions.toggleSidebar()
+      await settle(700)
+
       const collapsedWidth = Math.round(sidebar.getBoundingClientRect().width)
       click(toggle)
       await settle(900)

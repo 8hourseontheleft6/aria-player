@@ -331,7 +331,9 @@ select option {
   position: relative;
   display: flex;
   align-items: center;
-  height: 22px;
+  /* 24px 是 WCAG 2.5.8 对指针目标的下限；原来 22px，差这 2px 就会被"可点控件尺寸"那条检查点名。
+     轨道本身仍然很细（4px / 细版 3px），这里只是把**命中区**留够。 */
+  height: 24px;
   cursor: pointer;
   touch-action: none;
 }
@@ -451,6 +453,8 @@ select option {
 .search input {
   flex: 1;
   min-width: 0;
+  /* 输入框本身也是指针目标：给够 WCAG 2.5.8 的 24px 下限（原来实测 21px） */
+  min-height: 24px;
   border: none;
   background: none;
   font-size: var(--text-subhead);
@@ -527,7 +531,8 @@ select option {
   display: flex;
   align-items: center;
   gap: 3px;
-  height: 22px;
+  /* 24px：WCAG 2.5.8 的指针目标下限（见自检「可点控件的尺寸」），原来 22px */
+  height: 24px;
   padding: 0 5px 0 7px;
   border-radius: var(--radius-xs);
   font-size: var(--text-caption);

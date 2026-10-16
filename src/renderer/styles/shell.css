@@ -300,6 +300,8 @@ html[data-platform="darwin"] .titlebar {
 .sidebar__collapse {
   width: 24px;
   height: 24px;
+  /* 同 .sidebar__row-action：它在 flex 行里会被压扁（实测 15×24），明确禁止收缩 */
+  flex: none;
   color: var(--label-3);
 }
 
@@ -431,8 +433,15 @@ html[data-platform="darwin"] .titlebar {
 
 .sidebar__row-action {
   opacity: 0;
-  width: 18px;
-  height: 18px;
+  /*
+   * 24×24（原来 18×18），并且**明确不许被 flex 压扁**。
+   * 起因是"可点控件尺寸"那条检查：这两个"+"实测只有 12×18 —— 侧栏行是 flex 容器，
+   * 按钮没写 flex: none，空间一紧就被压到比自身还小（收起按钮同样：CSS 写 24×24，实测 15×24）。
+   * 侧栏行高 30px，24×24 放得下，这也正是 WCAG 2.5.8 对指针目标的下限。
+   */
+  width: 24px;
+  height: 24px;
+  flex: none;
   border-radius: var(--radius-2xs);
   display: grid;
   place-items: center;
