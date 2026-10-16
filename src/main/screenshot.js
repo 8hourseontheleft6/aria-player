@@ -952,6 +952,27 @@ async function runScreenshots ({ win }) {
      * 为什么要单独拍：说明文字写着"需要先打开总开关"，光看字看不出"点不动"——
      * 这一张是给"界面是否诚实"留证据的（31-settings-online.png 是总闸开启的对照）。
      */
+    /*
+     * 搜不到东西时的空状态（专辑页）。这一条是补漏的证据：
+     * 专辑 / 艺人页以前没有空状态，搜不到时只有页头一行副标题、下面一片空白。
+     */
+    ['35-search-no-match.png', '搜索无结果 · 专辑页的空状态', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('albums')
+        actions.setQuery('zzz这个词肯定搜不到qqq')
+        await new Promise((r) => setTimeout(r, 900))
+        return true`)
+      await sleep(900)
+    }],
+    ['36-search-no-match-artists.png', '搜索无结果 · 艺人页的空状态', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('artists')
+        await new Promise((r) => setTimeout(r, 800))
+        return true`)
+      await sleep(800)
+    }],
     ['34-settings-online-off.png', '在线与扩展 · 总闸关闭（子开关禁用）', async () => {
       await evaluate(win, `
         const { actions } = window.__aria

@@ -3554,6 +3554,67 @@ async function runSmoke ({ win, ctx }) {
       `真按 Esc 后剩 ${layerAfterEsc.count} 个（= 基线）、DOM 里 .menu/.popover ${layerAfterEsc.open} 个；` +
       `反复开合 8 次后剩 ${layerLeak.count} 个（= 基线，无泄漏）`)
 
+    /* ---------- 搜不到东西时的空状态 ----------
+     *
+     * 空状态是重构里最容易被丢掉的东西（"反正没人会搜不到"），
+     * 但它恰恰是新用户最容易撞上的界面 —— 朋友的音乐目录还没扫完时也一样。
+     * 用**搜不到的词**造出这个状态（不动任何数据），三个浏览视图各验一遍：
+     *   ① 出现 .empty，且正文里**回显**那个关键词（不回显的话用户不知道自己搜了什么）；
+     *   ② 列表行数为 0（不是"空状态还在、下面还留着一堆行"）。
+     */
+    const emptyStates = await evaluate(win, `
+      const settle = async (ms = 650) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      const junk = 'zzz这个词肯定搜不到qqq'
+      /*
+       * 只看**可见的**元素：三个视图都留在 DOM 里（切视图只是显示/隐藏），
+       * 所以 document.querySelector('.empty') 拿到的永远是文档里第一个（歌曲视图的）——
+       * 第一版就是这样三次都在验同一块，读数里"三个视图文案长度都是 42"就是这个破绽，
+       * 属于"因为错误的原因通过"。行数同理，只数可见的那些。
+       */
+      const visible = (node) => node && node.getClientRects().length > 0
+      const read = (view, rowSelector) => {
+        const empties = [...document.querySelectorAll('.empty')].filter(visible)
+        const empty = empties[0]
+        const text = empty ? empty.textContent : ''
+        return {
+          view,
+          hasEmpty: Boolean(empty),
+          extras: empties.length,
+          textLength: text.length,
+          echoes: text.includes(junk),
+          rows: [...document.querySelectorAll(rowSelector)].filter(visible).length,
+          sample: text.slice(0, 24)
+        }
+      }
+      const results = []
+      actions.setView('songs')
+      await settle(700)
+      actions.setQuery(junk)
+      await settle(900)
+      results.push(read('songs', '.track-row'))
+      actions.setView('albums')
+      await settle(800)
+      results.push(read('albums', '.cover-card'))
+      actions.setView('artists')
+      await settle(800)
+      results.push(read('artists', '.artist-row'))
+      actions.setQuery('')
+      actions.setView('songs')
+      await settle(700)
+      return { results, junk }
+    `)
+    const emptyBad = emptyStates.results.filter((item) =>
+      !item.hasEmpty || item.rows !== 0 || !item.echoes || item.textLength < 10)
+    // 三个视图的文案本来就不同（歌曲线长、专辑/艺人线短）—— 如果三处完全一样，多半又在看同一块
+    const emptyTexts = new Set(emptyStates.results.map((item) => item.sample))
+    record('搜不到东西时：三个视图都给出空状态、回显关键词、不留残余行',
+      emptyStates.results.length === 3 && emptyBad.length === 0 && emptyTexts.size >= 2,
+      emptyStates.results.map((item) =>
+        `${item.view}: 空状态=${item.hasEmpty}、行数=${item.rows}、回显关键词=${item.echoes}、` +
+        `文案长度=${item.textLength}（${item.sample}…）`
+      ).join('；'))
+
     /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
      *
      * 用户给了批注截图："中间有一个很明显的条，改一下" —— 说的是标题栏与内容之间那条硬边：

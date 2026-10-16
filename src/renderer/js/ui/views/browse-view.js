@@ -3,7 +3,7 @@
  * 四个页面各自有独立的滚动容器，切换时只显示其中一个。
  */
 
-import { h, on } from '../../core/dom.js'
+import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { EVENTS } from '../../core/bus.js'
 import { formatDurationLong } from '../../core/format.js'
@@ -31,7 +31,8 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   const albumsToolbar = h('div', { class: 'view-toolbar' },
     albumsTitle, h('div', { class: 'view-toolbar__spacer' }), albumsMeta, albumsSearch.element)
   const albumsHeader = pageHeader('专辑', '按艺人 / 专辑名排列')
-  const albumsScroll = h('div', { class: 'view-body scroll browse-scroll' }, albumGrid.element)
+  const albumsEmpty = h('div', { class: 'empty hidden' })
+  const albumsScroll = h('div', { class: 'view-body scroll browse-scroll' }, albumGrid.element, albumsEmpty)
   const albumsPage = h('div', { class: 'browse-page' }, albumsToolbar, albumsHeader.element, albumsScroll)
 
   /**
@@ -66,7 +67,8 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   const artistsToolbar = h('div', { class: 'view-toolbar' },
     artistsTitle, h('div', { class: 'view-toolbar__spacer' }), artistsMeta, artistsSearch.element)
   const artistsHeader = pageHeader('艺人', '按名称排列')
-  const artistsScroll = h('div', { class: 'view-body scroll browse-scroll' }, artistRows.element)
+  const artistsEmpty = h('div', { class: 'empty hidden' })
+  const artistsScroll = h('div', { class: 'view-body scroll browse-scroll' }, artistRows.element, artistsEmpty)
   const artistsPage = h('div', { class: 'browse-page' }, artistsToolbar, artistsHeader.element, artistsScroll)
 
   /* ================= 详情页公共部件 ================= */
@@ -251,6 +253,44 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
   let artistsSignature = ''
   let currentDetailKey = null
 
+  /*
+   * 专辑 / 艺人页的空状态。
+   *
+   * 以前这两页没有空状态：搜不到东西时只在页头副标题写一句「没有匹配「X」的专辑」，
+   * 下面是一片空白 —— 而**同一件事在歌曲页有一整块空状态**（图标 + 标题 + 说明，
+   * 见 library-view.js 的 .empty）。自检那条「搜不到东西时」的探针把差异量出来了：
+   * 歌曲页有 .empty，专辑 / 艺人页 0 个。补齐，用同一套 .empty 组件与同样的措辞。
+   * 顺带覆盖首次启动（还没有音乐文件夹）——那是新用户一定会遇到的状态，
+   * 空白页面对他毫无帮助，这里给一句解释加一个按钮。
+   */
+  function buildEmpty (node, { iconName, title, text, action }) {
+    clear(node)
+    node.append(
+      icon(iconName, { className: 'icon icon--stroke empty__icon' }),
+      h('div', { class: 'empty__title', text: title }),
+      h('div', { class: 'empty__text', text: text }),
+      action || ''
+    )
+    node.classList.remove('hidden')
+  }
+
+  function emptyContentFor (kind) {
+    const state = store.get()
+    if (!state.library.folders.length) {
+      return {
+        iconName: 'folder',
+        title: '还没有音乐文件夹',
+        text: '添加一个包含音乐的文件夹，Aria 会递归扫描并读取歌曲信息（封面、歌词都会一起读取）。',
+        action: h('button', { class: 'btn btn--primary', type: 'button', onClick: () => actions.addFolder() }, icon('plus'), '添加音乐文件夹')
+      }
+    }
+    return {
+      iconName: 'search',
+      title: kind === 'albums' ? '没有匹配的专辑' : '没有匹配的艺人',
+      text: `没有找到与「${state.ui.query}」相关的${kind === 'albums' ? '专辑' : '艺人'}，换个关键词试试。`
+    }
+  }
+
   function render () {
     const state = store.get()
     const view = state.ui.view
@@ -277,6 +317,14 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
             : `没有匹配「${state.ui.query}」的专辑`)
         : `${albums.length} 张专辑 · ${state.library.tracks.length} 首歌曲`
       albumsScroll.scrollTop = 0
+      // 空状态：搜不到、或者整个资料库还没有专辑（首次启动）
+      if (!albums.length) {
+        buildEmpty(albumsEmpty, emptyContentFor('albums'))
+        albumGrid.element.style.display = 'none'
+      } else {
+        albumsEmpty.classList.add('hidden')
+        albumGrid.element.style.display = ''
+      }
       return
     }
 
@@ -295,6 +343,14 @@ export function createBrowseView ({ store, bus, player, artwork, actions, lazy: 
             ? `匹配「${state.ui.query}」的 ${artists.length} 位艺人`
             : `没有匹配「${state.ui.query}」的艺人`)
         : `${artists.length} 位艺人`
+      // 与专辑页同构的空状态
+      if (!artists.length) {
+        buildEmpty(artistsEmpty, emptyContentFor('artists'))
+        artistRows.element.style.display = 'none'
+      } else {
+        artistsEmpty.classList.add('hidden')
+        artistRows.element.style.display = ''
+      }
       return
     }
 
