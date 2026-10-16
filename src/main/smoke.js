@@ -3616,7 +3616,31 @@ async function runSmoke ({ win, ctx }) {
       actions.setQuery('')
       actions.setView('songs')
       await settle(700)
-      return { results, junk }
+
+      /*
+       * 空播放列表：这一类空状态不靠搜索（列表本来就是空的），
+       * 文案不回显搜索词，而是回显**列表名**，并且要给一条出路（「去全部歌曲里挑」）。
+       * 建一个临时列表，验完就删，不留痕迹。
+       */
+      const created = await actions.createPlaylist('自检空状态')
+      actions.openPlaylist(created.id)
+      await settle(950)
+      const playlistEmpty = (() => {
+        const isVisible = (node) => node && node.getClientRects().length > 0
+        const empty = [...document.querySelectorAll('.empty')].filter(isVisible)[0]
+        const text = empty ? empty.textContent : ''
+        return {
+          hasEmpty: Boolean(empty),
+          rows: [...document.querySelectorAll('.track-row')].filter(isVisible).length,
+          mentionsName: text.includes('自检空状态'),
+          hasWayOut: Boolean(empty && empty.querySelector('button')),
+          text: text.slice(0, 40)
+        }
+      })()
+      await actions.deletePlaylist(created.id)
+      actions.setView('songs')
+      await settle(600)
+      return { results, junk, playlistEmpty, playlistsLeft: actions.playlists().length }
     `)
     const emptyBad = emptyStates.results.filter((item) =>
       !item.hasEmpty || item.rows !== 0 || !item.echoes || item.textLength < 10)
@@ -3628,6 +3652,16 @@ async function runSmoke ({ win, ctx }) {
         `${item.view}: 空状态=${item.hasEmpty}、行数=${item.rows}、回显关键词=${item.echoes}、` +
         `文案长度=${item.textLength}（${item.sample}…）`
       ).join('；'))
+
+    record('空播放列表：给出空状态、回显列表名、并提供一条出路',
+      emptyStates.playlistEmpty.hasEmpty === true &&
+      emptyStates.playlistEmpty.rows === 0 &&
+      emptyStates.playlistEmpty.mentionsName === true &&
+      emptyStates.playlistEmpty.hasWayOut === true &&
+      emptyStates.playlistsLeft === 0,
+      `临时列表「自检空状态」：空状态=${emptyStates.playlistEmpty.hasEmpty}、行数=${emptyStates.playlistEmpty.rows}、` +
+      `回显列表名=${emptyStates.playlistEmpty.mentionsName}、有出路按钮=${emptyStates.playlistEmpty.hasWayOut}；` +
+      `文案「${emptyStates.playlistEmpty.text}…」；已删除（剩余 ${emptyStates.playlistsLeft} 个）`)
 
     /* ---------- 没东西可播时，播放按钮必须说一句话 ----------
      *

@@ -956,6 +956,20 @@ async function runScreenshots ({ win }) {
      * 搜不到东西时的空状态（专辑页）。这一条是补漏的证据：
      * 专辑 / 艺人页以前没有空状态，搜不到时只有页头一行副标题、下面一片空白。
      */
+    /*
+     * 空播放列表：与"搜不到"不同的另一类空状态 —— 文案回显**列表名**、并给一条出路。
+     * 临时列表建完就删（出图末尾本来就会清掉所有示例列表）。
+     */
+    ['38-empty-playlist.png', '空播放列表（回显列表名 + 一条出路）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        for (const item of actions.playlists()) await actions.deletePlaylist(item.id)
+        const created = await actions.createPlaylist('深夜通勤')
+        actions.openPlaylist(created.id)
+        await new Promise((r) => setTimeout(r, 1200))
+        return true`)
+      await sleep(1000)
+    }],
     ['37-search-no-match-wall.png', '搜索无结果 · 媒体墙的空状态', async () => {
       await evaluate(win, `
         const { actions } = window.__aria
