@@ -1,7 +1,7 @@
 'use strict'
 
 const path = require('node:path')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, session } = require('electron')
 
 const { createContext } = require('./registry')
 const { registerSchemes, registerProtocols } = require('./protocols')
@@ -237,7 +237,39 @@ async function bootstrap () {
       watchSignature = signature
       watcher.start()
     }
+    void applyProxySettings()
   })
+
+  /*
+   * 网络代理。
+   *
+   * 在线歌词 / 封面 / 艺人头像都是主进程用 net.fetch 发出的，走的是**默认会话** ——
+   * 所以 setProxy 一次，它们全都跟着走（渲染层本来就不能联网，不需要额外处理）。
+   * 起因：用户反馈「开了加速器还是取不到封面/头像」，而不少加速器并不设置系统代理，
+   * 这时「跟随系统」就等于没有代理。默认值 'system' 与改动前行为一致，不影响任何人。
+   */
+  let appliedProxySignature = ''
+  async function applyProxySettings () {
+    const { proxyMode, proxyUrl } = settings.get()
+    const mode = proxyMode || 'system'
+    const url = String(proxyUrl || '').trim()
+    const signature = `${mode}|${url}`
+    // settings:changed 会为任何设置触发，只有代理这一项真的变了才重新应用
+    if (signature === appliedProxySignature) return
+    appliedProxySignature = signature
+    const config = mode === 'manual' && url
+      ? { proxyRules: url, proxyBypassRules: '<local>' }
+      : { mode: mode === 'direct' ? 'direct' : 'system' }
+    try {
+      await session.defaultSession.setProxy(config)
+      console.log(`[main] 网络代理：${config.proxyRules || config.mode}`)
+    } catch (err) {
+      // 填错地址不该让应用起不来，也不该静默：日志里留一行
+      console.warn('[main] 设置网络代理失败：', err && err.message)
+      appliedProxySignature = ''
+    }
+  }
+  await applyProxySettings()
 
   win.webContents.once('did-finish-load', () => {
     // 启动后台增量刷新：文件没变的话只做 stat，很快

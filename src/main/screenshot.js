@@ -788,6 +788,58 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(300)
+    }],
+    /*
+     * 设置 → 在线与扩展：这一节此前也没有截图，而新增的「网络代理」一行在这里
+     * （用户反馈「开了加速器还是取不到封面/头像」—— 不少加速器不设系统代理）。
+     */
+    ['31-settings-online.png', '设置 · 在线与扩展（含「网络代理」）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('settings')
+        await new Promise((r) => setTimeout(r, 800))
+        const tab = [...document.querySelectorAll('.settings-nav__item')]
+          .find((n) => (n.textContent || '').trim() === '在线与扩展')
+        tab?.click()
+        await new Promise((r) => setTimeout(r, 900))
+        return true`)
+      await sleep(400)
+      await evaluate(win, `
+        console.log('[settings-online] ' + JSON.stringify((() => {
+          const rows = [...document.querySelectorAll('.settings__row')]
+          const row = rows.find((r) => (r.querySelector('.settings__row-title')?.textContent || '').includes('网络代理'))
+          const pill = row ? row.querySelector('.pill-select') : null
+          const input = row ? row.querySelector('input.settings__input') : null
+          const state = () => ({ disabled: input ? input.disabled : null, value: input ? input.value : null })
+          const out = { found: Boolean(row), pill: Boolean(pill), pillLabel: pill ? pill.textContent.trim() : '', initial: state() }
+          if (pill) {
+            pill.click()
+          }
+          return out
+        })())); return true`)
+      await sleep(400)
+      await evaluate(win, `
+        console.log('[settings-online] ' + JSON.stringify((() => {
+          const menu = document.querySelector('.popover .pill-menu')
+          const options = menu ? [...menu.querySelectorAll('.pill')].map((n) => n.textContent.replace(/\\s+/g, ' ').trim()) : []
+          // 选「手动」之后地址框应当可用
+          const manual = menu ? [...menu.querySelectorAll('.pill')].find((n) => n.textContent.includes('手动')) : null
+          manual?.click()
+          return { options }
+        })())); return true`)
+      await sleep(600)
+      await evaluate(win, `
+        console.log('[settings-online] ' + JSON.stringify((() => {
+          const rows = [...document.querySelectorAll('.settings__row')]
+          const row = rows.find((r) => (r.querySelector('.settings__row-title')?.textContent || '').includes('网络代理'))
+          const input = row ? row.querySelector('input.settings__input') : null
+          const after = { disabled: input ? input.disabled : null, opacity: input ? getComputedStyle(input).opacity : null }
+          // 拍完还原成「跟随系统」，别把设置留在手动上
+          const pill = row ? row.querySelector('.pill-select') : null
+          window.__aria.actions.setSetting({ proxyMode: 'system' })
+          return { after }
+        })())); return true`)
+      await sleep(700)
     }]
   ]
 

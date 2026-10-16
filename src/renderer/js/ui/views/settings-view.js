@@ -948,6 +948,50 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         sub: onlineOn ? '歌曲没有内嵌封面、目录里也没有图片时，按「专辑 + 艺人」补齐 600×600 封面' : '需要先打开总开关',
         control: switchControl(settings.onlineCovers !== false, (value) => actions.setSetting({ onlineCovers: value }))
       }),
+      /*
+       * 网络代理：用户反馈「开了加速器还是取不到封面/头像」—— 不少加速器不设系统代理，
+       * 而在线请求默认跟随系统代理，于是就等于没有代理。
+       * 三种模式：跟随系统（默认，等于原来的行为）/ 直连 / 手动填地址。
+       * 地址框只在「手动」时可用，但一直可见（免得切换模式时整页重渲染找不着它）。
+       */
+      (() => {
+        const urlInput = h('input', {
+          class: 'settings__input',
+          type: 'text',
+          spellcheck: 'false',
+          placeholder: 'http://127.0.0.1:7890',
+          value: settings.proxyUrl || ''
+        })
+        const syncUrlState = (mode) => {
+          const manual = mode === 'manual'
+          urlInput.disabled = !manual
+          urlInput.style.opacity = manual ? '' : '0.5'
+        }
+        const modePill = createPillSelect({
+          items: [
+            { value: 'system', label: '跟随系统' },
+            { value: 'direct', label: '直连' },
+            { value: 'manual', label: '手动' }
+          ],
+          value: settings.proxyMode || 'system',
+          title: '网络代理',
+          onPick: (value) => {
+            syncUrlState(value)
+            actions.setSetting({ proxyMode: value, proxyUrl: urlInput.value.trim() })
+          }
+        })
+        on(urlInput, 'change', () => actions.setSetting({ proxyUrl: urlInput.value.trim() }))
+        syncUrlState(settings.proxyMode || 'system')
+        return row({
+          title: '网络代理',
+          sub: '在线歌词 / 封面 / 头像都由主进程发出，这里一改它们全都跟着走。默认「跟随系统」；'
+            + '若开了加速器仍取不到封面或头像，多半是它没设系统代理 —— 切成「手动」并填它的地址（例如 http://127.0.0.1:7890），'
+            + '或者如果本来不需要代理，切成「直连」。',
+          control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            modePill.element,
+            h('div', { style: { width: '220px' } }, urlInput))
+        })
+      })(),
       row({
         title: '在线缓存',
         sub: '命中的歌词与封面会缓存在本地，未命中的结果 24 小时内不会重复请求',

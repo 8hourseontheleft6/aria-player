@@ -6351,6 +6351,49 @@ async function runSmoke ({ win, ctx }) {
     record('在线缓存清理', cleared.ok && afterClear.files === 0,
       `清理后剩 ${afterClear.files} 个文件`)
 
+    /* ---------- 网络代理 ----------
+     *
+     * 用户反馈过「开了加速器还是取不到封面 / 头像」：不少加速器并不设置系统代理，
+     * 而在线的歌词 / 封面 / 头像全都由主进程用默认会话发出 —— 于是"跟随系统"等于没有代理。
+     * 这条不靠"读设置值"来验（读过就算过是假的），而是问 Chromium 自己：
+     * resolveProxy 返回的就是当前**真正生效**的代理。
+     */
+    {
+      const { session: electronSession } = require('electron')
+      const original = { proxyMode: settingsService.get().proxyMode, proxyUrl: settingsService.get().proxyUrl }
+      const probe = () => electronSession.defaultSession.resolveProxy('https://example.com')
+      /*
+       * 先取**基线**：这台机器的系统代理是什么。
+       * 第一版没取基线、而且测试端口随手写了 7890 —— 恰好是这台机器系统代理的端口，
+       * 于是"改回跟随系统"之后的读数看起来和手动那一步一模一样，
+       * 像是没恢复成功（其实是真的恢复了）。这类"读数会误导人"的坑要一开始就避开：
+       * 基线单独记下来对比，测试端口换成明显不同的一个。
+       */
+      const baseline = await probe()
+      const manualUrl = 'http://127.0.0.1:18080'
+
+      settingsService.set({ proxyMode: 'direct', proxyUrl: '' })
+      await sleep(600)
+      const direct = await probe()
+
+      settingsService.set({ proxyMode: 'manual', proxyUrl: manualUrl })
+      await sleep(600)
+      const manual = await probe()
+
+      settingsService.set({ proxyMode: 'system', proxyUrl: original.proxyUrl })
+      await sleep(600)
+      const restored = await probe()
+
+      record('网络代理：三种模式真的作用到默认会话（加速器没设系统代理时的开关）',
+        direct === 'DIRECT' &&
+        manual.includes('127.0.0.1:18080') &&
+        !direct.includes('18080') &&
+        restored === baseline &&
+        settingsService.get().proxyMode === 'system',
+        `基线（跟随系统）= ${baseline}；直连 → ${direct}；手动 ${manualUrl} → ${manual}；` +
+        `改回跟随系统 → ${restored}（与基线一致=${restored === baseline}）；模式=${settingsService.get().proxyMode}`)
+    }
+
     // 恢复默认：在线功能保持关闭
     settingsService.set({ onlineFeatures: false })
     await sleep(200)

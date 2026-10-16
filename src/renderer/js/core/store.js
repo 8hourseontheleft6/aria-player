@@ -106,6 +106,12 @@ export function initialState () {
       equalizer: { enabled: false, auto: true, preset: 'flat' },
       styleAnalysis: true,
       /*
+       * 网络代理：system（跟随系统，默认）| direct（直连）| manual（用 proxyUrl）。
+       * 有些加速器不设系统代理，那时在线封面/头像会取不到 —— 用户可以切到 manual。
+       */
+      proxyMode: 'system',
+      proxyUrl: '',
+      /*
        * 音频可视化样式：bars（频谱+波形）| wave（示波器）| ring（环形）| off。
        * 顶栏那颗小按钮循环切换。off 时不建 WebAudio 接入点，播放路径保持原生。
        */
