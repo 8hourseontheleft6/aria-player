@@ -87,6 +87,12 @@ function buildMacMenuTemplate ({ appName = 'Aria', send = () => {} } = {}) {
     {
       label: '窗口',
       submenu: [
+        /*
+         * ⌘W 关闭窗口：Electron 的默认菜单里有「File → Close」，而我们的自定义菜单没有文件栏 ——
+         * 不补这一项的话，换上自定义菜单之后 **⌘W 会失效**（mac 用户的第一反应就是按它）。
+         * role: 'close' 自带 ⌘W，而且不需要我们自己接任何东西（点它等于关窗）。
+         */
+        { role: 'close', label: '关闭窗口' },
         { role: 'minimize', label: '最小化' },
         { role: 'zoom', label: '缩放' },
         { type: 'separator' },
@@ -95,6 +101,16 @@ function buildMacMenuTemplate ({ appName = 'Aria', send = () => {} } = {}) {
     }
   ]
 }
+
+/*
+ * 一条给以后的自己留的规矩：**不要往这份菜单里加「应用功能 + 快捷键」，除非那条指令已经接好。**
+ *
+ * mac 上菜单快捷键会**先于**渲染层收到按键（键等价物在 web contents 之前被处理），
+ * 所以给菜单项写一个 `Cmd+O` 却没有对应的处理函数，就等于把应用里原本好用的 ⌘O（添加音乐文件夹）废掉。
+ * 现在这份菜单里带快捷键的项分两种：role 自带的标准项（⌘W / ⌘Q / ⌘M 等），
+ * 以及播放控制那一栏 —— 后者全部走 ctx.emit('player:command', …)，与托盘、媒体键同一条链路，
+ * 有自检盯着（smoke 里的「macOS 菜单能在 Electron 里真的构建出来…」会逐个点一遍）。
+ */
 
 /**
  * 在 macOS 上装上菜单。非 mac 什么都不做（Windows / Linux 走 Menu.setApplicationMenu(null)）。

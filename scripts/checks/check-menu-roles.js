@@ -89,7 +89,7 @@ const collectLabels = (items) => {
   }
 }
 collectLabels(template)
-for (const required of ['播放 / 暂停', '上一首', '下一首', '退出', '拷贝', '粘贴', '最小化']) {
+for (const required of ['播放 / 暂停', '上一首', '下一首', '退出', '拷贝', '粘贴', '关闭窗口', '最小化']) {
   if (!labels.some((label) => label.includes(required))) problems.push(`菜单里缺了「${required}」这一项`)
 }
 
