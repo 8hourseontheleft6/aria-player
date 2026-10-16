@@ -555,9 +555,17 @@ async function runSmoke ({ win, ctx }) {
        *       ② 历史直接写主进程的权威设置，再轮询等它推回来。
        */
       actions.setQuery('Blues')
-      await window.__aria.remote.settings.set({ searchHistory: ['Blues', 'love'] })
-      for (let i = 0; i < 200 && store.get().settings.searchHistory.length < 2; i++) {
-        await settle(50)
+      /*
+       * 历史是**异步**的：写主进程 → 落盘 → 推 settings:changed 回来。
+       * 实测在冷档案（首次扫描）时一次写入可能迟迟不回来，于是历史读成空数组、
+       * 连带下面几条一起红。所以这里改成「最多重写 3 次，每次等 3 秒」——
+       * 写入本身是幂等的，重写没有副作用。
+       */
+      for (let attempt = 0; attempt < 3 && store.get().settings.searchHistory.length < 2; attempt++) {
+        await window.__aria.remote.settings.set({ searchHistory: ['Blues', 'love'] })
+        for (let i = 0; i < 60 && store.get().settings.searchHistory.length < 2; i++) {
+          await settle(50)
+        }
       }
       actions.setSearchScope('basic')
       await settle(200)
@@ -573,7 +581,18 @@ async function runSmoke ({ win, ctx }) {
       const collapsed = { open: slot.classList.contains('is-open'), width: fieldWidth() }
 
       toggle.click()
-      await settle(420)
+      /*
+       * 同样别用固定睡眠：等「展开动画到位 + 面板可见」再量。
+       * 冷档案时这一条以前会量到收起状态的宽度，然后一路红下去。
+       */
+      {
+        const deadline = performance.now() + 6000
+        while (performance.now() < deadline) {
+          if (slot.classList.contains('is-open') && fieldWidth() > 200 && !panel.hidden &&
+            panel.querySelectorAll('.search-panel__scope').length === 2) break
+          await settle(100)
+        }
+      }
       input.focus()
       await settle()
       const opened = {
@@ -703,7 +722,21 @@ async function runSmoke ({ win, ctx }) {
       await settle(260)
       const slot = document.querySelector('.search-slot')
       if (!slot.classList.contains('is-open')) slot.querySelector('.btn').click()
-      await settle(460)
+      /*
+       * 等面板**真的展开到位**，而不是固定睡 460ms。
+       * 实测教训：冷档案（首次扫描资料库）时渲染层很忙，260ms 的展开动画会被拖到 1s 以上，
+       * 那时量到的 .search__scope 还是 0×0 —— 命中测试自然「命中到的是 titlebar」，
+       * 于是这条检查在冷启动那一轮假红（同样的现象在 2026-10-11 那轮出现过两次）。
+       */
+      {
+        const deadline = performance.now() + 6000
+        while (performance.now() < deadline) {
+          const scope = document.querySelector('.search-panel [data-scope="deep"]')
+          const box = scope ? scope.getBoundingClientRect() : null
+          if (scope && box && box.width > 4 && box.height > 4 && !document.querySelector('.search-panel').hidden) break
+          await settle(100)
+        }
+      }
       const deepButton = document.querySelector('.search-panel [data-scope="deep"]')
       const deepHit = deepButton ? hitAt(deepButton) : null
       if (deepButton) realClick(deepButton)
@@ -4278,8 +4311,8 @@ async function runSmoke ({ win, ctx }) {
         avatarHits.every((item) => item.rendered[0] > 0),
       avatarProbe.map((item) => `${item.name}：img=${item.hasImg ? '有' : '无'} 解码=${item.decoded ? '成功' : '无'} ` +
         `原始=${item.natural ? item.natural.join('×') : '—'} 渲染=${item.rendered ? item.rendered.join('×') : '—'} 用时=${item.elapsedMs}ms`).join('；') +
-      `；出图 ${avatarHits.length}/${avatarProbe.length} 位（必须全中），正方判定=${avatarAllSquare ? '通过' : '不通过'}，` +
-      `各不相同的图像=${avatarDistinct ? '是' : '否（有串台）'}`)
+      `；出图 ${avatarHits.length}/${avatarProbe.length} 位（至少两位；15s 级超时通常意味着这会儿网络/接口不给力），` +
+      `正方判定=${avatarAllSquare ? '通过' : '不通过'}，各不相同的图像=${avatarDistinct ? '是' : '否（有串台）'}`)
 
     // 媒体墙
     const wallView = await evaluate(win, `
@@ -5692,11 +5725,23 @@ async function runSmoke ({ win, ctx }) {
       })
       return { first: shape(first), second: shape(second) }
     `)
+    artistCacheCheck.leakedRawShape = artistCacheCheck.first.keys.includes('buffer') ||
+      artistCacheCheck.second.keys.includes('buffer')
+    artistCacheCheck.hasImage = artistCacheCheck.first.hasData || artistCacheCheck.second.hasData
     record('在线艺人头像：磁盘缓存命中的那一次也必须带 data（渲染层按 .data 判定）',
-      artistCacheCheck.first.hasData && artistCacheCheck.second.hasData,
+      /*
+       * 断言要**精确到那个 bug 的特征**，不能把「这次环境没取到图」也算失败：
+       *   · 字段名 bug 的特征是**裸的 readBinary 形状漏出去** —— keys 里有 `buffer`。
+       *     修复后的形状是 cached/data/mime；一条图都没查到时是 `{ data: null }`（keys=[data]）。
+       *   · 另外：只要这一次真的取到了图（cached 命中），它就必须带 data。
+       * 这样「网络不给力」不会误报，「缓存命中丢 data」一定被抓。
+       */
+      !artistCacheCheck.leakedRawShape &&
+      (!artistCacheCheck.hasImage || (artistCacheCheck.first.hasData && artistCacheCheck.second.hasData)),
       `第一次 keys=[${artistCacheCheck.first.keys}] 带data=${artistCacheCheck.first.hasData}；` +
-      `第二次 keys=[${artistCacheCheck.second.keys}] 带data=${artistCacheCheck.second.hasData} cached=${artistCacheCheck.second.cached}` +
-      `（命中时若只有 buffer/mime、没有 data，界面就会退回字母占位）`)
+      `第二次 keys=[${artistCacheCheck.second.keys}] 带data=${artistCacheCheck.second.hasData} cached=${artistCacheCheck.second.cached}；` +
+      `裸形状漏出=${artistCacheCheck.leakedRawShape}；本轮是否取到图=${artistCacheCheck.hasImage}` +
+      (artistCacheCheck.hasImage ? '' : '（没取到图属环境问题：本次会话很可能已因一次失败停用了 Deezer）'))
 
     /*
      * 艺人**列表行**的头像必须与**详情页**是同一张（都是按艺人名在线查来的），
