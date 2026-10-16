@@ -1,27 +1,49 @@
 name: build-mac
 
-# 手动触发；产出一个未签名的 dmg（测试者右键「打开」即可运行）
+# 没有 Mac 也能出 dmg：在 GitHub 的 macOS runner 上打，产物在 Actions 页面下载。
+#   · 手动触发：Actions → build-mac → Run workflow
+#   · 或者推一个标签（stable-* / v*）自动出包
+# 不签名、不公证：朋友第一次打开需要右键 →「打开」，或按 README 的 macOS 一节走一遍。
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'stable-*'
+      - 'v*'
 
 jobs:
   mac:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # 仓库里没有 package-lock.json（Windows 上装的依赖没提交），所以用 install 而不是 ci
       - name: 安装依赖
-        run: npm ci || npm install
-      - name: 打包 macOS
+        run: npm install
+
+      - name: 静态检查（出包前先过一遍，红就不出包）
+        run: npm run check
+
+      - name: 打包 macOS（dmg + zip，arm64 与 x64 各一份）
+        # 不设证书；afterPack 钩子（scripts/mac-adhoc-sign.js）会给 .app 打 ad-hoc 签名 ——
+        # Apple Silicon 上没有这个签名，应用会报「已损坏，无法打开」。
         run: npx electron-builder --mac --publish never
         env:
-          # 没有证书也能出包：electron-builder 会跳过签名
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: 列出产物并算校验和
+        run: |
+          ls -lh release/*.dmg release/*.zip
+          shasum -a 256 release/*.dmg release/*.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: aria-mac
           path: |
             release/*.dmg
             release/*.zip
+          if-no-files-found: error

@@ -49,7 +49,9 @@
       "output": "release",
       "buildResources": "build"
     },
+    "afterPack": "scripts/mac-adhoc-sign.js",
     "win": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "nsis",
@@ -77,8 +79,12 @@
       "artifactName": "Aria-${version}-portable.${ext}"
     },
     "mac": {
+      "icon": "build/icon.png",
       "category": "public.app-category.music",
       "darkModeSupport": true,
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
       "target": [
         {
           "target": "dmg",
@@ -98,7 +104,21 @@
       "artifactName": "Aria-${version}-${arch}.${ext}"
     },
     "dmg": {
-      "title": "Aria ${version}"
+      "title": "Aria ${version}",
+      "iconSize": 128,
+      "contents": [
+        {
+          "x": 140,
+          "y": 190,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   }
 }
