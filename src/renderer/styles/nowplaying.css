@@ -12,7 +12,18 @@
    */
   --visualizer-h: 72px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /*
+   * 三行：顶栏 / 主体 / 示波器。
+   *
+   * 示波器**占一行**而不是绝对定位压在底部 —— 这是被实测逼出来的：
+   * 原来用 `position: absolute; bottom: 0; height: 72px`，在 781px 高的视口下
+   * 工具条底边 703、示波器顶边 709，看着刚好不重叠；但把窗口缩到最小高度 620 再量，
+   * 工具条底边跑到 592、示波器顶边 549 —— **重叠 43px**。两个尺寸一拟合就能看出
+   * 工具条底边 ≈ 0.694×视口 + 161（它有自己的内容高度，不是贴着底边），
+   * 于是"视口低于约 761px 就会重叠"，而默认窗口才 780。
+   * 占一行之后主体只有 `1fr`，重叠在结构上不可能发生，也不需要给歌词单独留边距。
+   */
+  grid-template-rows: auto minmax(0, 1fr) var(--visualizer-h);
   background: var(--bg-window);
   animation: np-in var(--dur-slow) var(--ease-ios);
   overflow: hidden;
@@ -93,19 +104,12 @@ html[data-theme="light"] .now-playing__veil {
 }
 
 .visualizer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
   /*
-   * 高度 72px 是**量出来的**，不是拍脑袋：本机实测底部工具条（播放模式 / 倍速 / 歌词）
-   * 的底边在视口 -78px（781 的视口里是 703），所以留 72px 让示波器整条落在工具条**下方** ——
-   * 这样控件永远不会压在频谱上（当年那版把 132px 的条铺到工具条下面，
-   * 图标压在亮色频谱上读不清，只能再叠一层玻璃；不重叠就不需要那层玻璃）。
+   * 它是栅格的第三行（见上面 --visualizer-h 的说明），所以不再绝对定位：
+   * 高度由行高决定，宽度由栅格撑满。`pointer-events: none` 仍然必须 —— 它是纯装饰，
+   * 早先那版接收鼠标，把播放控件与底部工具条的点击全吃了。
    */
-  height: var(--visualizer-h);
-  z-index: 1;
+  width: 100%;
   pointer-events: none;
   overflow: hidden;
   background: linear-gradient(
@@ -122,6 +126,25 @@ html[data-theme="light"] .now-playing__veil {
   height: 100%;
   /* 略压一点，让夜色/浅色下都不刺眼 */
   opacity: 0.82;
+}
+
+/*
+ * 窗口不够高时，示波器整条让位。
+ *
+ * 阈值是量出来的：把窗口缩到最小高度 620 时，底部工具条会溢出主体那一行 7px、
+ * 落进示波器的行里（读数 `示波器顶边 549、工具条底边 556、重叠=true`）。
+ * 两个尺寸拟合出工具条底边 ≈ 0.694×视口 + 125，而示波器顶边 = 视口 − 72，
+ * 解出「视口 ≥ 约 644px 才放得下」；这里取 680px，留 36px 余量。
+ * 默认窗口高 780，所以正常使用一直看得到它。
+ */
+@media (max-height: 680px) {
+  .now-playing {
+    --visualizer-h: 0px;
+  }
+
+  .visualizer {
+    display: none;
+  }
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -369,12 +392,7 @@ html[data-platform="darwin"] .now-playing__topbar {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  /*
-   * 给底部那条示波器让位。歌词区本来就是"上下渐隐"的，滚到底时最后几行已经很淡；
-   * 再压在会动的频谱下面就是彻底读不了 —— 实测没让位时，最后一行落在条子里面。
-   * 高度取同一个变量，条子改高时这里跟着走。
-   */
-  padding-bottom: var(--visualizer-h);
+  /* 示波器已经占了自己的一行（见 .now-playing 的 grid-template-rows），这里不用再让位 */
 }
 
 /* 右栏标签页：歌词 + 插件注册的面板 */

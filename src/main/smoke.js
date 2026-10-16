@@ -965,8 +965,7 @@ async function runSmoke ({ win, ctx }) {
           visibleLines: visible.length
         }
       })()
-      const reducedProbe = (() => {
-        const node = document.querySelector('.visualizer__canvas')
+      const reducedProbe = (() => {        const node = document.querySelector('.visualizer__canvas')
         const strip = document.querySelector('.visualizer')
         const ctx = node.getContext('2d')
         const data = ctx.getImageData(0, 0, node.width, node.height).data
@@ -1059,6 +1058,52 @@ async function runSmoke ({ win, ctx }) {
       visualizerCheck.lyricsProbe.lastLineBottom <= visualizerCheck.lyricsProbe.stripTop - 8,
       `歌词区底边 ${visualizerCheck.lyricsProbe.regionBottom}、最后一行底边 ${visualizerCheck.lyricsProbe.lastLineBottom}、` +
       `示波器顶边 ${visualizerCheck.lyricsProbe.stripTop}（可见歌词 ${visualizerCheck.lyricsProbe.visibleLines} 行）`)
+
+    /*
+     * 矮窗口下会不会又压住工具条？
+     * 我加的条子高 72px，而窗口最小高度是 620 —— 如果底部工具条的位置不跟着视口等比走，
+     * 矮窗口里两者就会重新叠在一起（那正是我在正常尺寸下修掉的问题）。
+     * 这条不能靠推理：把窗口真的缩到最小高度量一次，再还原。
+     */
+    const beforeResize = win.getContentBounds()
+    await evaluate(win, `window.__aria.actions.openNowPlaying({ lyrics: true }); return true`)
+    await sleep(900)
+    win.setContentSize(beforeResize.width, 620)
+    await sleep(900)
+    const shortWindow = await evaluate(win, `
+      const strip = document.querySelector('.visualizer')
+      const tools = document.querySelector('.now-playing__tools')
+      if (!strip || !tools) return { missing: true }
+      const hidden = getComputedStyle(strip).display === 'none'
+      const stripRect = strip.getBoundingClientRect()
+      const toolsRect = tools.getBoundingClientRect()
+      return {
+        viewportH: window.innerHeight,
+        panelOpen: window.__aria.store.get().ui.nowPlayingOpen === true,
+        stripTop: Math.round(stripRect.top),
+        stripHeight: Math.round(stripRect.height),
+        toolsBottom: Math.round(toolsRect.bottom),
+        hidden,
+        overlap: hidden ? false : stripRect.top < toolsRect.bottom
+      }
+    `)
+    win.setContentSize(beforeResize.width, beforeResize.height)
+    await sleep(400)
+    await evaluate(win, `window.__aria.actions.closeNowPlaying(); return true`)
+    await sleep(400)
+    record('缩到最小窗口高度时，示波器不会重新压住底部工具条',
+      shortWindow.missing !== true &&
+      shortWindow.panelOpen === true &&
+      /*
+       * 前置条件"面板必须真的开着"用**工具条矩形非零**来证明（面板关着时它是 0）。
+       * 注意不能要求示波器高度非零：矮窗口下它是**合法隐藏**的（display:none → 矩形 0×0），
+       * 第一版就是这么把自己判红的 —— 防空洞的守卫不能把正常的降级路径一起挡掉。
+       */
+      shortWindow.panelOpen === true && shortWindow.toolsBottom > 0 &&
+      (shortWindow.hidden === true || (shortWindow.stripHeight > 0 && shortWindow.overlap === false)),
+      `视口 ${shortWindow.viewportH}px（面板开着=${shortWindow.panelOpen}）：` +
+      `${shortWindow.hidden ? '示波器已按矮窗口降级隐藏' : `示波器顶边 ${shortWindow.stripTop}、高 ${shortWindow.stripHeight}`}、` +
+      `工具条底边 ${shortWindow.toolsBottom}、重叠=${shortWindow.overlap}`)
 
     const matchDetailCheck = await evaluate(win, `
       const { actions, store } = window.__aria
@@ -3575,9 +3620,19 @@ async function runSmoke ({ win, ctx }) {
     const audioOutput = await evaluate(win, `
       const { actions, store, engine } = window.__aria
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
+      /*
+       * enumerateDevices() 在 Electron 上**可能永远不 resolve**（实测把整轮自检挂死了 28 分钟，
+       * 日志停在上一行、进程还在、CPU 也不动）。彻夜跑的时候这一挂就是整夜没有验证结果，
+       * 所以凡是这类平台调用一律加超时：宁可变红，也不能把自检挂住。
+       */
+      const withTimeout = (promise, ms, fallback) => Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve(fallback), ms))
+      ])
       const hasApi = typeof engine.setOutputDevice === 'function'
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const outputs = devices.filter((device) => device.kind === 'audiooutput')
+      const devices = await withTimeout(navigator.mediaDevices.enumerateDevices(), 4000, null)
+      const outputs = devices ? devices.filter((device) => device.kind === 'audiooutput') : []
+      const devicesTimedOut = devices === null
 
       actions.setView('settings')
       await settle(1200)
@@ -3596,6 +3651,7 @@ async function runSmoke ({ win, ctx }) {
       return {
         hasApi,
         outputs: outputs.length,
+        devicesTimedOut,
         hasRow: Boolean(row),
         hasSelect: Boolean(select),
         hasInfo: Boolean(info),
@@ -3607,6 +3663,11 @@ async function runSmoke ({ win, ctx }) {
     `)
     record('通话时放歌：可以指定独立输出设备',
       audioOutput.hasApi === true &&
+      /*
+       * `enumerateDevices()` 超时（返回 null）时这条会红，但**不会把整轮挂住** ——
+       * 这是刻意的取舍：宁可红一条、留下读数，也不要整夜没有结果。
+       */
+      audioOutput.devicesTimedOut === false &&
       audioOutput.outputs > 0 &&
       audioOutput.hasRow === true &&
       audioOutput.hasSelect === true &&
@@ -3614,7 +3675,8 @@ async function runSmoke ({ win, ctx }) {
       audioOutput.options[0] === '跟随系统' &&
       audioOutput.persisted === '' &&
       typeof audioOutput.applied === 'boolean',
-      `引擎有 setOutputDevice=${audioOutput.hasApi}；系统报告 ${audioOutput.outputs} 个输出设备；` +
+      `引擎有 setOutputDevice=${audioOutput.hasApi}；系统报告 ${audioOutput.outputs} 个输出设备` +
+      `${audioOutput.devicesTimedOut ? '（enumerateDevices 超时 —— 已按超时处理，不让它挂住整轮）' : ''}；` +
       `设置页有该行=${audioOutput.hasRow}（下拉=${audioOutput.hasSelect}、ⓘ 说明=${audioOutput.hasInfo}，选项 ${JSON.stringify(audioOutput.options)}）；` +
       `切到「跟随系统」返回 ok=${audioOutput.applied}${audioOutput.message ? `（${audioOutput.message}）` : ''}，落盘值「${audioOutput.persisted}」` +
       `　[注：合成事件没有用户手势，Chromium 可能拒绝 setSinkId；真实点击来自用户操作，不受影响]`)

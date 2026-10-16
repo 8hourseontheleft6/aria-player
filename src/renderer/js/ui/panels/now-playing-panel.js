@@ -386,12 +386,15 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
 
   /* ---------------- 主结构 ---------------- */
   /*
-   * 层级（见 nowplaying.css 里的 z-index 一组）：封面底 0 → 玻璃/光晕 1 → 示波器 2 → 内容 3 → 顶栏 4。
-   * 示波器压在内容之下、玻璃之上，所以既看得见又不会挡住任何可点的东西。
+   * 层级／行序（见 nowplaying.css 里 .now-playing 的 grid-template-rows）：
+   * 封面底 / 玻璃 / 光晕都是绝对定位（不参与栅格），真正占行的是
+   * **顶栏 → 主体 → 示波器**，所以示波器元素必须放在最后 —— 它占的是第三行。
+   * 这样它永远不会盖住工具条（重叠在结构上不可能），
+   * 也就解释了为什么它不需要 z-index 也不需要给歌词留边距。
    */
   const body = h('div', { class: 'now-playing__body' }, left, right)
   const element = h('section', { class: 'now-playing', id: 'now-playing', hidden: true },
-    artBackground, veil, glow, visualizer.element, topbar, body)
+    artBackground, veil, glow, topbar, body, visualizer.element)
 
   /* ---------------- 时间显示 ---------------- */
   function updateTimes (time, duration) {
