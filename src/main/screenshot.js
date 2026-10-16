@@ -883,6 +883,39 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(250)
+    }],
+    /*
+     * 键盘焦点框长什么样（文档里一直没有这类图）。
+     * 用真实的 Tab 键把焦点走到一个工具条按钮上 —— 全局 :focus-visible 给的是
+     * 3px 强调色描边 + 2px 偏移，光看 CSS 不容易判断实际观感。
+     */
+    ['33-focus-ring.png', '键盘焦点指示（Tab 走到工具条按钮）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('songs')
+        document.querySelector('.view-toolbar .btn')?.focus()
+        return true`)
+      await sleep(300)
+      for (let i = 0; i < 2; i++) {
+        win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
+        await sleep(160)
+      }
+      await evaluate(win, `
+        console.log('[focus-ring] ' + JSON.stringify((() => {
+          const node = document.activeElement
+          if (!node) return { missing: true }
+          const style = getComputedStyle(node)
+          const rect = node.getBoundingClientRect()
+          return {
+            what: node.tagName + '.' + (node.getAttribute('class') || '').split(/\\s+/).slice(0, 2).join('.'),
+            label: (node.getAttribute('title') || node.textContent || '').trim().slice(0, 20),
+            outline: style.outlineWidth + ' ' + style.outlineStyle + ' ' + style.outlineColor,
+            offset: style.outlineOffset,
+            rect: [Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height)]
+          }
+        })())); return true`)
+      await sleep(200)
     }]
   ]
 

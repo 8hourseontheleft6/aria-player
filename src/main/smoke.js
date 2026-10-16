@@ -3088,6 +3088,97 @@ async function runSmoke ({ win, ctx }) {
         thumbColor
       }
     `)
+    /* ---------- 键盘焦点可见（WCAG 2.4.7） ----------
+     *
+     * 用**真实的 Tab 键**走一遍（sendInputEvent），而不是 .focus() ——
+     * :focus-visible 只对"键盘触发的聚焦"生效，程序化 focus() 常常不匹配，
+     * 那样量出来的结论是错的。这一步同时验两件事：
+     *   ① 键盘能不能走到那些控件（Tab 顺序）；
+     *   ② 走到之后**有没有可见的焦点指示**（全局 :focus-visible 给 3px 描边 + 2px 偏移）。
+     */
+    const focusAudit = []
+    const focusClasses = new Set()
+    const focusSample = async (pass, tabs) => {
+      for (let step = 0; step < tabs; step++) {
+        win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
+        await sleep(110)
+        const info = await evaluate(win, `
+          const node = document.activeElement
+          if (!node || node === document.body) return null
+          const style = getComputedStyle(node)
+          const rect = node.getBoundingClientRect()
+          return {
+            tag: node.tagName,
+            cls: (node.getAttribute('class') || '').toString().split(/\\s+/).slice(0, 2).join('.'),
+            label: (node.getAttribute('title') || node.getAttribute('aria-label') || node.textContent || '').trim().slice(0, 20),
+            outlineWidth: parseFloat(style.outlineWidth) || 0,
+            outlineStyle: style.outlineStyle,
+            outlineOffset: parseFloat(style.outlineOffset) || 0,
+            boxShadow: style.boxShadow === 'none' ? '' : style.boxShadow.slice(0, 40),
+            visible: rect.width > 0 && rect.height > 0
+          }`)
+        if (!info || !info.visible) continue
+        info.pass = pass
+        focusAudit.push(info)
+        focusClasses.add(`${info.tag}.${info.cls}`)
+      }
+    }
+    /*
+     * 从不同起点播种再按 Tab。
+     * 为什么要播种：歌曲列表有 ~1700 个可获焦按钮，从文档开头一直 Tab 会在行里打转，
+     * 根本走不到侧栏 / 搜索 / 设置 / 歌词 —— 第一版 26 次采样全是同一行的「⋯」。
+     * 播种用 .focus()，**随后的 Tab 仍是键盘触发**，所以 :focus-visible 依然生效（这正是要验的）。
+     */
+    const focusPass = async (seed, pass, tabs) => {
+      await evaluate(win, `
+        const node = document.querySelector(${JSON.stringify(seed)})
+        if (node) node.focus()
+        return Boolean(node)`)
+      await sleep(120)
+      await focusSample(pass, tabs)
+    }
+
+    await focusPass('.sidebar__row', '侧栏', 5)
+    await focusPass('.view-toolbar .btn', '工具条', 4)
+    await focusPass('.search input', '搜索', 3)
+    await focusPass('.settings-nav__item', '设置', 4)
+    await evaluate(win, `window.__aria.actions.openNowPlaying({ lyrics: true }); return true`)
+    await sleep(900)
+    await focusPass('.now-playing__topbar .btn', '正在播放顶栏', 4)
+    /*
+     * 歌词区那一处是这轮真正修的东西（原来 `.lyrics:focus-visible { outline: none }`）。
+     * 从它前面的标签页按钮往后 Tab 一格，落到歌词区 —— 键盘触发的聚焦，:focus-visible 会匹配。
+     */
+    await evaluate(win, `
+      const tabs = [...document.querySelectorAll('.now-playing__tab')]
+      tabs[tabs.length - 1]?.focus()
+      return true`)
+    await sleep(150)
+    await focusSample('歌词（从标签页 Tab 过去）', 2)
+    const lyricsFocus = focusAudit.find((item) => item.cls.startsWith('lyrics'))
+    await evaluate(win, `window.__aria.actions.closeNowPlaying(); return true`)
+    await sleep(500)
+    // 回到页面主体，别把焦点留在某个控件上影响后面的检查
+    await evaluate(win, `document.activeElement?.blur?.(); return true`)
+    await sleep(200)
+
+    /*
+     * 判据是"**有没有**可见焦点框"，不是精确像素：
+     * 全局写 3px，Chromium 报 2.86px；歌词写 2px，报 1.7px（它按设备像素换算过）。
+     * 拿 2px 当门槛会把这条正确的样式判红 —— 第二版就是这么红的。
+     */
+    const hasRing = (item) => item.outlineStyle !== 'none' && item.outlineWidth > 0
+    const focusOffenders = focusAudit.filter((item) => !hasRing(item) && !item.boxShadow)
+    record('键盘焦点可见：Tab 能走到控件，且每个焦点都有可见指示（WCAG 2.4.7）',
+      focusAudit.length >= 10 && focusClasses.size >= 6 && focusOffenders.length === 0 &&
+      // 歌词区那一处是本轮修的：原来显式写了 outline: none，键盘用户看不出焦点在哪
+      Boolean(lyricsFocus) && hasRing(lyricsFocus) && lyricsFocus.outlineOffset < 0,
+      `从 6 个起点播种后共采样 ${focusAudit.length} 次、覆盖 ${focusClasses.size} 种控件（${[...focusClasses].slice(0, 8).join('、')}…）；` +
+      `没有可见焦点指示的 ${focusOffenders.length} 个` +
+      (focusOffenders.length ? `：` + focusOffenders.map((o) => `[${o.pass}] ${o.tag}.${o.cls}`).join('、') : '') +
+      `；歌词区：${lyricsFocus ? `${lyricsFocus.outlineWidth.toFixed(1)}px ${lyricsFocus.outlineStyle}、offset ${lyricsFocus.outlineOffset}（贴边内描边）` : '没采到'}`)
+
     /* ---------- 可点控件的尺寸（WCAG 2.5.8：指针目标 ≥24×24 CSS px） ----------
      * 这条以前从没量过，而"小到点不中"是最典型的 UI 缺陷之一。
      * 跨五个界面各量一遍（歌曲 / 专辑 / 艺人 / 设置 / 正在播放全屏页），

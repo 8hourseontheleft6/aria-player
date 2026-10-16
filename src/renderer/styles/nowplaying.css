@@ -464,8 +464,16 @@ html[data-platform="darwin"] .now-playing__topbar {
   user-select: none;
 }
 
+/*
+ * 歌词区是带 tabindex 的滚动区（键盘可以用方向键滚它），所以它**必须**有焦点指示。
+ * 原来这里是 `outline: none` —— 等于键盘用户 Tab 过来时完全看不出焦点在哪（WCAG 2.4.7）。
+ * 直接套全局那圈 3px 描边会在整块区域外画一个大矩形，不好看；改成**贴边的内描边**：
+ * 视觉上是区域内侧一圈细边，指示明确又不喧哗。
+ */
 .lyrics:focus-visible {
-  outline: none;
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -3px;
+  border-radius: var(--radius-md);
 }
 
 .lyrics::-webkit-scrollbar {
