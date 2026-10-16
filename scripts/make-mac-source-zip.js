@@ -76,6 +76,46 @@ execFileSync('tar', ['-a', '-c', '-f', zip, '-C', stage, '.'], { stdio: 'inherit
 fs.rmSync(stage, { recursive: true, force: true })
 
 const size = Math.round(fs.statSync(zip).size / 1024)
-const hash = require('node:crypto').createHash('sha256').update(fs.readFileSync(zip)).digest('hex')
+const crypto = require('node:crypto')
+const hash = crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex')
 console.log(`已写出 ${path.relative(root, zip)}（${size} KB）`)
 console.log(`sha256 ${hash}`)
+
+/*
+ * 旁车清单：记下"这个包是用哪一版源码打的"。
+ *
+ * 为什么需要：这个 zip 是**手动**生成的（每次改完代码要记得重打），
+ * 于是它天生会过期 —— 而它正是要发给朋友的那个文件，过期的后果是
+ * "她测的是几天前的代码"。这和那张停在六天前的截图是同一类问题：
+ * 产物看起来没问题，但它与当前源码已经脱节。
+ *
+ * 树指纹只覆盖**输入项**（ITEMS 里的那些），不含生成物（先读我.md / VERSION.txt），
+ * 这样检查脚本能一模一样地重算出来。另记 zip 自身的 sha256，替换/损坏也能发现。
+ */
+const fingerprint = (items) => {
+  const lines = []
+  const walk = (rel) => {
+    const full = path.join(root, rel)
+    const stat = fs.statSync(full)
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(full).sort()) walk(path.join(rel, name))
+      return
+    }
+    const digest = crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex')
+    lines.push(`${rel.replace(/\\/g, '/')}  ${digest}`)
+  }
+  for (const item of items.slice().sort()) if (fs.existsSync(path.join(root, item))) walk(item)
+  return crypto.createHash('sha256').update(lines.join('\n')).digest('hex')
+}
+
+const manifest = {
+  version,
+  zip: path.basename(zip),
+  zipSha256: hash,
+  treeSha256: fingerprint(ITEMS),
+  items: ITEMS,
+  builtAt: new Date().toISOString()
+}
+const manifestPath = path.join(outDir, `aria-${version}-mac-source.manifest.json`)
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
+console.log(`已写出 ${path.relative(root, manifestPath)}（源码指纹 ${manifest.treeSha256.slice(0, 12)}…）`)
