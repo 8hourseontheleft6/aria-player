@@ -72,6 +72,27 @@ for (const { accelerator, label, where } of accelerators) {
   }
 }
 
+/*
+ * 快捷键**唯一性**：两个菜单项抢同一个组合时，第二个永远不会触发，而且完全无声
+ * （Electron 不报错、日志里也看不出，只能靠用户"这个键怎么没用"来发现）。
+ * 归一化时把 Command/Cmd/Super 视作同一件事、大小写与空格无关 ——
+ * 不然 `Cmd+L` 与 `Command+L` 会绕过去。
+ */
+const acceleratorOwners = new Map()
+for (const { accelerator, label, where } of accelerators) {
+  const normalized = String(accelerator)
+    .replace(/\s+/g, '')
+    .replace(/Command|Cmd|Super/gi, 'Cmd')
+    .replace(/Option|Alt/gi, 'Alt')
+    .toLowerCase()
+  if (acceleratorOwners.has(normalized)) {
+    const first = acceleratorOwners.get(normalized)
+    problems.push(`快捷键 ${accelerator} 被两项同时占用：「${first.label}」与「${label}」（后者永远不会触发）`)
+  } else {
+    acceleratorOwners.set(normalized, { label, where })
+  }
+}
+
 /* 播放指令必须都是应用真的会处理的那几种（渲染层的 media:command 分支） */
 const rendererCommands = new Set([
   'play-pause', 'next', 'previous', 'stop', 'volume-up', 'volume-down', 'mute', 'queue', 'now-playing'
@@ -95,7 +116,7 @@ for (const required of ['播放 / 暂停', '上一首', '下一首', '退出', '
 
 /* ---------- 4. 报告 ---------- */
 console.log(`菜单检查：合法 role ${allowedRoles.size} 个（来自 electron.d.ts）；` +
-  `模板用了 ${usedRoles.length} 个 role、${accelerators.length} 个快捷键、共 ${itemCount} 项`)
+  `模板用了 ${usedRoles.length} 个 role、${accelerators.length} 个快捷键（去重后 ${acceleratorOwners.size} 个）、共 ${itemCount} 项`)
 for (const problem of problems) console.log('  ✗ ' + problem)
 if (problems.length === 0) console.log('  菜单角色与快捷键检查：0 问题')
 process.exit(problems.length ? 1 : 0)
