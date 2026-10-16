@@ -24,7 +24,9 @@
     "dist:portable": "electron-builder --win portable --x64",
     "dist:mac": "electron-builder --mac --publish never",
     "dist:mac:arm64": "electron-builder --mac --arm64 --publish never",
-    "check:arch": "node scripts/checks/check-architecture.js"
+    "check:arch": "node scripts/checks/check-architecture.js",
+    "make:mac-zip": "node scripts/make-mac-source-zip.js",
+    "check:mac-config": "node scripts/checks/check-mac-config.js"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"

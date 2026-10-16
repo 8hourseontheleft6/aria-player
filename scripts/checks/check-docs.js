@@ -73,9 +73,59 @@ for (const file of docs) {
   }
 }
 
+/* ---- 文档里"还没有 X"这类**绝对式否定**，必须与现实一致 ---- *
+ *
+ * 起因：docs/PLATFORMS.md 的 macOS 一节把四件事记成"待验证 / 已知缺口"，
+ * 实测**四条全都做完了**：electron-builder 配置在（dmg+zip、appId、hardenedRuntime、
+ * afterPack 签名）、mediaSession 在写、系统媒体键已注册、省电两套逻辑都在。
+ * 也就是说文档在告诉读者"Mac 构建路径还不存在"，而它已经完整就位。
+ *
+ * "还没有 X"是文档里最容易腐烂的一类句子：写完那一刻是真的，之后就没人回头看。
+ * 所以这里把**能机械判定**的几条钉住：条件成立时，文档里就不许再出现那句否定。
+ * 只收能明确判定的，不做模糊匹配 —— 满是误报的检查很快就会没人看。
+ */
+const srcText = (() => {
+  const out = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (entry.name.endsWith('.js')) out.push(fs.readFileSync(full, 'utf8'))
+    }
+  }
+  walk(path.join(ROOT, 'src'))
+  return out.join('\n')
+})()
+
+const absenceClaims = [
+  {
+    phrase: '没有 electron-builder 配置',
+    holds: Boolean(pkg.build && pkg.build.mac && pkg.build.mac.target),
+    reality: 'package.json 里有 build.mac.target（dmg + zip）'
+  },
+  {
+    phrase: '下一步在 `player-controller` 里随 `TRACK_CHANGED` 写 `mediaSession.metadata` 即可',
+    holds: srcText.includes('mediaSession.setPositionState') || srcText.includes('mediaSession.metadata'),
+    reality: 'player-controller.js 已经在写 navigator.mediaSession'
+  }
+]
+
+let absenceChecked = 0
+for (const file of docs) {
+  const rel = path.relative(ROOT, file).replace(/\\/g, '/')
+  const source = fs.readFileSync(file, 'utf8')
+  for (const claim of absenceClaims) {
+    if (!claim.holds) continue
+    absenceChecked++
+    if (source.includes(claim.phrase)) {
+      problems.push(`${rel}  还写着「${claim.phrase}」，但现实是：${claim.reality} —— 绝对式否定已经过期`)
+    }
+  }
+}
+
 for (const problem of problems) console.log(problem)
 console.log(
   `\n检查了 ${docs.length} 份文档：本地链接 ${checked} 条、脚本引用 ${scriptRefs} 处、` +
-  `版本声明 ${versionClaims} 处，问题 ${problems.length} 处`
+  `版本声明 ${versionClaims} 处、缺失声明 ${absenceChecked} 处，问题 ${problems.length} 处`
 )
 if (problems.length > 0) process.exit(1)

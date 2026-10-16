@@ -30,18 +30,28 @@
   否则 Cmd+Q / Cmd+W / 复制粘贴全都没了。
 - `renderer`：`isMac` 用于隐藏自绘窗口按钮；`Ctrl` 与 `⌘` 在快捷键里等价处理。
 
-**待验证 / 已知缺口**（没有 Mac 机器，这一步必须真机跑）：
+**当前状态（本节核对于 2026-10-17，逐条对着代码核过）**：
+下面四条以前记成"待验证 / 已知缺口"，实际上都已经做完了 —— 保留它们是为了说明**当时**缺什么，
+现在的事实写在每条后面。真正剩下的只有一件事：**真机验证**（我们没有 Mac）。
 
-1. **打包**：仓库目前只有开发脚本（`npm start`），没有 electron-builder 配置 ——
-   Mac 上至少需要 `dmg` / `zip` 目标、`com.aria.player` 的 bundle id、
-   `hardenedRuntime` 与签名（不签名则首次打开要右键 → 打开）。
-2. **系统「正在播放」**：macOS 的菜单栏 / 控制中心需要 `navigator.mediaSession`
-   的 metadata 与 action handler（Windows 的 SMTC 也吃这一套，属于双赢）。
-   下一步在 `player-controller` 里随 `TRACK_CHANGED` 写 `mediaSession.metadata` 即可。
-3. **媒体键**：现在走的是 Electron 的 `globalShortcut`；macOS 上更合规的做法是
-   `MediaPlayPause` 等系统媒体键 + `mediaSession` 的 handler。
-4. **省电**：macOS 上 `backgroundThrottling: false` 会阻止后台节流，
-   电池模式下建议跟随「最小化时释放」那套逻辑（已经实现，见 `services/background.js`）。
+1. **打包**：以前确实只有开发脚本，现在 `package.json` 里有完整的 electron-builder 配置 ——
+   `mac.target` 为 `dmg` + `zip`（arm64 与 x64 各一套）、`appId: com.aria.player`、
+   `hardenedRuntime`、以及 `afterPack` 走的 `scripts/mac-adhoc-sign.js`（临时签名，免签名问题）。
+   三条构建路径都在：本机 `npm run dist:mac`、CI `.github/workflows/build-mac.yml`、
+   以及**源码包**（`npm run make:mac-zip` 生成的 `release/aria-<版本>-mac-source.zip`，
+   朋友解压后 `npm install && npm run dist:mac` 就能出 dmg —— 见 [MAC-给朋友.md](MAC-给朋友.md)）。
+   不签名时首次打开要右键 → 打开，这一点写在给朋友的文档里。
+2. **系统「正在播放」**：已实现 —— `core/player-controller.js` 的 `updateMediaSession()` 与
+   `syncMediaSessionPosition()` 会写 `navigator.mediaSession.metadata` / `setPositionState`，
+   Windows 的 SMTC 也吃这一套。
+3. **媒体键**：已实现 —— `main/ipc.js` 里注册了 `MediaPlayPause` / `MediaNextTrack` /
+   `MediaPreviousTrack` 等系统媒体键（自检会打印注册清单，`check-menu-roles` 另有约束）。
+4. **省电**：`backgroundThrottling` 与「最小化时释放」两套逻辑都在
+   （`main/services/background.js` 与 `core/background-release.js`）。
+
+> 复核方式（都能当场跑）：`node -e "console.log(require('./package.json').build.mac.target)"`、
+> `grep -rn mediaSession src/renderer/js/core/player-controller.js`、
+> `grep -n MediaPlayPause src/main/ipc.js`、以及 `npm run check:mac-config`。
 
 ## 三、Android：为什么不是「移植」
 
