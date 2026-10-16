@@ -8,7 +8,8 @@ import { createSlider } from '../widgets/slider.js'
 import { createArtworkView } from '../widgets/artwork-node.js'
 import { createLyricsView } from '../widgets/lyrics-view.js'
 import { createVisualizer } from '../widgets/visualizer.js'
-import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
+import { openPopover } from '../widgets/overlay.js'
+import { openPillMenu } from '../widgets/pill-menu.js'
 import { presetOptions, matchPreset, PRESETS } from '../../core/equalizer-presets.js'
 
 const RATE_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2]
@@ -78,41 +79,42 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
 
   function openEqualizerMenu (anchor) {
     const settings = store.get().settings.equalizer || { enabled: false, auto: true, preset: 'flat' }
-    const current = store.get().playback.trackId
+    const track = store.get().playback.trackId
       ? store.get().library.byId.get(store.get().playback.trackId)
       : null
-    const matched = settings.enabled && settings.auto !== false ? matchPreset(current) : null
-    const apply = (patch) => {
-      closeAllLayers()
-      actions.setEqualizer(patch)
-    }
-    const rows = [
-      { title: '声音均衡器' },
+    const matched = settings.enabled && settings.auto !== false ? matchPreset(track) : null
+    const apply = (patch) => actions.setEqualizer(patch)
+    /*
+     * 用竖向药丸菜单（pill-menu.js），不用原来的横向 popoverRows：
+     * 用户说过原来那版"太丑"，而药丸是应用里已有的语言（半透明 + 0.5px 描边 + 选中抬起，
+     * 与灵动岛的滑块同一套）。切换开关那两项用 active 表达状态，预设那些用 active 表达"生效中"。
+     */
+    const items = [
       {
         label: settings.enabled ? '关闭均衡器' : '开启均衡器',
-        value: settings.enabled ? '已开启' : '已关闭',
+        hint: settings.enabled ? '已开启' : '已关闭',
+        active: settings.enabled === true,
         onClick: () => apply({ enabled: !settings.enabled })
       },
       {
         label: '按歌曲风格自动选择',
-        value: settings.auto !== false ? '开' : '关',
+        hint: settings.auto !== false ? '开' : '关',
+        active: settings.auto !== false,
         onClick: () => apply({ auto: settings.auto === false })
       },
-      { separator: true },
-      { title: matched ? `自动匹配到「${PRESETS[matched].displayName}」` : '选择预设' },
       ...presetOptions().map((option) => ({
         label: option.label,
-        // 自动模式下手动项是灰的：这时生效的是自动匹配出来的那一组
-        value: settings.auto === false
+        hint: settings.auto === false
           ? (settings.preset === option.value ? '使用中' : '')
           : (matched === option.value ? '自动选中' : ''),
+        active: settings.auto === false ? settings.preset === option.value : matched === option.value,
         onClick: () => apply({ auto: false, preset: option.value, enabled: true })
       }))
     ]
-    openPopover({
+    openPillMenu({
       anchor,
-      placement: 'bottom-end',
-      content: popoverRows(rows)
+      title: matched ? `自动匹配：${PRESETS[matched].displayName}` : '均衡器',
+      items
     })
   }
 

@@ -701,6 +701,47 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(200)
+    }],
+    /*
+     * 打开着的药丸菜单（第一张"浮层开着"的截图）。
+     * 为什么单独拍：原生 <select> 的弹层由系统画、深色下是一块白底 —— 用户抱怨过两次；
+     * 药丸菜单存在的意义就是替掉它，所以要把"开着的菜单长什么样"留一张图。
+     */
+    ['29-pill-menu.png', '正在播放 · 均衡器药丸菜单（打开状态）', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        const tracks = store.get().library.tracks
+        await actions.setSetting({ theme: 'system' })
+        const track = store.get().playback.trackId
+          ? tracks.find((t) => t.id === store.get().playback.trackId)
+          : null
+        if (!track || store.get().playback.status !== 'playing') actions.playTrack(tracks[0])
+        actions.openNowPlaying({ lyrics: false })
+        await new Promise((r) => setTimeout(r, 900))
+        const button = [...document.querySelectorAll('.now-playing__topbar .btn')]
+          .find((node) => (node.title || '').includes('均衡器'))
+        button?.click()
+        await new Promise((r) => setTimeout(r, 700))
+        return true`)
+      await sleep(500)
+      await evaluate(win, `
+        console.log('[pill-menu] ' + JSON.stringify((() => {
+          const menu = document.querySelector('.popover .pill-menu')
+          const popover = document.querySelector('.popover')
+          if (!menu) return { missing: true }
+          const r = popover.getBoundingClientRect()
+          const pills = [...menu.querySelectorAll('.pill')]
+          return {
+            pills: pills.length,
+            labels: pills.map((p) => p.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 8),
+            active: menu.querySelector('.pill.is-active')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+            title: menu.querySelector('.pill-menu__title')?.textContent || '',
+            rect: [Math.round(r.width), Math.round(r.height)],
+            inViewport: r.top >= 0 && r.bottom <= window.innerHeight && r.left >= 0 && r.right <= window.innerWidth,
+            bg: getComputedStyle(popover).backgroundColor
+          }
+        })())); return true`)
+      await sleep(200)
     }]
   ]
 

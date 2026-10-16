@@ -3354,13 +3354,24 @@ async function runSmoke ({ win, ctx }) {
       await settle(600)
       const popover = document.querySelector('.popover')
       const popoverText = popover ? popover.textContent : ''
-      const presetRow = popover
-        ? [...popover.querySelectorAll('.popover__row')].find((node) => node.textContent.includes('摇滚'))
+      /*
+       * 均衡器菜单现在是**竖向药丸**（pill-menu.js）：.popover 里套 .pill-menu，一行一颗 .pill。
+       * 原来断言的是 .popover__row（旧的横向列表），换成药丸后这里也得跟着换 ——
+       * 顺带把「药丸数」与「标题」记下来，这样以后换成别的控件时读数会明显不对。
+       * 注意：这段代码住在模板字符串里，注释里**不能出现反引号**，否则会截断外层字符串
+       * （本轮就踩了一次：node --check 过了、Electron 直接语法错误）。
+       */
+      const pillMenu = popover ? popover.querySelector('.pill-menu') : null
+      const pillCount = pillMenu ? pillMenu.querySelectorAll('.pill').length : 0
+      const activePill = pillMenu ? (pillMenu.querySelector('.pill.is-active')?.textContent || '') : ''
+      const presetRow = pillMenu
+        ? [...pillMenu.querySelectorAll('.pill')].find((node) => node.textContent.includes('摇滚'))
         : null
       presetRow?.click()
       await settle(700)
       const afterPick = store.get().settings.equalizer
       const applied = engine.equalizerSnapshot()
+      const pillMenuAfterPick = document.querySelector('.popover')
       actions.setEqualizer({ enabled: false })
       actions.closeNowPlaying()
       await settle(500)
@@ -3420,6 +3431,9 @@ async function runSmoke ({ win, ctx }) {
         mediaRowsOpen,
         eqButtonFound: Boolean(eqButton),
         popoverText: popoverText.slice(0, 120),
+        pillCount,
+        activePill: activePill.slice(0, 30),
+        pillMenuClosedAfterPick: pillMenuAfterPick === null,
         presetPicked: presetRow ? true : false,
         afterPick,
         appliedPreset: applied ? applied.preset : null,
@@ -3446,16 +3460,20 @@ async function runSmoke ({ win, ctx }) {
       uiRound2.mediaRowsOpen.length >= 4,
       `有「系统媒体键」分组=${uiRound2.hasMediaGroup}；主进程注册 ${uiRound2.declaredKeys.length} 个（${uiRound2.declaredKeys.join(', ')}）；` +
       `展开后列出 ${uiRound2.mediaRowsOpen.length} 行：${JSON.stringify(uiRound2.mediaRowsOpen.slice(0, 4))}`)
-    record('全屏播放页里能调均衡器',
+    record('全屏播放页里能调均衡器（竖向药丸菜单）',
       uiRound2.eqButtonFound === true &&
       uiRound2.popoverText.includes('均衡器') &&
       uiRound2.popoverText.includes('摇滚') &&
+      // 2 个开关 + 5 个预设 = 7 颗药丸；药丸菜单不像旧的横列表那样只是一堆行
+      uiRound2.pillCount === 7 &&
+      uiRound2.pillMenuClosedAfterPick === true &&
       uiRound2.presetPicked === true &&
       uiRound2.afterPick?.auto === false &&
       uiRound2.afterPick?.preset === 'rock' &&
       uiRound2.appliedPreset === 'rock',
-      `顶栏有均衡器按钮=${uiRound2.eqButtonFound}；面板列出预设=${uiRound2.presetPicked}（含「摇滚」）；` +
-      `点它之后设置 auto=${uiRound2.afterPick?.auto}、preset=${uiRound2.afterPick?.preset}，引擎生效=${uiRound2.appliedPreset}`)
+      `顶栏有均衡器按钮=${uiRound2.eqButtonFound}；菜单里 ${uiRound2.pillCount} 颗药丸（选中「${uiRound2.activePill}」）、含「摇滚」=${uiRound2.popoverText.includes('摇滚')}；` +
+      `点它之后设置 auto=${uiRound2.afterPick?.auto}、preset=${uiRound2.afterPick?.preset}，引擎生效=${uiRound2.appliedPreset}；` +
+      `选完菜单自动关=${uiRound2.pillMenuClosedAfterPick}`)
     record('风格判断会「听」声音：低音重的判电子、噪声重的判摇滚、动态大的判古典',
       uiRound2.classified.bassy.key === 'electronic' &&
       uiRound2.classified.bright.key === 'rock' &&
