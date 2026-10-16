@@ -902,6 +902,36 @@ async function runSmoke ({ win, ctx }) {
       await settle(300)
       actions.closeNowPlaying()
       await settle(400)
+
+      /*
+       * 设置页那条路径也要能改：外观分组里的分段控件。
+       * （顶栏那颗按钮是"离正在播放最近"的入口，设置页是"能找到"的入口，两条都得通。）
+       */
+      actions.setView('settings')
+      await settle(900)
+      const settingRows = [...document.querySelectorAll('.settings__row')]
+      const vizRow = settingRows.find((r) => (r.querySelector('.settings__row-title')?.textContent || '').includes('音频可视化'))
+      const vizOptions = vizRow ? [...vizRow.querySelectorAll('.segmented__item')].map((b) => b.textContent) : []
+      const waveButton = vizRow ? [...vizRow.querySelectorAll('.segmented__item')].find((b) => b.textContent === '波形') : null
+      if (waveButton) waveButton.click()
+      await settle(700)
+      const styleFromSettings = store.get().settings.visualizerStyle
+      const offButton = vizRow ? [...vizRow.querySelectorAll('.segmented__item')].find((b) => b.textContent === '关闭') : null
+      if (offButton) offButton.click()
+      await settle(500)
+      const styleAfterOff = store.get().settings.visualizerStyle
+      if (vizRow) [...vizRow.querySelectorAll('.segmented__item')].find((b) => b.textContent === '频谱')?.click()
+      await settle(400)
+      actions.setView('songs')
+      await settle(300)
+      const settingsRowCheck = {
+        found: Boolean(vizRow),
+        options: vizOptions,
+        styleFromSettings,
+        styleAfterOff,
+        restored: store.get().settings.visualizerStyle
+      }
+
       return {
         exists: Boolean(first && canvas()),
         pointerEvents: cs.pointerEvents,
@@ -915,6 +945,7 @@ async function runSmoke ({ win, ctx }) {
         seen,
         offState,
         afterCycle,
+        settingsRowCheck,
         runningAfterClose: Boolean(document.querySelector('.visualizer')) && store.get().ui.nowPlayingOpen === false
       }
     `)
@@ -933,6 +964,21 @@ async function runSmoke ({ win, ctx }) {
       `工具条中心的命中对象=${visualizerCheck.toolHitClass}（是示波器=${visualizerCheck.toolHitIsStrip}）；` +
       `画布 ${visualizerCheck.size} 画了 ${visualizerCheck.bars.paintedPct.toFixed(1)}% 像素、纵向铺开 ${visualizerCheck.bars.spreadPct.toFixed(0)}%；` +
       `连点四次样式变化 ${visualizerCheck.seen.join('→')}；选 off 时画布已清空=${visualizerCheck.offState.canvasEmpty}（dataset=${visualizerCheck.offState.datasetStyle}）`)
+
+    /*
+     * 样式有两个入口：正在播放页顶栏那颗按钮（离得最近），设置 → 外观里的分段控件（找得到）。
+     * 两条都要真的落到设置里 —— 只有一条能用的话，另一种使用习惯的人就摸不到这个功能。
+     */
+    record('音频可视化的两个入口都能改样式（顶栏按钮 / 设置 → 外观）',
+      visualizerCheck.settingsRowCheck.found === true &&
+      visualizerCheck.settingsRowCheck.options.join(',') === '频谱,波形,环形,关闭' &&
+      visualizerCheck.settingsRowCheck.styleFromSettings === 'wave' &&
+      visualizerCheck.settingsRowCheck.styleAfterOff === 'off' &&
+      visualizerCheck.settingsRowCheck.restored === 'bars',
+      `设置里的选项 ${JSON.stringify(visualizerCheck.settingsRowCheck.options)}；` +
+      `点「波形」后 style=${visualizerCheck.settingsRowCheck.styleFromSettings}、` +
+      `点「关闭」后 style=${visualizerCheck.settingsRowCheck.styleAfterOff}、` +
+      `最后复原为 ${visualizerCheck.settingsRowCheck.restored}`)
 
     const matchDetailCheck = await evaluate(win, `
       const { actions, store } = window.__aria

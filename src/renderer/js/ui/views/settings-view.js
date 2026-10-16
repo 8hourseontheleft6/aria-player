@@ -7,6 +7,7 @@ import { formatDurationLong, formatRelativeTime, formatRate, formatBytes, modLab
 import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
 import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
+import { visualizerChoices } from '../widgets/visualizer.js'
 
 const THEMES = [
   { id: 'system', label: '跟随系统' },
@@ -627,6 +628,17 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         title: '显示帧率',
         sub: '在右下角显示实时帧率与帧耗时（最近两秒平均 · 最差）。拖动媒体墙、开合视图时可以直观看到数字，方便确认卡顿是否真的消失',
         control: switchControl(settings.showFps === true, (value) => actions.setSetting({ showFps: value }))
+      }),
+      /*
+       * 音频可视化也放在「外观」里：它是纯视觉的东西，而且和主题一样
+       * 是"我想要它长什么样"的选择。选项与顶栏那颗循环切换按钮共用同一份标签
+       * （见 ui/widgets/visualizer.js 的 visualizerChoices）。
+       */
+      row({
+        title: '音频可视化',
+        sub: '正在播放页底部那条示波器。也可以直接在正在播放页点顶栏那颗波形图标循环切换。选「关闭」时不创建 WebAudio 接入点，播放路径保持原生。',
+        control: segmented(visualizerChoices(), settings.visualizerStyle || 'bars',
+          (style) => actions.setSetting({ visualizerStyle: style }))
       })
     ]))
 

@@ -29,8 +29,22 @@ const STYLE_LABELS = {
   off: '关闭'
 }
 
-export function visualizerStyleLabel (style) {
-  return STYLE_LABELS[style] || STYLE_LABELS.bars
+/** 设置页的分段控件用短标签，太长会挤 */
+const STYLE_SHORT_LABELS = {
+  bars: '频谱',
+  wave: '波形',
+  ring: '环形',
+  off: '关闭'
+}
+
+export function visualizerStyleLabel (style, short = false) {
+  const table = short ? STYLE_SHORT_LABELS : STYLE_LABELS
+  return table[style] || table.bars
+}
+
+/** 设置页的选项（顺序与循环顺序一致，标签只有这一处真相） */
+export function visualizerChoices () {
+  return VISUALIZER_STYLES.map((id) => ({ id, label: visualizerStyleLabel(id, true) }))
 }
 
 export function nextVisualizerStyle (current) {
