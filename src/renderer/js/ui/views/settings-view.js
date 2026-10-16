@@ -424,16 +424,37 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     return node
   }
 
-  function switchControl (value, onChange) {
+  /*
+   * 开关。
+   *
+   * 第三参数是**禁用态**：有些开关依赖另一个总开关（例如「在线歌词 / 在线封面」依赖
+   * 「在线补全」这个联网总闸 —— 总闸关掉时子开关点不点都不起作用）。
+   * 说明文字早就写着"需要先打开总开关"，但开关本身还能点、点了什么也不发生 ——
+   * 那才是让人困惑的地方。禁用它，界面就诚实了（与代理 URL 输入、自动模式下的均衡器药丸同一套做法）。
+   *
+   * 顺带补上 `aria-checked`：`role="switch"` 缺这个属性，读屏软件读不出开关的开 / 关状态。
+   * 也补上键盘操作（Enter / 空格）：它带 tabindex 本来就该能用键盘切换。
+   */
+  function switchControl (value, onChange, { disabled = false } = {}) {
     const node = h('span', {
-      class: `switch${value ? ' is-on' : ''}`,
+      class: `switch${value ? ' is-on' : ''}${disabled ? ' is-disabled' : ''}`,
       role: 'switch',
-      tabindex: '0',
+      tabindex: disabled ? '-1' : '0',
+      'aria-checked': value ? 'true' : 'false',
+      'aria-disabled': disabled ? 'true' : null,
       onClick: (event) => {
         event.stopPropagation()
+        if (disabled) return
         const next = !node.classList.contains('is-on')
         node.classList.toggle('is-on', next)
+        node.setAttribute('aria-checked', next ? 'true' : 'false')
         onChange(next)
+      },
+      onKeydown: (event) => {
+        if (disabled) return
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        node.click()
       }
     })
     return node
@@ -942,12 +963,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       row({
         title: '在线歌词',
         sub: onlineOn ? '本地没有 .lrc 时向 LRCLIB 查询（含时间轴）' : '需要先打开总开关',
-        control: switchControl(settings.onlineLyrics !== false, (value) => actions.setSetting({ onlineLyrics: value }))
+        control: switchControl(settings.onlineLyrics !== false, (value) => actions.setSetting({ onlineLyrics: value }), { disabled: !onlineOn })
       }),
       row({
         title: '在线封面',
         sub: onlineOn ? '歌曲没有内嵌封面、目录里也没有图片时，按「专辑 + 艺人」补齐 600×600 封面' : '需要先打开总开关',
-        control: switchControl(settings.onlineCovers !== false, (value) => actions.setSetting({ onlineCovers: value }))
+        control: switchControl(settings.onlineCovers !== false, (value) => actions.setSetting({ onlineCovers: value }), { disabled: !onlineOn })
       }),
       /*
        * 网络代理：用户反馈「开了加速器还是取不到封面/头像」—— 不少加速器不设系统代理，

@@ -946,6 +946,23 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(200)
+    }],
+    /*
+     * 总闸关闭时的在线页：子开关应当是**禁用**样子（半透明、点不动）。
+     * 为什么要单独拍：说明文字写着"需要先打开总开关"，光看字看不出"点不动"——
+     * 这一张是给"界面是否诚实"留证据的（31-settings-online.png 是总闸开启的对照）。
+     */
+    ['34-settings-online-off.png', '在线与扩展 · 总闸关闭（子开关禁用）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('settings')
+        await new Promise((r) => setTimeout(r, 900))
+        const tab = [...document.querySelectorAll('.settings-nav__item')].find((n) => (n.textContent || '').includes('在线'))
+        tab?.click()
+        await actions.setSetting({ onlineFeatures: false, onlineLyrics: true, onlineCovers: true })
+        await new Promise((r) => setTimeout(r, 900))
+        return true`)
+      await sleep(900)
     }]
   ]
 

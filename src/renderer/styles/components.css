@@ -317,6 +317,20 @@ select option {
   transform: translateX(20px);
 }
 
+/*
+ * 禁用态：依赖的总开关关着时用（例如「在线歌词 / 在线封面」依赖「在线补全」）。
+ * 只降不透明度 + 去掉指针手势，**不改颜色**：它仍然是"开"或"关"那个状态，
+ * 只是暂时点不动 —— 把颜色也改掉会让人以为状态被重置了。
+ */
+.switch.is-disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.switch.is-disabled::after {
+  box-shadow: none;
+}
+
 .switch:active::after {
   width: 29px;
 }

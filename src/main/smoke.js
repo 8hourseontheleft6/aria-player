@@ -3306,6 +3306,87 @@ async function runSmoke ({ win, ctx }) {
         ? `：${overflowAudit.noTitleGroups.join('、')}（例如 ${overflowAudit.noTitleSample.join('、')}）`
         : '（都能看到全文）'))
 
+    /* ---------- 开关的禁用态与 ARIA（界面要诚实） ----------
+     *
+     * 「在线补全」是联网总闸（online-media.js 里三处都是 `!settings.onlineFeatures` 直接 return），
+     * 子开关（在线歌词 / 在线封面）在总闸关闭时**点不点都不起作用**。
+     * 说明文字早就写着"需要先打开总开关"，但开关本身还能点 —— 那才是让人困惑的地方。
+     * 现在总闸关着时子开关带 is-disabled / tabindex=-1 / aria-disabled，
+     * 而且**点它不会偷偷改设置**（这是关键：视觉禁用与行为必须一致）。
+     * 顺带验 aria-checked：role="switch" 缺它读屏软件读不出开关状态。
+     */
+    const switchState = await evaluate(win, `
+      const settle = async (ms = 550) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      const findRows = () => {
+        const rows = [...document.querySelectorAll('.settings__row')]
+        const find = (title) => rows.find((row) => (row.textContent || '').includes(title))
+        return {
+          master: find('在线补全') ? find('在线补全').querySelector('.switch') : null,
+          lyrics: find('在线歌词') ? find('在线歌词').querySelector('.switch') : null,
+          covers: find('在线封面') ? find('在线封面').querySelector('.switch') : null
+        }
+      }
+      const read = (node) => node && ({
+        disabled: node.classList.contains('is-disabled'),
+        tabindex: node.getAttribute('tabindex'),
+        ariaDisabled: node.getAttribute('aria-disabled'),
+        ariaChecked: node.getAttribute('aria-checked'),
+        on: node.classList.contains('is-on')
+      })
+
+      actions.setView('settings')
+      await settle(800)
+      const tab = [...document.querySelectorAll('.settings-nav__item')].find((n) => (n.textContent || '').includes('在线'))
+      tab?.click()
+      await settle(800)
+
+      // ① 总闸关：子开关应当禁用，点了也不改设置
+      await actions.setSetting({ onlineFeatures: false, onlineLyrics: true, onlineCovers: true })
+      await settle(700)
+      const offRows = findRows()
+      const offLyrics = read(offRows.lyrics)
+      offRows.lyrics?.click()
+      await settle(500)
+      const lyricsAfterDisabledClick = store.get().settings.onlineLyrics
+      const ariaAfterClick = offRows.lyrics?.getAttribute('aria-checked')
+
+      // ② 总闸开：子开关可用，点了真的改设置
+      await actions.setSetting({ onlineFeatures: true, onlineLyrics: true })
+      await settle(700)
+      const onRows = findRows()
+      const onLyrics = read(onRows.lyrics)
+      onRows.lyrics?.click()
+      await settle(500)
+      const lyricsAfterEnabledClick = store.get().settings.onlineLyrics
+
+      await actions.setSetting({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
+      actions.setView('songs')
+      await settle(300)
+      return {
+        hasMaster: Boolean(offRows.master),
+        off: offLyrics,
+        offCoversDisabled: Boolean(read(offRows.covers)?.disabled),
+        lyricsAfterDisabledClick,
+        ariaAfterClick,
+        on: onLyrics,
+        lyricsAfterEnabledClick
+      }
+    `)
+    record('开关：依赖总闸的子开关会禁用（点了也不改设置），aria-checked 跟随状态',
+      switchState.hasMaster &&
+      switchState.off?.disabled === true && switchState.off?.tabindex === '-1' &&
+      switchState.off?.ariaDisabled === 'true' && switchState.off?.ariaChecked === 'true' &&
+      switchState.offCoversDisabled === true &&
+      switchState.lyricsAfterDisabledClick === true && switchState.ariaAfterClick === 'true' &&
+      switchState.on?.disabled === false && switchState.on?.ariaChecked === 'true' &&
+      switchState.lyricsAfterEnabledClick === false,
+      `总闸关：在线歌词 禁用=${switchState.off?.disabled}、tabindex=${switchState.off?.tabindex}、` +
+      `aria-disabled=${switchState.off?.ariaDisabled}、aria-checked=${switchState.off?.ariaChecked}；` +
+      `点它之后设置仍是 ${switchState.lyricsAfterDisabledClick}（未被偷偷改掉）、aria-checked 未变；` +
+      `在线封面 禁用=${switchState.offCoversDisabled}。总闸开：禁用=${switchState.on?.disabled}、` +
+      `点一下设置变成 ${switchState.lyricsAfterEnabledClick}`)
+
     /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
      *
      * 用户给了批注截图："中间有一个很明显的条，改一下" —— 说的是标题栏与内容之间那条硬边：
