@@ -832,6 +832,108 @@ async function runSmoke ({ win, ctx }) {
       `z=${hitRealityCheck.diag?.queueZ}/${hitRealityCheck.diag?.queuePosition}，播放页 z=${hitRealityCheck.diag?.nowPlayingZ}；` +
       `中心点的层序 ${JSON.stringify(hitRealityCheck.diag?.stack)}；队列的祖先 ${JSON.stringify(hitRealityCheck.diag?.ancestors)}`)
 
+    /*
+     * 沉浸式示波器（从 wip/visualizer-immersive 重启的那条线）。
+     *
+     * 盯三件事，都是那条分支当年真踩过的坑：
+     *   ① 装饰层**不能吃点击**：铺满底部又接收鼠标时，底部工具条与播放控件全点不动；
+     *   ② 不能压住底部工具条：重叠时图标落在亮色频谱上，读不清；
+     *   ③ 切样式要真的生效并落盘（bars → wave → ring → off），
+     *      且选 off 之后画布要被清空（别留上一帧的残留）。
+     */
+    const visualizerCheck = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const settle = async (ms = 120) => { await new Promise((r) => setTimeout(r, ms)) }
+      const tracks = store.get().library.tracks
+      if (store.get().playback.status !== 'playing') actions.playTrack(tracks[0])
+      await actions.setSetting({ visualizerStyle: 'bars' })
+      actions.openNowPlaying({ lyrics: true })
+      await settle(1500)
+
+      const strip = () => document.querySelector('.visualizer')
+      const canvas = () => document.querySelector('.visualizer__canvas')
+      const measure = () => {
+        const node = canvas()
+        const ctx = node.getContext('2d')
+        const { width, height } = node
+        const data = ctx.getImageData(0, 0, width, height).data
+        let painted = 0
+        let minY = height
+        let maxY = -1
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            if (data[(y * width + x) * 4 + 3] > 8) {
+              painted++
+              if (y < minY) minY = y
+              if (y > maxY) maxY = y
+            }
+          }
+        }
+        return { paintedPct: (painted / (width * height)) * 100, spreadPct: maxY < 0 ? 0 : ((maxY - minY) / height) * 100 }
+      }
+
+      const first = strip()
+      const cs = getComputedStyle(first)
+      const stripRect = first.getBoundingClientRect()
+      const toolsRect = document.querySelector('.now-playing__tools')?.getBoundingClientRect() || null
+      // 底部工具条正中间那一点，命中的必须不是这层装饰
+      const toolHit = toolsRect
+        ? document.elementFromPoint(Math.round(toolsRect.left + toolsRect.width / 2), Math.round(toolsRect.top + toolsRect.height / 2))
+        : null
+      const bars = measure()
+
+      // 逐个点那颗按钮：bars → wave → ring → off，然后回到 bars
+      const button = document.querySelector('.now-playing__topbar .visualizer + .btn, .now-playing__topbar button[title^="音频可视化"]') ||
+        [...document.querySelectorAll('.now-playing__topbar .btn')].find((b) => (b.title || '').includes('音频可视化'))
+      const seen = []
+      const click = async () => {
+        button.click()
+        await settle(280)
+        seen.push(store.get().settings.visualizerStyle)
+        return store.get().settings.visualizerStyle
+      }
+      await click()                       // wave
+      await click()                       // ring
+      const offStyle = await click()      // off
+      const offState = { style: offStyle, datasetStyle: strip().dataset.style, canvasEmpty: measure().paintedPct < 0.05 }
+      await click()                       // bars
+      const afterCycle = store.get().settings.visualizerStyle
+      await actions.setSetting({ visualizerStyle: 'bars' })
+      await settle(300)
+      actions.closeNowPlaying()
+      await settle(400)
+      return {
+        exists: Boolean(first && canvas()),
+        pointerEvents: cs.pointerEvents,
+        zIndex: cs.zIndex,
+        stripTop: Math.round(stripRect.top),
+        toolsBottom: toolsRect ? Math.round(toolsRect.bottom) : null,
+        size: canvas().width + 'x' + canvas().height,
+        bars,
+        toolHitClass: toolHit ? ((toolHit.getAttribute && toolHit.getAttribute('class')) || toolHit.tagName).toString().slice(0, 40) : null,
+        toolHitIsStrip: Boolean(toolHit && toolHit.closest && toolHit.closest('.visualizer')),
+        seen,
+        offState,
+        afterCycle,
+        runningAfterClose: Boolean(document.querySelector('.visualizer')) && store.get().ui.nowPlayingOpen === false
+      }
+    `)
+    record('沉浸式示波器：装饰层不吃点击、不与底部工具条重叠、切样式生效并可关闭',
+      visualizerCheck.exists === true &&
+      visualizerCheck.pointerEvents === 'none' &&
+      visualizerCheck.toolHitIsStrip === false &&
+      visualizerCheck.toolsBottom !== null &&
+      visualizerCheck.stripTop >= visualizerCheck.toolsBottom &&
+      visualizerCheck.bars.paintedPct > 1 && visualizerCheck.bars.spreadPct > 20 &&
+      visualizerCheck.seen.join(',') === 'wave,ring,off,bars' &&
+      visualizerCheck.offState.datasetStyle === 'off' && visualizerCheck.offState.canvasEmpty === true &&
+      visualizerCheck.runningAfterClose === true,
+      `层：pointer-events=${visualizerCheck.pointerEvents} z=${visualizerCheck.zIndex}；` +
+      `几何：示波器顶 ${visualizerCheck.stripTop} ≥ 工具条底 ${visualizerCheck.toolsBottom}；` +
+      `工具条中心的命中对象=${visualizerCheck.toolHitClass}（是示波器=${visualizerCheck.toolHitIsStrip}）；` +
+      `画布 ${visualizerCheck.size} 画了 ${visualizerCheck.bars.paintedPct.toFixed(1)}% 像素、纵向铺开 ${visualizerCheck.bars.spreadPct.toFixed(0)}%；` +
+      `连点四次样式变化 ${visualizerCheck.seen.join('→')}；选 off 时画布已清空=${visualizerCheck.offState.canvasEmpty}（dataset=${visualizerCheck.offState.datasetStyle}）`)
+
     const matchDetailCheck = await evaluate(win, `
       const { actions, store } = window.__aria
       const settle = async (ms = 340) => { await new Promise((r) => setTimeout(r, ms)) }

@@ -73,6 +73,57 @@ async function runScreenshots ({ win }) {
     await new Promise((r) => setTimeout(r, 600))
     return true`)
 
+  /*
+   * 示波器探针（抽出来给四张图共用）。
+   * 要回答三件事：
+   *   ① 画布上真的画了东西吗（不是空的一条）；
+   *   ② 纵向铺开的高度占比 —— 静音时条形只有 1px 高，有声音才会铺开，
+   *      所以这个数字能区分「真的在画音频」和「AudioContext 挂起、画的是静音」；
+   *   ③ 这层装饰有没有挡住控件（命中测试 + 与底部工具条的位置关系）。
+   */
+  const visualizerProbe = async () => evaluate(win, `
+    console.log('[visualizer] ' + JSON.stringify((() => {
+      const strip = document.querySelector('.visualizer')
+      const canvas = document.querySelector('.visualizer__canvas')
+      if (!canvas) return { missing: true }
+      const ctx = canvas.getContext('2d')
+      const { width, height } = canvas
+      const data = ctx.getImageData(0, 0, width, height).data
+      let painted = 0
+      let minY = height
+      let maxY = -1
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (data[(y * width + x) * 4 + 3] > 8) {
+            painted++
+            if (y < minY) minY = y
+            if (y > maxY) maxY = y
+          }
+        }
+      }
+      const cs = strip ? getComputedStyle(strip) : null
+      const rect = (sel) => {
+        const el = document.querySelector(sel)
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) }
+      }
+      return {
+        style: strip ? strip.dataset.style : null,
+        size: width + 'x' + height,
+        paintedPct: Math.round((painted / (width * height)) * 1000) / 10,
+        spreadPct: maxY < 0 ? 0 : Math.round(((maxY - minY) / height) * 100),
+        pointerEvents: cs ? cs.pointerEvents : null,
+        zIndex: cs ? cs.zIndex : null,
+        height: cs ? cs.height : null,
+        viewportH: window.innerHeight,
+        stripTop: strip ? Math.round(strip.getBoundingClientRect().top) : null,
+        tools: rect('.now-playing__tools'),
+        // 画布中心点命中的是谁：应当是控件/内容，而不是这层装饰
+        hitAtCenter: (() => { const r = strip.getBoundingClientRect(); const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)); return el ? (el.className || el.tagName).toString().slice(0, 40) : null })()
+      }
+    })())); return true`)
+
   const shots = [
     ['01-library.png', '歌曲列表', async () => {
       // 几何量测：内容区顶部那条「白条」到底是谁画的（工具条 vs 大标题 vs 舞台）
@@ -536,6 +587,48 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(300)
+    }],
+    /*
+     * 沉浸式示波器（从 wip/visualizer-immersive 重启的那条线）：三种画法各一张，
+     * 外加一张深色主题（那张必须**播放中**才有东西可看 —— 静音时条形只有 1px 高，
+     * 深色下几乎不可见，只看 07-now-playing-dark 那张会误判成"没画"）。
+     */
+    ...['bars', 'wave', 'ring'].map((style, index) => [
+      `${24 + index}-visualizer-${style}.png`,
+      `正在播放 · 示波器（${{ bars: '频谱 + 波形', wave: '纯波形', ring: '环形频谱' }[style]}）`,
+      async () => {
+        await evaluate(win, `
+          const { actions, store } = window.__aria
+          const tracks = store.get().library.tracks
+          const track = store.get().playback.trackId
+            ? tracks.find((t) => t.id === store.get().playback.trackId)
+            : null
+          if (!track) actions.playTrack(tracks[0])
+          await actions.setSetting({ theme: 'system', visualizerStyle: '${style}' })
+          // 显式指定歌词可见，免得受前面几张图留下的状态影响
+          actions.openNowPlaying({ lyrics: true })
+          await new Promise((r) => setTimeout(r, 1200))
+          return true`)
+        await sleep(500)
+        await visualizerProbe()
+        await sleep(200)
+      }
+    ]),
+    ['27-visualizer-dark.png', '正在播放 · 示波器（深色主题，播放中）', async () => {
+      await evaluate(win, `
+        const { actions, store } = window.__aria
+        const tracks = store.get().library.tracks
+        await actions.setSetting({ theme: 'dark', visualizerStyle: 'bars' })
+        const track = store.get().playback.trackId
+          ? tracks.find((t) => t.id === store.get().playback.trackId)
+          : null
+        if (!track || store.get().playback.status !== 'playing') actions.playTrack(tracks[0])
+        actions.openNowPlaying({ lyrics: true })
+        await new Promise((r) => setTimeout(r, 1500))
+        return true`)
+      await sleep(600)
+      await visualizerProbe()
+      await sleep(200)
     }]
   ]
 
