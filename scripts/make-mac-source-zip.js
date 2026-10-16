@@ -26,12 +26,17 @@ const stage = path.join(os.tmpdir(), `aria-mac-source-${version}`)
 const outDir = path.join(root, 'release')
 const zip = path.join(outDir, `aria-${version}-mac-source.zip`)
 
-/* 只带「能在 Mac 上构建出 app」所必需的东西；node_modules / release / 截图 / .git 一律不带 */
+/* 只带「能在 Mac 上构建 + 能自己跑检查」所必需的东西；node_modules / release / 截图 / .git 一律不带 */
 const ITEMS = [
   'src',
   'build/icon.png',
-  'scripts/mac-adhoc-sign.js',
-  'scripts/make-icon.py',
+  /*
+   * scripts 整个带上，而不是只挑两个文件：
+   * package.json 里的 `npm run check` 会引用 scripts/checks/*.js，
+   * 少一个文件对方那边一跑检查就报「找不到模块」——包里自带检查却缺文件，很怪。
+   * 整个目录也就几百 KB。
+   */
+  'scripts',
   'package.json',
   'README.md',
   'docs/MACOS.md',
