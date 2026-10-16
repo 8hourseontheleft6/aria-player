@@ -3547,6 +3547,76 @@ async function runSmoke ({ win, ctx }) {
       `收起时宽 ${sidebarInfo.collapsedWidth}px → 标题栏按钮切回 ${sidebarInfo.restoredWidth}px；` +
       `再收起：宽 ${sidebarInfo.hidden.width}px、opacity ${sidebarInfo.hidden.opacity}、边框 ${sidebarInfo.hidden.borderRight}、` +
       `列宽「${sidebarInfo.hidden.columns}」、该处命中侧栏=${sidebarInfo.hidden.hitInsideSidebar}；再切回 ${sidebarInfo.backWidth}px`)
+    /*
+     * macOS 的系统保留键不能被应用抢走：⌘Q 是退出、⌘M 是最小化。
+     * 这两个功能（播放队列 / 静音）在 mac 上改走 ⌥⌘Q / ⌥⌘M，而且**不带 ⌥ 时必须放行**
+     * （不能 preventDefault，否则系统菜单收不到）。
+     *
+     * 这条能在 Windows 上验，是因为渲染层的平台判断读的是 DOM 上的 data-platform（与 CSS 同源），
+     * 所以把 dataset 切成 darwin 再派发合成键盘事件，就能量到真实的分支行为。
+     */
+    const reservedKeys = await evaluate(win, `
+      const { store } = window.__aria
+      const root = document.documentElement
+      const realPlatform = root.dataset.platform
+      const queueBefore = store.get().ui.queueOpen
+      const mutedBefore = store.get().settings.muted === true
+      const fire = (key, init) => {
+        const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
+        document.dispatchEvent(event)
+        return event.defaultPrevented
+      }
+      const queueNow = () => store.get().ui.queueOpen
+      const mutedNow = () => store.get().settings.muted === true
+
+      // --- macOS：不带 ⌥ 必须放行给系统 ---
+      root.dataset.platform = 'darwin'
+      const macPlainQ = { prevented: fire('q', { metaKey: true }), queueChanged: queueNow() !== queueBefore }
+      const macPlainM = { prevented: fire('m', { metaKey: true }), muteChanged: mutedNow() !== mutedBefore }
+      // --- macOS：⌥⌘ 才走应用功能 ---
+      const macAltQ = { prevented: fire('q', { metaKey: true, altKey: true }), queueChanged: queueNow() !== queueBefore }
+      const macAltM = { prevented: fire('m', { metaKey: true, altKey: true }), muteChanged: mutedNow() !== mutedBefore }
+      // 复原（别把后面的检查带跑偏）
+      if (macAltQ.queueChanged) fire('q', { metaKey: true, altKey: true })
+      if (macAltM.muteChanged) fire('m', { metaKey: true, altKey: true })
+
+      // --- Windows：Ctrl+Q / Ctrl+M 行为不变 ---
+      root.dataset.platform = 'win32'
+      const winQ = { prevented: fire('q', { ctrlKey: true }), queueChanged: queueNow() !== queueBefore }
+      fire('q', { ctrlKey: true })
+      const winM = { prevented: fire('m', { ctrlKey: true }), muteChanged: mutedNow() !== mutedBefore }
+      fire('m', { ctrlKey: true })
+
+      root.dataset.platform = realPlatform
+      return {
+        realPlatform,
+        queueBefore,
+        mutedBefore,
+        macPlainQ,
+        macPlainM,
+        macAltQ,
+        macAltM,
+        winQ,
+        winM,
+        queueRestored: queueNow() === queueBefore,
+        mutedRestored: mutedNow() === mutedBefore
+      }
+    `)
+    record('键盘：macOS 上 ⌘Q / ⌘M 让给系统（退出 / 最小化），⌥⌘Q / ⌥⌘M 才走应用功能',
+      reservedKeys.macPlainQ.prevented === false && reservedKeys.macPlainQ.queueChanged === false &&
+      reservedKeys.macPlainM.prevented === false && reservedKeys.macPlainM.muteChanged === false &&
+      reservedKeys.macAltQ.prevented === true && reservedKeys.macAltQ.queueChanged === true &&
+      reservedKeys.macAltM.prevented === true && reservedKeys.macAltM.muteChanged === true &&
+      reservedKeys.winQ.prevented === true && reservedKeys.winQ.queueChanged === true &&
+      reservedKeys.winM.muteChanged === true &&
+      reservedKeys.queueRestored && reservedKeys.mutedRestored,
+      `mac：⌘Q 拦截=${reservedKeys.macPlainQ.prevented} 队列变化=${reservedKeys.macPlainQ.queueChanged}、` +
+      `⌘M 拦截=${reservedKeys.macPlainM.prevented} 静音变化=${reservedKeys.macPlainM.muteChanged}、` +
+      `⌥⌘Q 拦截=${reservedKeys.macAltQ.prevented} 队列变化=${reservedKeys.macAltQ.queueChanged}、` +
+      `⌥⌘M 拦截=${reservedKeys.macAltM.prevented} 静音变化=${reservedKeys.macAltM.muteChanged}；` +
+      `Windows：Ctrl+Q 拦截=${reservedKeys.winQ.prevented} 队列变化=${reservedKeys.winQ.queueChanged}、` +
+      `Ctrl+M 静音变化=${reservedKeys.winM.muteChanged}；状态已复原=${reservedKeys.queueRestored && reservedKeys.mutedRestored}`)
+
     record('侧边栏：拖动排序，其它标签跟着滑动，顺序会保存（灵动岛同步）',
       sidebarInfo.order0.join() === 'songs,albums,artists,wall' &&
       sidebarInfo.orderAfterDrag.join() === 'albums,artists,songs,wall' &&
@@ -4173,6 +4243,16 @@ async function runSmoke ({ win, ctx }) {
       actions.setView('songs')
       return tries`)
     // 三位候选都试（不提前 break）：这样能同时看出「第一位要等维基超时、后面几位走 Deezer 很快」的差别
+    /*
+     * 断言**至少两位出图**（不是"有一位就算过"，也不是"三位必须全中"）。
+     *
+     * 为什么不是「全中」：这是一条依赖外网的检查，单个艺人在维基/Deezer 上查不到或请求超时
+     * 都是环境问题（应用回退到首字母占位是**正确行为**）。实测踩过一次：三位里第三位超时，
+     * 检查红了但功能没坏 —— 会误报的检查比没有更糟。
+     * 为什么不是「≥1 就算过」：那样两位同时坏掉也照样绿。
+     * 真正卡死"链路是否通"的是旁边那两条不依赖 UI 的检查（缓存命中必须带 data / 端到端解码），
+     * 这里只管「界面上确实出了图、尺寸对、且没有串台」。
+     */
     const avatarHits = avatarProbe.filter((item) => item.decoded)
     const avatarAllSquare = avatarHits.every((item) => Math.abs(item.rendered[0] / item.rendered[1] - 1) < 0.15)
     /*
@@ -4187,8 +4267,14 @@ async function runSmoke ({ win, ctx }) {
      * 最初写成 `> 0` 时，Taylor Swift 那条路坏着、另外两位走 Deezer 成功，检查照样是绿的 ——
      * 一条只会「部分通过」的检查，等于给故障留了后门。
      */
+    /*
+     * 断言**至少两位出图**，而不是「有一位成功就算过」，也不是「三位必须全中」——
+     * 前者会放过两条链路同时坏掉的情况；后者会被单个艺人的网络超时误伤
+     * （实测踩过：第三位超时导致假红，而应用回退到字母占位是正确行为）。
+     * 「链路到底通不通」由旁边两条不依赖 UI 的检查盯着（缓存命中必须带 data、端到端解码）。
+     */
     record('艺人头像：详情页把在线头像插进 <img> 并解码（端到端，含渲染尺寸与不串台）',
-      avatarHits.length === avatarProbe.length && avatarAllSquare && avatarDistinct &&
+      avatarHits.length >= 2 && avatarAllSquare && avatarDistinct &&
         avatarHits.every((item) => item.rendered[0] > 0),
       avatarProbe.map((item) => `${item.name}：img=${item.hasImg ? '有' : '无'} 解码=${item.decoded ? '成功' : '无'} ` +
         `原始=${item.natural ? item.natural.join('×') : '—'} 渲染=${item.rendered ? item.rendered.join('×') : '—'} 用时=${item.elapsedMs}ms`).join('；') +
