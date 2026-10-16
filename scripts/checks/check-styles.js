@@ -52,6 +52,7 @@ for (const file of [...cssFiles, ...jsFiles, ...otherFiles]) {
 // 刻意保留的写法：细环（0 0 0 …）与取色发光（color-mix / 变量拼出来的阴影）
 const ringOrGlow = (value) => /^0 0 0\b/.test(value) || value.includes('color-mix(')
 
+let checkedSeparator = 0
 let checkedRadius = 0
 let checkedShadow = 0
 
@@ -66,6 +67,22 @@ for (const file of cssFiles) {
       const value = radius[1].trim()
       const ok = value === '0' || value === '50%' || value === 'inherit' || /^var\(--radius-/.test(value)
       if (!ok) problems.push(`${at}  border-radius 应该用 --radius-*：${value}`)
+    }
+
+    /*
+     * 分隔线粗细：凡是**用 --separator / --separator-strong 当边框色**的地方，粗细必须是 0.5px。
+     *
+     * 依据是 DESIGN.md 的规则："分隔线一律 0.5px，1px 在高分屏上会显得比原生重"
+     * （1px 在 1.75× 屏上渲染成约 2 个物理像素）。实测全库 19 处都守规矩，
+     * 只有 .input 漏成 1px —— 那次就是这条规则量出来的。
+     * 想用更粗的边就别用 --separator 这个令牌（它的含义就是"发丝线"）。
+     */
+    const separatorBorder = /border[a-z-]*:\s*([\d.]+)px\s+[^;]*var\(--separator(-strong)?\)/.exec(line)
+    if (separatorBorder) {
+      checkedSeparator++
+      if (separatorBorder[1] !== '0.5') {
+        problems.push(`${at}  用 --separator 画的边框宽度应当是 0.5px，这里是 ${separatorBorder[1]}px（高分屏上会偏重）`)
+      }
     }
 
     const shadow = line.match(/box-shadow:\s*([^;]+);/)
@@ -406,7 +423,7 @@ console.log(
   `基准线 ${checkedBaseline} 处、裸值 色${naked.color}/时${naked.duration}/字${naked.fontSize}` +
   `、重复选择器 ${duplicateSelectors.length} 处（只提示不改）` +
   `（上限 ${NAKED_BASELINE.color}/${NAKED_BASELINE.duration}/${NAKED_BASELINE.fontSize}）、` +
-  `已定义令牌 ${defined.size} 个，问题 ${problems.length} 处`
+  `分隔线 ${checkedSeparator} 处、已定义令牌 ${defined.size} 个，问题 ${problems.length} 处`
 )
 
 if (problems.length > 0) process.exit(1)

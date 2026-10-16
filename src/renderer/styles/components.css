@@ -1161,7 +1161,12 @@ button.popover__row.is-danger:hover {
   height: 32px;
   padding: 0 12px;
   min-width: 0;
-  border: 1px solid var(--separator);
+  /*
+   * 0.5px 而不是 1px：全库用 --separator 画边的地方（19 处）都是 0.5px ——
+   * 这是 DESIGN.md 的规则，也是高分屏上更像原生的粗细（1px 会渲染成约 2 个物理像素，偏重）。
+   * 这一处原先漏成 1px，是"分隔线 / 毛玻璃"这条线里量出来的唯一例外（自检 check-styles 现在守着）。
+   */
+  border: 0.5px solid var(--separator);
   border-radius: var(--radius-md);
   background: var(--fill-quaternary);
   color: var(--label-2);
