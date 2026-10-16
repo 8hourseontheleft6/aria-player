@@ -314,10 +314,20 @@ async function runScreenshots ({ win }) {
        * 所以首屏会先显示首字母占位、再逐个换成照片 —— 不等一下就会拍到"一屏首字母"。
        * 第一批之前要付一次维基超时，之后每位约 0.3s（服务端串行 + 350ms 最小间隔），
        * 所以这里给 25s 预算，够 6 位到位即可。
+       *
+       * ⚠️ 但**等不到也不算失败**：网络不好时（整晚都在间歇性降级）以前会直接抛错，
+       * 于是后面 27 张图全都不生成 —— 一晚上的出图成果被一次网络抖动毁掉。
+       * 现在超时只记一行说明，继续拍（拍到的是占位图，那也是应用真实的离线外观）。
        */
-      await waitFor(win,
-        `[...document.querySelectorAll('.artist-row__avatar img')].filter((img) => img.complete && img.naturalWidth > 0).length >= 6`,
-        { timeout: 25000, label: '艺人列表头像' })
+      try {
+        await waitFor(win,
+          `[...document.querySelectorAll('.artist-row__avatar img')].filter((img) => img.complete && img.naturalWidth > 0).length >= 6`,
+          { timeout: 25000, label: '艺人列表头像' })
+      } catch (error) {
+        const got = await evaluate(win, `
+          return [...document.querySelectorAll('.artist-row__avatar img')].filter((img) => img.complete && img.naturalWidth > 0).length`)
+        console.log(`  · 11-artists.png：等在线头像超时（拿到 ${got} 张），按离线外观继续 —— 这只影响这一张`)
+      }
       await sleep(600)
     }],
     ['13-artist-detail.png', '艺人详情', async () => {
@@ -353,8 +363,18 @@ async function runScreenshots ({ win }) {
         return true`)
       await sleep(1200)
     }],
+    /*
+     * 这两张以前**假设自己已经在媒体墙页**——prepare 只操作 .wall-viewport 与密度按钮，
+     * 从没切视图。而 13-artist-detail 会把视图切到艺人页，于是 14/15 一直在拍**别的视图**
+     * （实测 15-wall-large.png 里是歌曲列表）。这是"产物说谎"的又一例：
+     * 文件名写着媒体墙，内容是歌曲列表，而没有任何检查会发现。
+     * 现在每个 prepare 都显式声明自己要的视图 —— 不依赖上一张留下的状态。
+     */
     ['14-wall-scrolled.png', '媒体墙（斜向拖到中段）', async () => {
       await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('wall')
+        await new Promise((r) => setTimeout(r, 900))
         // 用滚轮事件做一次斜向平移，验证二维画布
         const viewport = document.querySelector('.wall-viewport')
         viewport.dispatchEvent(new WheelEvent('wheel', {
@@ -366,6 +386,9 @@ async function runScreenshots ({ win }) {
     }],
     ['15-wall-large.png', '媒体墙（大尺寸 + 回到起点）', async () => {
       await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('wall')
+        await new Promise((r) => setTimeout(r, 900))
         document.querySelector('[data-density="l"]')?.click()
         return true`)
       await sleep(600)
@@ -1174,7 +1197,25 @@ async function runScreenshots ({ win }) {
      * 自检里改验"材质元素是否真的接上"（机制层面，不会假通过）。
      */
     written.push(`${file}（${label}）`)
-    console.log(`  ✓ ${file} — ${label}  ${deltaText}`)
+    /*
+     * 把"这张图实际拍到了什么"一并打出来。
+     *
+     * 起因：14/15 两张文件名写着媒体墙，实际内容却是歌曲列表 —— 因为它们的 prepare
+     * 只操作画布、从没切视图，而中间插进来的 13-artist-detail 把视图改了。
+     * 这种"图和标签不符"以前完全无声（清单检查只看名字），现在每次出图都会显示实际视图，
+     * 一眼就能对上。顺带输出当前打开的详情/面板，覆盖"拍的是详情页"这类情况。
+     */
+    const captured = await evaluate(win, `
+      const state = window.__aria.store.get()
+      const heading = document.querySelector('.view-header__title, .browse-detail__title, .now-playing__title')
+      return {
+        view: state.ui.view,
+        detail: state.ui.detail ? state.ui.detail.type : '',
+        panel: state.ui.nowPlayingOpen ? 'now-playing' : '',
+        heading: (heading ? heading.textContent : '').trim().slice(0, 12)
+      }`)
+    const where = [captured.view, captured.detail, captured.panel].filter(Boolean).join('/')
+    console.log(`  ✓ ${file} — ${label}  ${deltaText}  [视图：${where}${captured.heading ? ' · ' + captured.heading : ''}]`)
   }
 
   // 示例播放列表只在截图里出现，拍完就删掉，免得留在自动化档案里；
