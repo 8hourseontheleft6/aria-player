@@ -102,7 +102,13 @@ if (!app.requestSingleInstanceLock()) {
 async function bootstrap () {
   await app.whenReady()
 
-  app.setAppUserModelId('com.aria.player')
+  /*
+   * 只在 Windows 上调：`app.setAppUserModelId` 是 Windows 专属 API
+   * （Electron 的类型定义里标着 @platform win32），用来让任务栏/通知认得这个应用。
+   * 之前是不加判断直接调的 —— 在 macOS 上这是「未实现的方法」，轻则抛错、重则应用起不来，
+   * 而我们正要把它搬到别人的 Mac 上测，所以这里明确收进平台判断里。
+   */
+  if (process.platform === 'win32') app.setAppUserModelId('com.aria.player')
 
   const ctx = createContext()
   ctx.define('settings', createSettingsService)
