@@ -503,6 +503,39 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(300)
+    }],
+    /*
+     * macOS 正在播放页的顶栏（模拟）——这是**最后一条**没验过的 darwin CSS 规则：
+     * `html[data-platform="darwin"] .now-playing__topbar { padding-left: 84px }`。
+     * 正在播放页是全屏浮层，而窗口是 hiddenInset（红黄绿还在），所以它同样要让出那 84px。
+     */
+    ['23-mac-nowplaying-emulated.png', 'macOS 正在播放页顶栏（模拟：给红黄绿留 84px）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        document.documentElement.dataset.platform = 'darwin'
+        actions.setView('songs')
+        await new Promise((r) => setTimeout(r, 300))
+        actions.openNowPlaying({ lyrics: true })
+        await new Promise((r) => setTimeout(r, 1300))
+        document.querySelectorAll('.setting-tip').forEach((n) => n.remove())
+        return true`)
+      await sleep(400)
+      await evaluate(win, `
+        console.log('[mac-nowplaying] ' + JSON.stringify((() => {
+          const bar = document.querySelector('.now-playing__topbar')
+          const first = bar ? bar.firstElementChild : null
+          const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } }
+          const firstX = first ? Math.round(first.getBoundingClientRect().left) : null
+          return {
+            platform: document.documentElement.dataset.platform,
+            topbar: box(bar),
+            paddingLeft: bar ? getComputedStyle(bar).paddingLeft : null,
+            firstChild: box(first),
+            firstChildUnderTrafficLights: firstX === null ? null : firstX < 84,
+            overflowX: document.documentElement.scrollWidth - window.innerWidth
+          }
+        })())); return true`)
+      await sleep(300)
     }]
   ]
 

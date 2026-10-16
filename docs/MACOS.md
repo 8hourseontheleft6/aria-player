@@ -65,10 +65,11 @@ Aria-<版本>-x64.zip
 
 ```bash
 npm install
-npm run dist:mac        # = electron-builder --mac --publish never
+npm run dist:mac:arm64   # 只打这一台的架构（Apple Silicon），比下面那条快将近一半
+npm run dist:mac         # 两个架构都打（arm64 + x64），产物更全
 ```
 
-产物同样落在 `release/` 下。
+产物同样落在 `release/` 下。分不清自己是哪种芯片：苹果菜单 →「关于本机」→ 看「芯片」。
 
 ---
 

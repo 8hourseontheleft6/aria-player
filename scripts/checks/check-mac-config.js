@@ -109,6 +109,19 @@ if (!fs.existsSync(workflowPath)) {
   if (!/CSC_IDENTITY_AUTO_DISCOVERY/.test(workflow)) problems.push('CI 工作流没设 CSC_IDENTITY_AUTO_DISCOVERY —— 没有证书时会尝试自动找证书')
 }
 
+/* ---------- 8. 出包脚本本身 ---------- */
+/*
+ * 朋友（或 CI）按下的是这两条命令，写错一个字就会白等一场。
+ * 文档里提到 `npm run dist:mac:arm64` 时，check-docs 也会核对它存在（两条检查互为呼应）。
+ */
+const scripts = pkg.scripts || {}
+const distMac = scripts['dist:mac'] || ''
+const distMacArm = scripts['dist:mac:arm64'] || ''
+if (!distMac.includes('--mac')) problems.push('npm run dist:mac 没有 `--mac`（会去打 Windows 包）')
+if (!distMacArm.includes('--mac') || !distMacArm.includes('--arm64')) {
+  problems.push('npm run dist:mac:arm64 应该同时带 `--mac` 与 `--arm64`（给 Apple Silicon 的快速出包路径）')
+}
+
 /* ---------- 报告 ---------- */
 console.log(`macOS 打包配置检查：图标 ${fs.existsSync(iconPath) ? '有' : '缺'}、` +
   `目标 ${[...kinds].join('+') || '（无）'}、架构 ${[...arches].join('+') || '（无）'}、` +

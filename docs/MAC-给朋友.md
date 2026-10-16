@@ -25,10 +25,14 @@
 
    ```bash
    npm install
-   npm run dist:mac
+   npm run dist:mac:arm64     # Apple Silicon（M 系列）
+   # 如果你的 Mac 是 Intel：把上面那条换成 npm run dist:mac
    ```
 
-3. 跑完之后，`release/` 目录里会出现 `Aria-…-arm64.dmg`（或 `-x64.dmg`），回到第二节。
+   > 不确定是哪种？屏幕左上角 苹果菜单 →「关于本机」，看「芯片」：写 Apple M… 就是 arm64。
+   > `dist:mac:arm64` 只打你这一台的架构，比 `dist:mac`（两个架构都打）快将近一半。
+
+3. 跑完之后，`release/` 目录里会出现 `Aria-…-arm64.dmg`，回到第二节。
 
 ---
 
@@ -77,6 +81,17 @@
   ```
 
   它会打开一个开发者工具窗口，里面的红字就是线索。
+
+### 如果「情况 B」的打包卡住了（大概率用不上）
+
+| 现象 | 怎么办 |
+| --- | --- |
+| 终端说 `command not found: npm` | Node 没装好：重开一个终端窗口再试；还不行就重新装一遍 Node（用官网那个 `.pkg`） |
+| `npm install` 中途报网络错误 | 删掉文件夹里的 `node_modules` 再跑一次 `npm install`；网络不稳就换个时间 |
+| 打了很久没动静 | 第一次要下载 Electron（约 100MB 起），慢是正常的；等不下去就告诉我，我改在 CI 上出包给你 |
+| 出现 `codesign` 相关警告 | **可以忽略**：这个包本来就不签名，脚本会自己继续 |
+| 磁盘空间不够 | 整个过程需要 1.5–2GB 空闲（`dist:mac` 两个架构都打要更多） |
+| 想从头再来 | 删掉整个文件夹、重新解压一次最省事 |
 
 ## 五、先说在前面：这些不是 bug
 

@@ -19,7 +19,8 @@
     "probe": "node scripts/probes/probe-library.js",
     "dist": "electron-builder --win --x64",
     "dist:portable": "electron-builder --win portable --x64",
-    "dist:mac": "electron-builder --mac --publish never"
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:mac:arm64": "electron-builder --mac --arm64 --publish never"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"
