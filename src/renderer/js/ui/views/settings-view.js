@@ -7,6 +7,7 @@ import { formatDurationLong, formatRelativeTime, formatRate, formatBytes, modLab
 import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
 import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
+import { createPillSelect } from '../widgets/pill-menu.js'
 import { visualizerChoices } from '../widgets/visualizer.js'
 
 const THEMES = [
@@ -503,7 +504,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
    */
   const sleepValue = h('span', { class: 'settings__row-value' })
   /* 到点复位后，下拉自身也要跟着回到「关闭」，否则界面与状态不一致 */
-  let sleepSelect = null
+  let sleepPill = null
   let sleepTimerId = null
   let lastSleepMinutes = store.get().settings.sleepTimerMinutes || 0
 
@@ -541,8 +542,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     const minutes = state.settings.sleepTimerMinutes || 0
     if (minutes === lastSleepMinutes) return
     lastSleepMinutes = minutes
-    // 状态是唯一事实来源：下拉跟着它走（到点复位时也回到「关闭」）
-    if (sleepSelect && sleepSelect.value !== String(minutes)) sleepSelect.value = String(minutes)
+    // 状态是唯一事实来源：药丸下拉跟着它走（到点复位时也回到「关闭」）
+    if (sleepPill && sleepPill.value !== String(minutes)) sleepPill.setValue(String(minutes))
     applySleepTimer(minutes)
   })
 
@@ -659,19 +660,30 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 输出设备列表要现取：插拔耳机、切蓝牙都会变。
      * 名字需要 media 权限（主进程已放行），拿不到就退化成「输出设备 N」。
      */
-    const outputSelect = h('select', { class: 'settings__select' })
+    /*
+     * 输出设备：用**药丸下拉**（pill-menu.js）替代原生 <select>。
+     * 原生下拉的弹层由系统画，深色下会弹出一块白底列表 —— 用户反馈过两次。
+     * 药丸控件把"当前值"与"弹层"都握在我们手里，外观与全应用统一。
+     * 设备列表会变（插拔耳机 / 切蓝牙），所以用 setItems 换选项、setValue 保持当前值。
+     */
+    let outputPill = createPillSelect({
+      items: [{ value: '', label: '跟随系统' }],
+      value: store.get().settings.audioOutputDevice || '',
+      title: '输出设备',
+      onPick: (value) => actions.setOutputDevice(value)
+    })
     function paintOutputDevices () {
       const current = store.get().settings.audioOutputDevice || ''
-      outputSelect.replaceChildren(
-        h('option', { value: '', text: '跟随系统' }),
+      outputPill.setItems([
+        { value: '', label: '跟随系统' },
         ...outputDevices
           .filter((device) => device.deviceId && device.deviceId !== 'default')
-          .map((device, index) => h('option', {
+          .map((device, index) => ({
             value: device.deviceId,
-            text: device.label || `输出设备 ${index + 1}`
+            label: device.label || `输出设备 ${index + 1}`
           }))
-      )
-      outputSelect.value = current
+      ])
+      outputPill.setValue(current)
     }
     async function loadOutputDevices () {
       try {
@@ -683,7 +695,6 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       }
       paintOutputDevices()
     }
-    on(outputSelect, 'change', () => actions.setOutputDevice(outputSelect.value))
     paintOutputDevices()
     // 已经有缓存就不再异步刷一遍（否则每次改设置都会重放一次宽度跳动）
     if (!outputDevicesLoaded) loadOutputDevices()
@@ -697,12 +708,14 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
      * 折叠标题上直接写清当前状态（开关 / 自动 / 生效预设），
      * 展开后是完整设置 + 十段增益的可视化。
      */
-    const eqPresetSelect = h('select', { class: 'settings__select' })
-    eqPresetSelect.replaceChildren(...presetOptions().map((option) =>
-      h('option', { value: option.value, text: option.label })))
-    eqPresetSelect.value = settings.equalizer?.preset || 'flat'
-    eqPresetSelect.disabled = settings.equalizer?.auto !== false
-    on(eqPresetSelect, 'change', () => actions.setEqualizer({ preset: eqPresetSelect.value }))
+    // 均衡器预设也用同一套药丸下拉（理由同输出设备那处：原生弹层深色下是白底）
+    const eqPresetPill = createPillSelect({
+      items: presetOptions().map((option) => ({ value: option.value, label: option.label })),
+      value: settings.equalizer?.preset || 'flat',
+      disabled: settings.equalizer?.auto !== false,
+      title: '均衡器预设',
+      onPick: (value) => actions.setEqualizer({ preset: value })
+    })
 
     const eqSnapshot = { preset: basis?.preset, bands: basis?.bands || [] }
     const eqBands = (eqSnapshot ? eqSnapshot.bands : []).map((band) => {
@@ -743,7 +756,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       row({
         title: '均衡器预设',
         sub: '自动匹配关闭时使用这一组。原声 = 不做任何处理。',
-        control: h('div', { class: 'select' }, eqPresetSelect)
+        control: eqPresetPill.element
       }),
       row({
         title: '用声音辅助判断风格',
@@ -765,15 +778,15 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       sub: '选一个时长，到点自动暂停播放。只在本次运行内有效（重启后需要重新选）。',
       control: (() => {
         const options = [[0, '关闭'], [15, '15 分钟'], [30, '30 分钟'], [45, '45 分钟'], [60, '1 小时'], [90, '1.5 小时']]
-        const select = h('select', {
-          'aria-label': '睡眠定时器时长',
-          onChange: (event) => actions.setSetting({ sleepTimerMinutes: Number(event.currentTarget.value) })
-        }, options.map(([value, label]) =>
-          h('option', { value: String(value), selected: (store.get().settings.sleepTimerMinutes || 0) === value }, label)))
-        // .select 是**包裹层**类（负责配色与右侧箭头），要包在 <select> 外面
-        sleepSelect = select
+        // 同样换成药丸下拉；倒计时的那个数字（sleepValue）是独立节点，不受影响
+        sleepPill = createPillSelect({
+          items: options.map(([value, label]) => ({ value: String(value), label })),
+          value: String(store.get().settings.sleepTimerMinutes || 0),
+          title: '睡眠定时器时长',
+          onPick: (value) => actions.setSetting({ sleepTimerMinutes: Number(value) })
+        })
         return h('div', { class: 'settings__row-control' },
-          h('div', { class: 'select' }, select),
+          sleepPill.element,
           sleepValue,
         )
       })()
@@ -781,7 +794,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       row({
         title: '输出设备',
         sub: '通话 / 游戏语音时想让对方听不到音乐：把这里选成你的耳机（通话留在原设备）。音乐只进你的耳朵，麦克风拾不到它，对方就什么也听不到。留「跟随系统」则与其它应用共用默认输出。',
-        control: h('div', { class: 'select' }, outputSelect)
+        control: outputPill.element
       }),
       row({
         title: '单击歌曲直接播放',

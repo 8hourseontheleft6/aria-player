@@ -3196,7 +3196,7 @@ async function runSmoke ({ win, ctx }) {
         none: window.__aria.matchPreset({ genre: '', title: '', artist: '' })
       }
 
-      // 设置页要有这三行，且关掉自动后预设下拉可选
+      // 设置页要有这三行，且关掉自动后预设下拉（药丸）可选
       actions.setView('settings')
       await settle(900)
       const rows = [...document.querySelectorAll('.settings__row')].map((node) => node.textContent)
@@ -3204,8 +3204,14 @@ async function runSmoke ({ win, ctx }) {
       const hasAutoRow = rows.some((text) => text.includes('按歌曲风格自动选择'))
       const presetRow = [...document.querySelectorAll('.settings__row')]
         .find((node) => node.textContent.includes('均衡器预设'))
-      const presetSelect = presetRow ? presetRow.querySelector('select') : null
-      const presetOptions = presetSelect ? [...presetSelect.options].map((option) => option.text) : []
+      const presetPill = presetRow ? presetRow.querySelector('.pill-select') : null
+      const presetOptions = (() => {
+        if (!presetPill) return []
+        presetPill.click()
+        return [...document.querySelectorAll('.popover .pill-menu .pill')]
+          .map((node) => node.textContent.replace(/\\s+/g, ' ').trim())
+      })()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 
       /* ③ 开着均衡器播放不能哑（WebAudio 接管输出的最大风险） */
       actions.setEqualizer({ enabled: true, auto: false, preset: 'pop' })
@@ -3295,39 +3301,36 @@ async function runSmoke ({ win, ctx }) {
       const { actions, store, engine } = window.__aria
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }
 
-      /* ① 深色模式下的下拉框不能再是白底黑字 */
+      /*
+       * ① 设置里**不再有原生下拉**：它的弹层由系统画，深色下会弹出一块白底
+       * （用户抱怨过两次；此前只美化了控件本身，弹层没救）。现在统一成药丸下拉，
+       * 这里既验"一个原生 select 都不剩"，也验药丸控件在深浅色下都可读。
+       */
       actions.setView('settings')
       await settle(1100)
-      const readSelect = () => {
-        const node = document.querySelector('.settings select')
+      const nativeSelects = document.querySelectorAll('.settings select').length
+      const readPill = () => {
+        const node = document.querySelector('.settings .pill-select')
         if (!node) return null
         const style = getComputedStyle(node)
-        return {
-          appearance: style.appearance,
-          background: style.backgroundColor,
-          color: style.color,
-          // 原生外观没被拿掉时，深色下系统会画白底
-          wrapped: Boolean(node.closest('.select')),
-          chevron: getComputedStyle(node.closest('.select'), '::after').content
-        }
+        return { background: style.backgroundColor, color: style.color }
       }
       actions.setSetting({ theme: 'dark' })
       await settle(700)
-      const darkSelect = readSelect()
+      const darkPill = readPill()
       actions.setSetting({ theme: 'light' })
       await settle(700)
-      const lightSelect = readSelect()
+      const lightPill = readPill()
       actions.setSetting({ theme: 'system' })
       await settle(500)
-      const selectStyle = darkSelect
-      // 深色下必须是「浅字 + 半透明灰底」，白底就是用户报的那个 bug
-      const darkReadable = Boolean(darkSelect) &&
-        darkSelect.color.includes('255, 255, 255') &&
-        darkSelect.background.includes('120, 120, 128') &&
-        !darkSelect.background.includes('255, 255, 255')
-      const lightReadable = Boolean(lightSelect) &&
-        lightSelect.color.includes('0, 0, 0') &&
-        !lightSelect.background.includes('255, 255, 255')
+      const selectStyle = darkPill
+      const darkReadable = Boolean(darkPill) &&
+        darkPill.color.includes('255, 255, 255') &&
+        darkPill.background.includes('120, 120, 128') &&
+        !darkPill.background.includes('255, 255, 255')
+      const lightReadable = Boolean(lightPill) &&
+        lightPill.color.includes('0, 0, 0') &&
+        !lightPill.background.includes('255, 255, 255')
 
       /* ② 系统媒体键要列出来（之前手写那份被删掉后就再没显示过） */
       const MEDIA_LABELS = ['播放 / 暂停键', '下一首键', '上一首键', '停止键']
@@ -3422,8 +3425,9 @@ async function runSmoke ({ win, ctx }) {
       await settle(400)
       return {
         selectStyle,
-        darkSelect,
-        lightSelect,
+        nativeSelects,
+        darkPill,
+        lightPill,
         darkReadable,
         lightReadable,
         hasMediaGroup,
@@ -3446,14 +3450,13 @@ async function runSmoke ({ win, ctx }) {
         trustTag
       }
     `)
-    record('下拉框在深色下也看得清（拿掉原生外观 + 主题化箭头）',
-      uiRound2.selectStyle?.appearance === 'none' &&
-      uiRound2.selectStyle?.wrapped === true &&
+    record('设置里不再有原生下拉（弹层由系统画、深色下白底），药丸控件深浅色都可读',
+      uiRound2.nativeSelects === 0 &&
       uiRound2.darkReadable === true &&
       uiRound2.lightReadable === true,
-      `appearance=${uiRound2.selectStyle?.appearance}、包了 .select=${uiRound2.selectStyle?.wrapped}、箭头 content=${uiRound2.selectStyle?.chevron}；` +
-      `深色：字 ${uiRound2.darkSelect?.color} / 底 ${uiRound2.darkSelect?.background}（可读=${uiRound2.darkReadable}）；` +
-      `浅色：字 ${uiRound2.lightSelect?.color} / 底 ${uiRound2.lightSelect?.background}（可读=${uiRound2.lightReadable}）`)
+      `设置页里的原生 <select> 数量=${uiRound2.nativeSelects}（应为 0）；` +
+      `深色：字 ${uiRound2.darkPill?.color} / 底 ${uiRound2.darkPill?.background}（可读=${uiRound2.darkReadable}）；` +
+      `浅色：字 ${uiRound2.lightPill?.color} / 底 ${uiRound2.lightPill?.background}（可读=${uiRound2.lightReadable}）`)
     record('设置里列出系统媒体键（清单来自主进程注册表）',
       uiRound2.hasMediaGroup === true &&
       uiRound2.declaredKeys.length === 4 &&
@@ -3656,8 +3659,15 @@ async function runSmoke ({ win, ctx }) {
       await settle(1200)
       const row = [...document.querySelectorAll('.settings__row')]
         .find((node) => node.textContent.includes('输出设备'))
-      const select = row ? row.querySelector('select.settings__select') : null
-      const options = select ? [...select.options].map((option) => option.text) : []
+      // 输出设备现在是药丸下拉（.pill-select）而不是原生 <select>
+      const pill = row ? row.querySelector('.pill-select') : null
+      const pillLabel = pill ? pill.textContent.trim() : ''
+      pill?.click()
+      await settle(350)
+      const menu = document.querySelector('.popover .pill-menu')
+      const options = menu ? [...menu.querySelectorAll('.pill')].map((node) => node.textContent.replace(/\\s+/g, ' ').trim()) : []
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await settle(250)
       const info = row ? row.querySelector('.settings__info') : null
 
       const applied = await actions.setOutputDevice('')
@@ -3671,7 +3681,9 @@ async function runSmoke ({ win, ctx }) {
         outputs: outputs.length,
         devicesTimedOut,
         hasRow: Boolean(row),
-        hasSelect: Boolean(select),
+        hasPill: Boolean(pill),
+        pillLabel,
+        hasList: options.length > 0,
         hasInfo: Boolean(info),
         options,
         applied: Boolean(applied && applied.ok === true),
@@ -3688,14 +3700,16 @@ async function runSmoke ({ win, ctx }) {
       audioOutput.devicesTimedOut === false &&
       audioOutput.outputs > 0 &&
       audioOutput.hasRow === true &&
-      audioOutput.hasSelect === true &&
+      audioOutput.hasPill === true &&
+      audioOutput.hasList === true &&
       audioOutput.hasInfo === true &&
-      audioOutput.options[0] === '跟随系统' &&
+      audioOutput.options[0].startsWith('跟随系统') &&
       audioOutput.persisted === '' &&
       typeof audioOutput.applied === 'boolean',
       `引擎有 setOutputDevice=${audioOutput.hasApi}；系统报告 ${audioOutput.outputs} 个输出设备` +
       `${audioOutput.devicesTimedOut ? '（enumerateDevices 超时 —— 已按超时处理，不让它挂住整轮）' : ''}；` +
-      `设置页有该行=${audioOutput.hasRow}（下拉=${audioOutput.hasSelect}、ⓘ 说明=${audioOutput.hasInfo}，选项 ${JSON.stringify(audioOutput.options)}）；` +
+      `设置页有该行=${audioOutput.hasRow}（药丸下拉=${audioOutput.hasPill}、当前显示「${audioOutput.pillLabel}」、` +
+      `点开列出 ${audioOutput.options.length} 项、ⓘ 说明=${audioOutput.hasInfo}）；` +
       `切到「跟随系统」返回 ok=${audioOutput.applied}${audioOutput.message ? `（${audioOutput.message}）` : ''}，落盘值「${audioOutput.persisted}」` +
       `　[注：合成事件没有用户手势，Chromium 可能拒绝 setSinkId；真实点击来自用户操作，不受影响]`)
 
@@ -5749,9 +5763,21 @@ async function runSmoke ({ win, ctx }) {
       const { actions, store } = window.__aria
       actions.setView('settings')
       await settle(500)
-      const select = document.querySelector('select[aria-label="睡眠定时器时长"]')
-      const optionCount = select ? select.options.length : 0
-      const labels = select ? [...select.options].map((o) => o.textContent).join('/') : ''
+      /*
+       * 睡眠定时器也是药丸下拉了（原生 <select> 的弹层深色下是白底，已全部换掉）。
+       * 选项只在下拉**打开时**存在，所以这里先读触发器上的当前值、再点开数一遍。
+       */
+      const sleepPill = document.querySelector('.pill-select[title="睡眠定时器时长"]')
+      const pillLabel = sleepPill ? sleepPill.textContent.trim() : ''
+      sleepPill?.click()
+      await settle(350)
+      const sleepMenu = document.querySelector('.popover .pill-menu')
+      const optionCount = sleepMenu ? sleepMenu.querySelectorAll('.pill').length : 0
+      const labels = sleepMenu
+        ? [...sleepMenu.querySelectorAll('.pill')].map((o) => o.textContent.replace(/\\s+/g, '').trim()).join('/')
+        : ''
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      await settle(250)
       // 注意：setSetting 收的是对象补丁（这里曾经写成两参数，导致永远读回 0）
       actions.setSetting({ sleepTimerMinutes: 15 })
       let armed = 0
@@ -5792,11 +5818,12 @@ async function runSmoke ({ win, ctx }) {
       actions.setSetting({ sleepTimerMinutes: 0 })
       actions.setView('songs')
       await settle(200)
-      return { optionCount, labels, armed, afterFire, note: sleepNote }
+      return { optionCount, labels, pillLabel, armed, afterFire, note: sleepNote }
     `)
-    record('睡眠定时器：到点暂停并复位（把 setTimeout 换成立即执行来验）',
+    record('睡眠定时器：到点暂停并复位（下拉是药丸，到点用替换 setTimeout 来验）',
       sleepTimerCheck.armed === 15 && sleepTimerCheck.afterFire === 0 && sleepTimerCheck.optionCount >= 5,
-      `选项 ${sleepTimerCheck.optionCount} 个 [${sleepTimerCheck.labels}]；选中 15 → 落盘 ${sleepTimerCheck.armed}；到点复位为 ${sleepTimerCheck.afterFire}（应为 0）`)
+      `药丸下拉当前显示「${sleepTimerCheck.pillLabel}」；点开有 ${sleepTimerCheck.optionCount} 项 [${sleepTimerCheck.labels}]；` +
+      `选中 15 → 落盘 ${sleepTimerCheck.armed}；到点复位为 ${sleepTimerCheck.afterFire}（应为 0）`)
 
     /* ---------- 系统集成 ---------- */
 

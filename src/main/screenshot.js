@@ -742,6 +742,52 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(200)
+    }],
+    /*
+     * 设置 → 播放与音效：这一节此前也没有截图覆盖，而刚换掉的三个药丸下拉都在这里
+     * （睡眠定时器 / 输出设备 / 均衡器预设）。
+     */
+    ['30-settings-playback.png', '设置 · 播放与音效（药丸下拉）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('settings')
+        await new Promise((r) => setTimeout(r, 800))
+        /*
+         * 点顶部的分类页签，而不是 scrollIntoView —— 页签的"跟随滚动"高亮只认用户滚动，
+         * 程序化滚动不会联动，截出来会出现「内容在播放、页签却高亮外观」的假象。
+         */
+        const tab = [...document.querySelectorAll('.settings-nav__item')]
+          .find((n) => (n.textContent || '').trim() === '播放与音效')
+        tab?.click()
+        await new Promise((r) => setTimeout(r, 900))
+        return true`)
+      await sleep(400)
+      await evaluate(win, `
+        console.log('[settings-playback] ' + JSON.stringify((() => {
+          const pills = [...document.querySelectorAll('.settings .pill-select')]
+          return {
+            nativeSelects: document.querySelectorAll('.settings select').length,
+            pills: pills.length,
+            labels: pills.map((p) => p.textContent.replace(/\\s+/g, ' ').trim()),
+            activeTab: document.querySelector('.settings-nav__item.is-active')?.textContent || '',
+            /*
+             * 打开一颗**可用**的药丸确认弹层是自绘的（不是系统列表）。
+             * 注意别点第一颗：均衡器预设那颗在"自动"模式下是 disabled 的，
+             * 点了不会开菜单（第一版探针就是这样报出 menu:false 的假读数）。
+             */
+            opensOwnMenu: (() => {
+              const usable = pills.find((p) => !p.disabled)
+              if (!usable) return null
+              usable.click()
+              const menu = document.querySelector('.popover .pill-menu')
+              const count = menu ? menu.querySelectorAll('.pill').length : 0
+              const open = Boolean(menu)
+              document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+              return { menu: open, pills: count }
+            })()
+          }
+        })())); return true`)
+      await sleep(300)
     }]
   ]
 
