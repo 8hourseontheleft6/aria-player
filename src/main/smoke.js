@@ -3161,6 +3161,120 @@ async function runSmoke ({ win, ctx }) {
           `开了之后同样 30ms 走了 ${smoothScrollCheck.withReduce.earlyMoved}px` +
           `（占全程 ${smoothScrollCheck.withReduce.total ? Math.round((smoothScrollCheck.withReduce.earlyMoved / smoothScrollCheck.withReduce.total) * 100) : 0}%）`)
 
+    /* ---------- 文本是否溢出自己的盒子（flex 布局的经典坑） ----------
+     *
+     * 判据要分清楚，第一版就判错了：`scrollWidth > clientWidth` 本身**不是**问题 ——
+     * `.truncate`（overflow:hidden + nowrap + text-overflow:ellipsis）正是靠它工作，
+     * 13 个"溢出"全是刻意的省略号截断。
+     * 真正算问题的是两种：
+     *   · 溢出**到盒子外面**（overflow-x: visible）—— 文字会压到邻居上，就是"错位/重叠"；
+     *   · **硬裁没有省略号**（hidden + 非 ellipsis）—— 文字被默默切掉，用户不知道还有内容。
+     * 有一定宽度的省略号截断单独统计、不算失败（它是正常做法）。
+     */
+    const overflowAudit = await evaluate(win, `
+      const settle = async (ms = 450) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      const offenders = []
+      const ellipsised = []
+      const noTitle = []
+      const scan = (where) => {
+        for (const node of document.querySelectorAll('div, span, h1, h2, h3, p, strong, em, button, td, li')) {
+          if (!node.textContent || !node.textContent.trim()) continue
+          const style = getComputedStyle(node)
+          if (style.display === 'none' || style.visibility === 'hidden') continue
+          if (style.overflowX === 'auto' || style.overflowX === 'scroll') continue
+          const rect = node.getBoundingClientRect()
+          if (rect.width < 4 || rect.height < 4) continue
+          if (rect.bottom < 0 || rect.top > window.innerHeight) continue
+          // 只看"自己直接装文字"的元素，别把外层容器算进来（容器的 scrollWidth 会被子元素影响）
+          const ownText = [...node.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim())
+          if (!ownText) continue
+          const overflowX = node.scrollWidth - node.clientWidth
+          const overflowY = node.scrollHeight - node.clientHeight
+          const hasEllipsis = style.textOverflow === 'ellipsis'
+          const clipped = style.overflowX === 'hidden' || style.overflowX === 'clip'
+          const item = {
+            where,
+            cls: (node.getAttribute('class') || node.tagName).toString().split(/\\s+/).slice(0, 2).join('.'),
+            text: node.textContent.trim().slice(0, 22),
+            overflowX,
+            overflowY,
+            width: Math.round(rect.width),
+            ellipsis: style.textOverflow,
+            overflowStyle: style.overflowX
+          }
+          if (hasEllipsis && clipped) {
+            if (overflowX > 2) {
+              ellipsised.push(item)
+              /*
+               * 被省略号截掉的文字，必须能在悬停时看到全文（title / aria-label）。
+               * 要看**祖先链**，不能只看文字元素自己 —— 第一版就判错了：
+               * 封面卡与媒体墙瓦片都把 title 放在**根元素**上（形如「专辑名 — 艺人」），
+               * 悬停在里面的文字上时浏览器显示的是那个 title，信息本来就能看到。
+               * 浏览器取的是**最近的**带 title 的祖先，所以往上找到第一个就算有。
+               */
+              const hasTooltip = (() => {
+                for (let el = node; el && el !== document.body; el = el.parentElement) {
+                  if (el.getAttribute('title') || el.getAttribute('aria-label')) return true
+                }
+                return false
+              })()
+              if (!hasTooltip) noTitle.push(item)
+            }
+            continue
+          }
+          // 溢出到外面（会压到邻居）或硬裁（没有省略号）都算问题；纵向被裁也算
+          if (overflowX > 2 && (style.overflowX === 'visible' || clipped)) offenders.push(item)
+          else if (overflowY > 2 && clipped) offenders.push({ ...item, overflowX: overflowY, kind: '纵向被裁' })
+        }
+      }
+      if (!store.get().ui.sidebarVisible) actions.toggleSidebar()
+      await settle(500)
+      for (const view of ['songs', 'albums', 'artists', 'wall']) {
+        actions.setView(view)
+        await settle()
+        scan(view)
+      }
+      actions.setView('settings')
+      await settle(700)
+      scan('settings')
+      actions.setView('songs')
+      await settle(300)
+      const groups = new Map()
+      for (const item of offenders) {
+        const key = item.cls + (item.kind || '')
+        const existing = groups.get(key)
+        if (!existing) groups.set(key, { cls: item.cls, kind: item.kind || '溢出', count: 1, worst: item })
+        else {
+          existing.count++
+          if (item.overflowX > existing.worst.overflowX) existing.worst = item
+        }
+      }
+      return {
+        total: offenders.length,
+        groups: [...groups.values()].sort((a, b) => b.worst.overflowX - a.worst.overflowX),
+        ellipsisedCount: ellipsised.length,
+        ellipsisedClasses: [...new Set(ellipsised.map((item) => item.cls))],
+        noTitleCount: noTitle.length,
+        noTitleGroups: [...new Set(noTitle.map((item) => item.cls))],
+        noTitleSample: noTitle.slice(0, 4).map((item) => item.cls + '「' + item.text + '」')
+      }
+    `)
+    record('文本不会溢出到盒子外面，也不会被硬裁（省略号截断不算问题）',
+      overflowAudit.total === 0,
+      `扫描五个界面：**溢出/硬裁** ${overflowAudit.total} 处` +
+      (overflowAudit.groups.length
+        ? `（${overflowAudit.groups.slice(0, 8).map((g) => `${g.cls} ${g.kind} ×${g.count}，最严重多 ${g.worst.overflowX}px、宽 ${g.worst.width}px，如「${g.worst.text}」`).join('；')}）`
+        : '') +
+      `；另有 ${overflowAudit.ellipsisedCount} 处是刻意的省略号截断（${overflowAudit.ellipsisedClasses.join('、')}），不算问题`)
+
+    record('被省略号截断的文字，鼠标悬停能看到全文（title / aria-label）',
+      overflowAudit.noTitleCount === 0,
+      `${overflowAudit.ellipsisedCount} 处截断里有 ${overflowAudit.noTitleCount} 处没有 title/aria-label` +
+      (overflowAudit.noTitleCount
+        ? `：${overflowAudit.noTitleGroups.join('、')}（例如 ${overflowAudit.noTitleSample.join('、')}）`
+        : '（都能看到全文）'))
+
     /* ---------- 键盘焦点可见（WCAG 2.4.7） ----------
      *
      * 用**真实的 Tab 键**走一遍（sendInputEvent），而不是 .focus() ——
@@ -3974,7 +4088,12 @@ async function runSmoke ({ win, ctx }) {
       await settle(250)
       const info = row ? row.querySelector('.settings__info') : null
 
-      const applied = await actions.setOutputDevice('')
+      /*
+       * setOutputDevice 内部走 audio.setSinkId()，**在合成事件（没有用户手势）下 Chromium 可能挂住** ——
+       * 实测又让整轮自检僵死了十几分钟（上一次是 enumerateDevices，同一个检查里）。
+       * 同样按超时处理：宁可变红留下读数，也不让自检挂住。
+       */
+      const applied = await withTimeout(actions.setOutputDevice(''), 5000, null)
       await settle(400)
       const persisted = store.get().settings.audioOutputDevice
 
@@ -3984,6 +4103,7 @@ async function runSmoke ({ win, ctx }) {
         hasApi,
         outputs: outputs.length,
         devicesTimedOut,
+        setSinkTimedOut: applied === null,
         hasRow: Boolean(row),
         hasPill: Boolean(pill),
         pillLabel,
@@ -3991,17 +4111,18 @@ async function runSmoke ({ win, ctx }) {
         hasInfo: Boolean(info),
         options,
         applied: Boolean(applied && applied.ok === true),
-        message: applied ? applied.message || '' : '没有返回结果',
+        message: applied ? applied.message || '' : '调用超时（合成事件没有用户手势，setSinkId 可能卡住）',
         persisted
       }
     `)
     record('通话时放歌：可以指定独立输出设备',
       audioOutput.hasApi === true &&
       /*
-       * `enumerateDevices()` 超时（返回 null）时这条会红，但**不会把整轮挂住** ——
+       * `enumerateDevices()` / `setSinkId()` 超时都按"拿不到结果"处理：这条会红、但**不会把整轮挂住** ——
        * 这是刻意的取舍：宁可红一条、留下读数，也不要整夜没有结果。
        */
       audioOutput.devicesTimedOut === false &&
+      audioOutput.setSinkTimedOut === false &&
       audioOutput.outputs > 0 &&
       audioOutput.hasRow === true &&
       audioOutput.hasPill === true &&
@@ -4011,7 +4132,8 @@ async function runSmoke ({ win, ctx }) {
       audioOutput.persisted === '' &&
       typeof audioOutput.applied === 'boolean',
       `引擎有 setOutputDevice=${audioOutput.hasApi}；系统报告 ${audioOutput.outputs} 个输出设备` +
-      `${audioOutput.devicesTimedOut ? '（enumerateDevices 超时 —— 已按超时处理，不让它挂住整轮）' : ''}；` +
+      `${audioOutput.devicesTimedOut ? '（enumerateDevices 超时 —— 已按超时处理，不让它挂住整轮）' : ''}` +
+      `${audioOutput.setSinkTimedOut ? '（setOutputDevice 超时 —— 同上，合成事件没有用户手势时 Chromium 可能卡住 setSinkId）' : ''}；` +
       `设置页有该行=${audioOutput.hasRow}（药丸下拉=${audioOutput.hasPill}、当前显示「${audioOutput.pillLabel}」、` +
       `点开列出 ${audioOutput.options.length} 项、ⓘ 说明=${audioOutput.hasInfo}）；` +
       `切到「跟随系统」返回 ok=${audioOutput.applied}${audioOutput.message ? `（${audioOutput.message}）` : ''}，落盘值「${audioOutput.persisted}」` +
