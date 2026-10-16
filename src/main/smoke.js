@@ -3650,6 +3650,62 @@ async function runSmoke ({ win, ctx }) {
       `Windows：Ctrl+Q 拦截=${reservedKeys.winQ.prevented} 队列变化=${reservedKeys.winQ.queueChanged}、` +
       `Ctrl+M 静音变化=${reservedKeys.winM.muteChanged}；状态已复原=${reservedKeys.queueRestored && reservedKeys.mutedRestored}`)
 
+    /*
+     * macOS 菜单：**真的让 Electron 构建一次**，并逐个点一遍验证指令映射。
+     *
+     * 为什么能在 Windows 上做：菜单是 Electron 的跨平台 API，`Menu.buildFromTemplate` 在
+     * Windows 上照样能建（我们只是**build**，不 setApplicationMenu，所以不会影响这个进程）。
+     * 这件事的意义：菜单跑在启动路径上，构建抛错就是「朋友一打开就崩」——
+     * check-menu-roles.js 守住了 role 名字，这里守住「结构本身能不能建出来」。
+     */
+    {
+      const { Menu } = require('electron')
+      const { buildMacMenuTemplate } = require('./menu')
+      const commands = []
+      const template = buildMacMenuTemplate({ appName: 'Aria', send: (name) => commands.push(name) })
+
+      let built = null
+      let buildError = ''
+      try {
+        built = Menu.buildFromTemplate(template)
+      } catch (err) {
+        buildError = err && err.message ? err.message : String(err)
+      }
+
+      // 逐个点一遍（模板里的 click 是我们自己的函数，能确定性地验证「菜单项 → 播放指令」）
+      const clickByLabel = (label) => {
+        for (const top of template) {
+          for (const item of top.submenu || []) {
+            if (item.label === label && typeof item.click === 'function') {
+              item.click()
+              return true
+            }
+          }
+        }
+        return false
+      }
+      const wanted = ['播放 / 暂停', '上一首', '下一首', '静音', '播放队列', '打开正在播放与歌词']
+      const clickedAll = wanted.map(clickByLabel).every(Boolean)
+      const builtLabels = built ? built.items.map((item) => item.label) : []
+      const templateLabels = template.map((item) => item.label)
+      const quitRole = (() => {
+        if (!built) return null
+        const appMenu = built.items[0] && built.items[0].submenu
+        const quit = appMenu && appMenu.items.find((item) => item.role === 'quit')
+        return quit ? quit.role : null
+      })()
+
+      record('macOS 菜单能在 Electron 里真的构建出来，且每项发出正确的播放指令',
+        !buildError &&
+        Boolean(built) &&
+        builtLabels.join(',') === templateLabels.join(',') &&
+        clickedAll &&
+        commands.join(',') === 'play-pause,previous,next,mute,queue,now-playing' &&
+        quitRole === 'quit',
+        `buildFromTemplate=${buildError || '成功'}；顶层 ${builtLabels.join(' / ')}；` +
+        `点击指令=${commands.join(',')}；「退出」的 role=${quitRole}`)
+    }
+
     record('侧边栏：拖动排序，其它标签跟着滑动，顺序会保存（灵动岛同步）',
       sidebarInfo.order0.join() === 'songs,albums,artists,wall' &&
       sidebarInfo.orderAfterDrag.join() === 'albums,artists,songs,wall' &&

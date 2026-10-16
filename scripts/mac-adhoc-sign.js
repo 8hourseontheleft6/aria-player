@@ -19,10 +19,19 @@
 const { execFileSync } = require('node:child_process')
 const path = require('node:path')
 
-module.exports = async function afterPack (context) {
-  if (context.electronPlatformName !== 'darwin') return
-  if (process.platform !== 'darwin') return
+module.exports = function afterPack (context) {
+  /*
+   * 非 darwin：**同步早退**，不返回 Promise。
+   * 这样「在别的平台什么都不做」是可以被验证的性质（check-mac-config.js 会直接调用它看返回值），
+   * 而不是只能靠读代码相信。真正要签名时才把 Promise 交出去。
+   */
+  if (context.electronPlatformName !== 'darwin') return undefined
+  if (process.platform !== 'darwin') return undefined
+  return signApp(context)
+}
 
+/** 只有 macOS 上才会走到这里 */
+async function signApp (context) {
   const appName = `${context.packager.appInfo.productFilename}.app`
   const appPath = path.join(context.appOutDir, appName)
 
@@ -32,7 +41,7 @@ module.exports = async function afterPack (context) {
   } catch (err) {
     /*
      * 签名失败不阻断出包：dmg 仍然可用，只是朋友那边可能需要先执行一次
-     * `xattr -cr /Applications/Aria.app`（README 的 macOS 一节写了这条兜底）。
+     * `xattr -cr /Applications/Aria.app`（docs/MACOS.md 的第四节写了这条兜底）。
      */
     console.warn(`  • ad-hoc 签名失败（不阻断出包，改用 xattr -cr 兜底）：${err.message}`)
   }
