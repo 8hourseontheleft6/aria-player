@@ -853,11 +853,10 @@ html[data-reduce-motion='true'] .online-result:hover {
    * 而不是 --bg-bar（≈78%）。用 --bg-bar 的后果在截图里一眼可见：
    * 面板后面的「随机播放 / 播放」按钮和专辑列的文字全都透出来，
    * 看起来就是"两块内容重在一起"（用户此前抱怨过的同类现象）。
-   * 毛玻璃留着（与菜单、选择器那些弹层一致），但底色换成弹层那一档。
+   * 也不挂毛玻璃：98% 不透明的底子上，34px 模糊只剩 2–4% 的效果，
+   * 却要在面板浮于滚动列表之上时每帧重算一次。
    */
   background: var(--bg-popover);
-  backdrop-filter: blur(var(--blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   border-left: 0.5px solid var(--separator);
   box-shadow: var(--elev-3);
   animation: queue-in var(--dur) var(--ease-ios);

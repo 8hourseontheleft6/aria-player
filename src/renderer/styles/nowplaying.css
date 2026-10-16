@@ -512,9 +512,8 @@ html[data-platform="darwin"] .now-playing__topbar {
   height: 30px;
   padding: 0 14px;
   border-radius: var(--radius-pill);
+  /* 浮层不挂毛玻璃，理由见 components.css 里 .search-panel 那一处的注释 */
   background: var(--bg-popover);
-  backdrop-filter: blur(var(--blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   box-shadow: var(--shadow-popover);
   border: 0.5px solid var(--separator);
   color: var(--label);
