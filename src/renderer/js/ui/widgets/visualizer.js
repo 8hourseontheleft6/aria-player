@@ -183,18 +183,24 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
   function drawRing (width, height) {
     const cx = width / 2
     const cy = height / 2
-    const radius = Math.min(cx, cy) * 0.55
-    const bars = 72
+    /*
+     * 这条只有 72px 高，画正圆会小得像颗痣（截图里能直接看出来）。
+     * 改成**椭圆**：横向按宽度拉开，纵向贴合条高 —— 一样是环形频谱，但铺满整条。
+     */
+    const rx = Math.min(width * 0.3, height * 2.4)
+    const ry = height * 0.42
+    const bars = 96
     for (let i = 0; i < bars; i++) {
       const index = Math.floor(Math.pow(i / bars, 1.5) * (freqData.length * 0.6))
       const value = freqData[index] / 255
       const angle = (i / bars) * Math.PI * 2 - Math.PI / 2
-      const inner = radius
-      const outer = radius + value * radius * 0.7
-      context.globalAlpha = 0.4 + value * 0.6
+      const cos = Math.cos(angle)
+      const sin = Math.sin(angle)
+      const outer = 1 + value * 0.75
+      context.globalAlpha = 0.35 + value * 0.65
       context.beginPath()
-      context.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner)
-      context.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer)
+      context.moveTo(cx + cos * rx, cy + sin * ry)
+      context.lineTo(cx + cos * rx * outer, cy + sin * ry * outer)
       context.stroke()
     }
     context.globalAlpha = 1
