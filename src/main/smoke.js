@@ -3324,7 +3324,8 @@ async function runSmoke ({ win, ctx }) {
         return {
           master: find('在线补全') ? find('在线补全').querySelector('.switch') : null,
           lyrics: find('在线歌词') ? find('在线歌词').querySelector('.switch') : null,
-          covers: find('在线封面') ? find('在线封面').querySelector('.switch') : null
+          covers: find('在线封面') ? find('在线封面').querySelector('.switch') : null,
+          artists: find('在线艺人头像') ? find('在线艺人头像').querySelector('.switch') : null
         }
       }
       const read = (node) => node && ({
@@ -3367,6 +3368,8 @@ async function runSmoke ({ win, ctx }) {
         hasMaster: Boolean(offRows.master),
         off: offLyrics,
         offCoversDisabled: Boolean(read(offRows.covers)?.disabled),
+        offArtistsDisabled: Boolean(read(offRows.artists)?.disabled),
+        hasArtistsRow: Boolean(offRows.artists),
         lyricsAfterDisabledClick,
         ariaAfterClick,
         on: onLyrics,
@@ -3378,14 +3381,16 @@ async function runSmoke ({ win, ctx }) {
       switchState.off?.disabled === true && switchState.off?.tabindex === '-1' &&
       switchState.off?.ariaDisabled === 'true' && switchState.off?.ariaChecked === 'true' &&
       switchState.offCoversDisabled === true &&
+      // 在线艺人头像：代码里一直读这个设置，界面上以前没有开关（等于给了默认值却不让改）
+      switchState.hasArtistsRow === true && switchState.offArtistsDisabled === true &&
       switchState.lyricsAfterDisabledClick === true && switchState.ariaAfterClick === 'true' &&
       switchState.on?.disabled === false && switchState.on?.ariaChecked === 'true' &&
       switchState.lyricsAfterEnabledClick === false,
       `总闸关：在线歌词 禁用=${switchState.off?.disabled}、tabindex=${switchState.off?.tabindex}、` +
       `aria-disabled=${switchState.off?.ariaDisabled}、aria-checked=${switchState.off?.ariaChecked}；` +
       `点它之后设置仍是 ${switchState.lyricsAfterDisabledClick}（未被偷偷改掉）、aria-checked 未变；` +
-      `在线封面 禁用=${switchState.offCoversDisabled}。总闸开：禁用=${switchState.on?.disabled}、` +
-      `点一下设置变成 ${switchState.lyricsAfterEnabledClick}`)
+      `在线封面 禁用=${switchState.offCoversDisabled}、在线艺人头像 存在=${switchState.hasArtistsRow} 禁用=${switchState.offArtistsDisabled}。` +
+      `总闸开：禁用=${switchState.on?.disabled}、点一下设置变成 ${switchState.lyricsAfterEnabledClick}`)
 
     /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
      *

@@ -971,6 +971,18 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         control: switchControl(settings.onlineCovers !== false, (value) => actions.setSetting({ onlineCovers: value }), { disabled: !onlineOn })
       }),
       /*
+       * 在线艺人头像。
+       *
+       * 这一项**代码里一直在读**（main/services/online-media.js 的 `onlineArtists === false` 直接 return），
+       * 但界面上从来没有开关 —— 等于给了个默认值却不让改。补上它，和上面两颗兄弟开关同一套写法
+       * （依赖总闸、总闸关时禁用）。注意：这**不改变门控关系**，只是把已有能力露出来。
+       */
+      row({
+        title: '在线艺人头像',
+        sub: onlineOn ? '艺人详情页的头像按艺人名在线查询（不去抓某首歌的专辑封面）' : '需要先打开总开关',
+        control: switchControl(settings.onlineArtists !== false, (value) => actions.setSetting({ onlineArtists: value }), { disabled: !onlineOn })
+      }),
+      /*
        * 网络代理：用户反馈「开了加速器还是取不到封面/头像」—— 不少加速器不设系统代理，
        * 而在线请求默认跟随系统代理，于是就等于没有代理。
        * 三种模式：跟随系统（默认，等于原来的行为）/ 直连 / 手动填地址。
