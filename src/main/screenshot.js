@@ -840,6 +840,49 @@ async function runScreenshots ({ win }) {
           return { after }
         })())); return true`)
       await sleep(700)
+    }],
+    /*
+     * 警告提示（toast）长什么样。
+     * 为什么单拍：浅色的 --warning 因为对比度不达标刚调深过一档（#ff9500 → #c93400，
+     * 白底上 2.20:1 → 5.28:1），而它全项目只当**文字/图标**用，所以要看一眼实际观感。
+     * 用一条合成的「扫描发现目录读不了」事件把它弹出来（与自检里那条走同一条链路）。
+     */
+    ['32-warning-toast.png', '警告提示（音源目录读不了时的黄色提示）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        await actions.setSetting({ theme: 'light' })
+        actions.setView('songs')
+        await new Promise((r) => setTimeout(r, 600))
+        return true`)
+      win.webContents.send('library:scan-progress', {
+        phase: 'done',
+        reason: 'manual',
+        done: 0,
+        total: 0,
+        reused: 0,
+        failed: 0,
+        added: 0,
+        removed: 0,
+        changed: 0,
+        count: 0,
+        scannedAt: Date.now(),
+        elapsedMs: 1,
+        unreadable: [{ dir: '/Users/me/文稿/音乐', code: 'EACCES' }],
+        unreadableCount: 1
+      })
+      await sleep(900)
+      await evaluate(win, `
+        console.log('[warning-toast] ' + JSON.stringify((() => {
+          const node = document.querySelector('.toast--warning')
+          const token = getComputedStyle(document.documentElement).getPropertyValue('--warning').trim()
+          return {
+            found: Boolean(node),
+            iconColor: node && node.querySelector('.icon') ? getComputedStyle(node.querySelector('.icon')).color : null,
+            token,
+            text: node ? node.textContent.slice(0, 46) : ''
+          }
+        })())); return true`)
+      await sleep(250)
     }]
   ]
 

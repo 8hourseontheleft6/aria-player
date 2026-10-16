@@ -6052,16 +6052,31 @@ async function runSmoke ({ win, ctx }) {
       await sleep(700)
       const toastProbe = await evaluate(win, `
         const node = document.querySelector('.toast--warning')
+        /*
+         * 顺便把 --warning 令牌的**计算色**读回来（在这里读而不是在主进程读 ——
+         * getComputedStyle / document 只存在于页面里；上一版写到外面直接让整轮自检中断了）。
+         * 不写死具体色值：浅色的 --warning 刚因为对比度调深过一档（#ff9500 → #c93400），
+         * 以后调色只改 tokens.css 即可。
+         */
+        const token = getComputedStyle(document.documentElement).getPropertyValue('--warning').trim()
+        const probe = document.createElement('span')
+        probe.style.color = token
+        document.body.appendChild(probe)
+        const tokenRgb = getComputedStyle(probe).color
+        probe.remove()
         return {
           found: Boolean(node),
           text: node ? node.textContent : '',
           iconColor: node && node.querySelector('.icon') ? getComputedStyle(node.querySelector('.icon')).color : null,
-          toasts: document.querySelectorAll('.toast').length
+          toasts: document.querySelectorAll('.toast').length,
+          token,
+          tokenRgb
         }`)
-      const warningOrange = ['rgb(255, 149, 0)', 'rgb(255, 159, 10)']   // --warning 的浅色 / 深色取值
       record('扫描发现目录读不了时，界面弹出黄色提示（不是只在控制台）',
-        toastProbe.found && toastProbe.text.includes('隐私与安全性') && warningOrange.includes(toastProbe.iconColor),
-        `找到 warning 提示=${toastProbe.found}（当前 toast 共 ${toastProbe.toasts} 条），图标色=${toastProbe.iconColor}，` +
+        toastProbe.found && toastProbe.text.includes('隐私与安全性') &&
+        toastProbe.iconColor === toastProbe.tokenRgb,
+        `找到 warning 提示=${toastProbe.found}（当前 toast 共 ${toastProbe.toasts} 条），` +
+        `图标色=${toastProbe.iconColor}（--warning 令牌 ${toastProbe.token} = ${toastProbe.tokenRgb}），` +
         `文案「${toastProbe.text.slice(0, 70)}…」`)
     }
 

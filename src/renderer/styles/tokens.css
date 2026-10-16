@@ -176,7 +176,15 @@ html[data-theme="light"] {
   --accent-label: #ffffff;
   --danger: #ff3b30;
   --success: #34c759;
-  --warning: #ff9500;
+  /*
+   * 浅色的 --warning 比深色那支深一档：它只当**文字/图标**用（全项目仅一处 color，
+   * 就是"读不了某个音乐文件夹"那条提示的图标），而 #ff9500 在白底上只有 2.20:1 ——
+   * 图标看不出是橙的，更像一抹浅黄。换成 #c93400 之后是 5.28:1，
+   * 同时满足正文 4.5:1 与非文本 3:1 两条线，颜色依旧是橙的。
+   * 深色那支（#ff9f0a 在深底上 9.62:1）不动。
+   * 数字来自 scripts/checks/check-contrast.js，别凭手感改。
+   */
+  --warning: #c93400;
 
   --shadow-popover: var(--elev-3);
   --shadow-artwork: 0 30px 56px -18px rgba(0, 0, 0, 0.45), 0 8px 22px rgba(0, 0, 0, 0.16);
