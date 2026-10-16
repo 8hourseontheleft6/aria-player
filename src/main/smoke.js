@@ -3088,6 +3088,79 @@ async function runSmoke ({ win, ctx }) {
         thumbColor
       }
     `)
+    /* ---------- 「减少动画」也要管住 JS 驱动的滚动 ----------
+     *
+     * CSS 那条 `html[data-reduce-motion="true"] *` 把 animation/transition 压到 0.001ms，
+     * 但 `scrollBy({ behavior: 'smooth' })` 是 JS 驱动的滚动，CSS 管不到 ——
+     * 设置页的分类跳转与字母索引都是这种。这里做一次**差分**验证：
+     * 同一次跳转、同一个短窗口内，开了「减少动画」必须比没开走得更远（并且基本已到位）。
+     * 用"两者相比"而不是写死像素阈值 —— 不同机器一帧的时间不一样，写死必假红。
+     */
+    const smoothScrollCheck = await evaluate(win, `
+      const settle = async (ms = 120) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      /*
+       * 不猜设置页滚动容器的类名（第一版就是猜错的，两次测量都返回 null）：
+       * 先列出所有可滚动元素，点一次导航，**哪个的 scrollTop 真的动了**就是它。
+       */
+      const scrollables = () => [...document.querySelectorAll('div, section, main, ul')]
+        .filter((n) => n.scrollHeight > n.clientHeight + 200)
+
+      const findScroller = async () => {
+        const before = new Map(scrollables().map((n) => [n, n.scrollTop]))
+        const navItems = [...document.querySelectorAll('.settings-nav__item')]
+        if (navItems.length < 2) return { error: '设置页没有分类导航' }
+        navItems[0].click()
+        await settle(600)
+        let best = null
+        for (const [node, was] of before) {
+          const moved = Math.abs(node.scrollTop - was)
+          if (moved > 50 && (!best || moved > best.moved)) best = { node, moved }
+        }
+        return best ? { node: best.node } : { error: '点了分类导航但没有任何容器滚动' }
+      }
+
+      const measure = async (reduceMotion) => {
+        await actions.setSetting({ reduceMotion })
+        actions.setView('songs')
+        await settle(300)
+        actions.setView('settings')
+        await settle(800)
+        const found = await findScroller()
+        if (found.error) return { error: found.error }
+        const scroller = found.node
+        const navItems = [...document.querySelectorAll('.settings-nav__item')]
+        scroller.scrollTop = scroller.scrollHeight      // 先滚到底，制造足够长的距离
+        await settle(250)
+        const start = scroller.scrollTop
+        navItems[0].click()
+        await new Promise((r) => realSetTimeout(r, 30))
+        const early = scroller.scrollTop
+        await settle(900)
+        const final = scroller.scrollTop
+        return { start, early, final, earlyMoved: Math.abs(early - start), total: Math.abs(final - start) }
+      }
+      const realSetTimeout = window.setTimeout
+      const withMotion = await measure(false)
+      const withReduce = await measure(true)
+      await actions.setSetting({ reduceMotion: false })
+      actions.setView('songs')
+      await settle(300)
+      return { withMotion, withReduce }
+    `)
+    record('「减少动画」也管住 JS 驱动的滚动（设置页分类跳转不再做动画）',
+      smoothScrollCheck.withMotion && !smoothScrollCheck.withMotion.error &&
+      smoothScrollCheck.withReduce && !smoothScrollCheck.withReduce.error &&
+      smoothScrollCheck.withMotion.total > 200 &&
+      smoothScrollCheck.withReduce.earlyMoved > smoothScrollCheck.withMotion.earlyMoved + 50 &&
+      smoothScrollCheck.withReduce.earlyMoved >= smoothScrollCheck.withReduce.total * 0.9,
+      smoothScrollCheck.withMotion?.error
+        ? `测量失败：${smoothScrollCheck.withMotion.error}`
+        : `跳转距离 ${smoothScrollCheck.withMotion.total}px：` +
+          `没开减少动画时 30ms 内走了 ${smoothScrollCheck.withMotion.earlyMoved}px；` +
+          `开了之后同样 30ms 走了 ${smoothScrollCheck.withReduce.earlyMoved}px` +
+          `（占全程 ${smoothScrollCheck.withReduce.total ? Math.round((smoothScrollCheck.withReduce.earlyMoved / smoothScrollCheck.withReduce.total) * 100) : 0}%）`)
+
     /* ---------- 键盘焦点可见（WCAG 2.4.7） ----------
      *
      * 用**真实的 Tab 键**走一遍（sendInputEvent），而不是 .focus() ——

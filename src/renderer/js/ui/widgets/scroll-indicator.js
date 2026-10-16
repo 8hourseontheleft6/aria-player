@@ -12,6 +12,7 @@
 
 import { h, on } from '../../core/dom.js'
 import { initialOf } from '../../core/pinyin.js'
+import { prefersReducedMotion } from '../../core/dom.js'
 
 const IDLE_DELAY = 900
 const STEP_PX = 26 // 拖动多少像素换一个字母
@@ -70,13 +71,20 @@ export function createScrollIndicator (scroller, { label = '滚动', getMarks = 
     knob.style.setProperty('--knob-progress', `${(index / Math.max(1, marks.length - 1)) * 100}%`)
   }
 
-  /** 平滑滚到当前字母的第一首 */
+  /**
+   * 平滑滚到当前字母的第一首。
+   *
+   * 「减少动画」开着时一律用 `auto`（瞬时）—— CSS 那条全局规则把 transition/animation 压到 0.001ms，
+   * 但 `scrollTo({ behavior: 'smooth' })` 是 JS 驱动的滚动，CSS 管不到，所以这里得自己问一次。
+   * 三个调用点（滚轮停下 / 点击 / 键盘 Enter）都走这个函数，所以改一处就够。
+   */
   function apply (smooth = true) {
     ensureMarks()
     const mark = marks[index]
     if (!mark) return
     programmaticUntil = Date.now() + 900
-    scroller.scrollTo({ top: mark.offset, behavior: smooth ? 'smooth' : 'auto' })
+    const wantSmooth = smooth && !prefersReducedMotion()
+    scroller.scrollTo({ top: mark.offset, behavior: wantSmooth ? 'smooth' : 'auto' })
   }
 
   function wake () {

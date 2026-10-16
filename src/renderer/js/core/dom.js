@@ -104,6 +104,19 @@ export function onOutsideClick (element, handler) {
   }
 }
 
+/**
+ * 「减少动画」开着吗？
+ *
+ * CSS 那边由 `html[data-reduce-motion="true"] *` 统一把 animation/transition 的时长压到 0.001ms，
+ * 但那条规则**管不到 JS 驱动的运动** —— `scrollTo({ behavior: 'smooth' })`、canvas 动画、
+ * 惯性滚动都不看 CSS。所以这些地方必须自己问一次。
+ *
+ * 与应用其它地方（ui/views/media-wall.js）同一套判据：先看设置在 html 上留下的这个标记。
+ */
+export function prefersReducedMotion () {
+  return document.documentElement.dataset.reduceMotion === 'true'
+}
+
 export function raf (fn) {
   let handle = 0
   let running = false

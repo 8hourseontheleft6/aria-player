@@ -1,6 +1,6 @@
 /** 设置页：iOS 分组列表风格 */
 
-import { h, on, clear } from '../../core/dom.js'
+import { h, on, clear, prefersReducedMotion } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { remote } from '../../core/remote.js'
 import { formatDurationLong, formatRelativeTime, formatRate, formatBytes, modLabel, altLabel, reservedKeyHint } from '../../core/format.js'
@@ -288,7 +288,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     const target = searchHits[index]
     if (!target) return
     const delta = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top
-    scroll.scrollBy({ top: delta - 16, behavior: 'smooth' })
+    // 「减少动画」时瞬时到位：CSS 那条全局规则管不到 scrollBy 的 behavior（见 core/dom.js）
+    scroll.scrollBy({ top: delta - 16, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
   }
 
   /*
@@ -1462,7 +1463,8 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       navClickTimer = setTimeout(() => highlightSection(label), 900)
       // 用 rect 差值算目标位置，不依赖 offsetTop / offsetParent
       const delta = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top
-      scroll.scrollBy({ top: delta - 8, behavior: 'smooth' })
+      // 同上：减少动画时瞬时到位，别让键盘/点击跳转也做一段滚动动画
+      scroll.scrollBy({ top: delta - 8, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
     }
 
     /*
