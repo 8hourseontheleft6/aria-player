@@ -34,6 +34,33 @@ export function keyHint (combo) {
 }
 
 /**
+ * 把「扫描时读不了某个音乐目录」翻译成用户能照做的一句话。
+ *
+ * 错误码来自主进程（Node 的 fs 错误）。放在这里而不是 app.js 里，
+ * 是为了让自检能直接 import 这个模块做断言（smoke 里有对应的一条）。
+ * macOS 上最常见的是 EACCES/EPERM —— TCC 权限不让未授权的应用读「文稿 / 桌面 / 下载」，
+ * 而扫描会"成功返回 0 首"，用户只看到「扫不到歌」，所以这句提示必须给出可执行的下一步。
+ *
+ * @param {{ dir?: string, code?: string }} info
+ * @param {number} count 一共多少个目录读不了（>1 时补一句）
+ */
+export function describeUnreadable (info, count = 1) {
+  const where = info && info.dir ? `「${info.dir}」` : '某个音乐文件夹'
+  const code = (info && info.code) || 'UNKNOWN'
+  const more = count > 1 ? `（另有 ${count - 1} 个目录也读不了）` : ''
+  if (code === 'EACCES' || code === 'EPERM') {
+    return `没有权限读取${where}${more} —— macOS 上请到「系统设置 → 隐私与安全性 → 文件与文件夹」允许 Aria 访问，或把音乐放进「音乐」文件夹`
+  }
+  if (code === 'ENOENT') {
+    return `${where}不存在了${more} —— 可能被移动、重命名，或外接硬盘没插上`
+  }
+  if (code === 'ENOTDIR') {
+    return `${where}不是一个文件夹${more} —— 在设置里移除它，再重新添加正确的目录`
+  }
+  return `读取${where}失败（${code}）${more} —— 到设置里检查这个音乐文件夹还能不能访问`
+}
+
+/**
  * 与 macOS **系统保留键**冲突的那几个功能用这个：
  * ⌘Q 是「退出」、⌘M 是「最小化」，不能让应用抢走（用户按 ⌘M 想最小化，结果被静音了）。
  * 所以 macOS 上这两个功能改走 ⌥⌘ 变体；其它平台没有这个冲突，仍用 Ctrl+。

@@ -5562,6 +5562,72 @@ async function runSmoke ({ win, ctx }) {
     record('路径解析桥', dropZoneResult.bridgeIsArray,
       `webUtils 桥可用（内存里的 File 没有真实路径，返回 ${dropZoneResult.bridgeCount} 条，符合预期）`)
 
+    /*
+     * 读不了的音乐目录必须**说出来**，不能静默返回 0 首。
+     *
+     * 背景（做 macOS 移植时发现的）：walkFiles 原来把 readdir 的错误 catch 掉就 continue，
+     * 而 macOS 的 TCC 权限会让「文稿 / 桌面 / 下载」对未授权应用直接 EACCES ——
+     * 结果是扫描"成功"返回 0 首，用户只看到「扫不到歌」，界面上一个字的原因都没有。
+     * 三段验证：① walkFiles 会上报；② 错误码翻译成的中文提示能照做；③ 界面真的弹出黄色提示。
+     */
+    {
+      const missingDir = path.join(os.tmpdir(), `aria-没有这个目录-${Date.now()}`)
+      const walkErrors = []
+      await require('./util/files').walkFiles(missingDir, () => true, { onError: (info) => walkErrors.push(info) })
+      record('读不了的目录会上报（walkFiles 不再静默 continue）',
+        walkErrors.length === 1 && walkErrors[0].code === 'ENOENT' && walkErrors[0].dir === missingDir,
+        `对一个不存在的目录走一遍：上报 ${walkErrors.length} 条，code=${walkErrors[0] && walkErrors[0].code}`)
+
+      const hints = await evaluate(win, `
+        const { describeUnreadable } = await import('/js/core/format.js')
+        return {
+          eacces: describeUnreadable({ dir: '/Users/me/文稿/音乐', code: 'EACCES' }, 1),
+          eaccesMore: describeUnreadable({ dir: '/Users/me/桌面/专辑', code: 'EPERM' }, 3),
+          enoent: describeUnreadable({ dir: '/Volumes/移动硬盘', code: 'ENOENT' }, 1),
+          other: describeUnreadable({ dir: '/tmp/x', code: 'EIO' }, 1)
+        }
+      `)
+      record('读不了目录的提示是「能照做」的中文（权限 / 不存在 / 其它）',
+        hints.eacces.includes('隐私与安全性') && hints.eacces.includes('文稿') &&
+        hints.eaccesMore.includes('另有 2 个') &&
+        hints.enoent.includes('不存在') && hints.enoent.includes('外接硬盘'.slice(0, 2)) &&
+        hints.other.includes('EIO'),
+        `EACCES →「${hints.eacces.slice(0, 60)}…」；多条 →「${hints.eaccesMore.slice(0, 30)}…」；` +
+        `ENOENT →「${hints.enoent}」；其它码 →「${hints.other.slice(0, 40)}…」`)
+
+      // ③ 真的弹提示：往渲染层发一份**真实形状**的 scan-progress 载荷（done + unreadable）
+      win.webContents.send('library:scan-progress', {
+        phase: 'done',
+        reason: 'manual',
+        done: 0,
+        total: 0,
+        reused: 0,
+        failed: 0,
+        added: 0,
+        removed: 0,
+        changed: 0,
+        count: 0,
+        scannedAt: Date.now(),
+        elapsedMs: 1,
+        unreadable: [{ dir: '/Users/me/文稿/音乐', code: 'EACCES' }],
+        unreadableCount: 1
+      })
+      await sleep(700)
+      const toastProbe = await evaluate(win, `
+        const node = document.querySelector('.toast--warning')
+        return {
+          found: Boolean(node),
+          text: node ? node.textContent : '',
+          iconColor: node && node.querySelector('.icon') ? getComputedStyle(node.querySelector('.icon')).color : null,
+          toasts: document.querySelectorAll('.toast').length
+        }`)
+      const warningOrange = ['rgb(255, 149, 0)', 'rgb(255, 159, 10)']   // --warning 的浅色 / 深色取值
+      record('扫描发现目录读不了时，界面弹出黄色提示（不是只在控制台）',
+        toastProbe.found && toastProbe.text.includes('隐私与安全性') && warningOrange.includes(toastProbe.iconColor),
+        `找到 warning 提示=${toastProbe.found}（当前 toast 共 ${toastProbe.toasts} 条），图标色=${toastProbe.iconColor}，` +
+        `文案「${toastProbe.text.slice(0, 70)}…」`)
+    }
+
     /* ---------- 在线补全 ---------- */
 
     const online = ctx.get('online')

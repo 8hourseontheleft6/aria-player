@@ -189,8 +189,19 @@ function createLibraryService (ctx) {
       emitProgress({ phase: 'walking', done: 0, total: 0, current: '' })
 
       const files = []
+      /*
+       * 读不进去的目录要收集起来（macOS 的 TCC 权限会让「文稿/桌面/下载」直接 EACCES）。
+       * 以前 walkFiles 静默吞掉这类错误，扫描就"成功返回 0 首"——
+       * 用户看到的是「扫不到歌」，而真正的原因（没权限）在界面上完全看不到。
+       */
+      const unreadable = []
       for (const root of roots) {
-        const found = await walkFiles(root, isAudioFile)
+        const found = await walkFiles(root, isAudioFile, {
+          onError: (info) => {
+            unreadable.push(info)
+            console.warn(`[library] 读不了目录 ${info.dir}（${info.code}）：${info.message}`)
+          }
+        })
         files.push(...found)
       }
       files.sort()
@@ -279,7 +290,10 @@ function createLibraryService (ctx) {
         changed: added + removed,
         scannedAt,
         elapsedMs: Date.now() - started,
-        count: next.length
+        count: next.length,
+        /* 读不进去的目录：界面据此提示用户去授权 / 检查路径（最多带 5 条，免得 payload 无限大） */
+        unreadable: unreadable.slice(0, 5),
+        unreadableCount: unreadable.length
       }
       emitProgress(summary)
       return summary

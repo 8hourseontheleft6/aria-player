@@ -13,7 +13,7 @@
 import { createBus, EVENTS } from './core/bus.js'
 import { createStore, initialState } from './core/store.js'
 import { remote, isElectron } from './core/remote.js'
-import { normalizeForSearch, isMacOS } from './core/format.js'
+import { normalizeForSearch, isMacOS, describeUnreadable } from './core/format.js'
 import { createAudioEngine } from './core/audio-engine.js'
 import { matchPreset, matchByMetadata, PRESETS } from './core/equalizer-presets.js'
 import { analyzeTrack, cachedAnalysis, analyzeBuffer, classifyStyle } from './core/style-analyzer.js'
@@ -1309,6 +1309,22 @@ async function main () {
       ui: { ...state.ui, scanning, scanProgress: progress }
     }))
     if (progress.phase !== 'done') return
+
+    /*
+     * 有目录读不进去时必须**说出来**。
+     *
+     * macOS 的 TCC 会让「文稿 / 桌面 / 下载」对未授权应用直接报 EACCES ——
+     * 那种情况下扫描会"成功返回 0 首"，用户只看到「扫不到歌」，
+     * 而我们这边（日志、界面）都没有线索。所以这里按错误码给一句能照做的中文提示。
+     */
+    if (progress.unreadableCount) {
+      const first = progress.unreadable && progress.unreadable[0]
+      toast({
+        message: describeUnreadable(first, progress.unreadableCount),
+        type: 'warning',
+        duration: 7000
+      })
+    }
 
     loadLibrary().then(() => {
       // 只有真的增减了曲目才提示；启动时的增量刷新、什么都没变的重扫都保持安静

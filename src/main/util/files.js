@@ -84,6 +84,7 @@ const SKIP_DIRS = new Set([
  */
 async function walkFiles (root, accept, options = {}) {
   const maxDepth = options.maxDepth ?? 16
+  const onError = typeof options.onError === 'function' ? options.onError : null
   const out = []
   const stack = [{ dir: root, depth: 0 }]
 
@@ -93,7 +94,15 @@ async function walkFiles (root, accept, options = {}) {
     let entries
     try {
       entries = await fsp.readdir(dir, { withFileTypes: true })
-    } catch {
+    } catch (err) {
+      /*
+       * 读不了就跳过这一层（保持原来"不中断扫描"的行为），但**要报上去**。
+       *
+       * 为什么必须报：macOS 的 TCC 会让「文稿 / 桌面 / 下载」这类目录对未授权应用直接报 EACCES/EPERM，
+       * 原来这里是静默 continue —— 结果是扫描**一声不响地返回 0 首**，
+       * 用户只会说「扫不到歌」，而我们从日志到界面都看不到真正的原因。
+       */
+      if (onError) onError({ dir, code: err && err.code ? err.code : 'UNKNOWN', message: err && err.message ? err.message : String(err) })
       continue
     }
     for (const entry of entries) {
