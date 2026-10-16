@@ -6,6 +6,11 @@
   position: fixed;
   inset: 0;
   z-index: 40;
+  /*
+   * 底部那条示波器的高度只在这一处定义：条本身用它，歌词区也用它留出下边距。
+   * 两处各写一个数字的话，改一处忘一处，最后几行歌词就会正好落在频谱底下。
+   */
+  --visualizer-h: 72px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--bg-window);
@@ -99,7 +104,7 @@ html[data-theme="light"] .now-playing__veil {
    * 这样控件永远不会压在频谱上（当年那版把 132px 的条铺到工具条下面，
    * 图标压在亮色频谱上读不清，只能再叠一层玻璃；不重叠就不需要那层玻璃）。
    */
-  height: 72px;
+  height: var(--visualizer-h);
   z-index: 1;
   pointer-events: none;
   overflow: hidden;
@@ -364,6 +369,12 @@ html[data-platform="darwin"] .now-playing__topbar {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /*
+   * 给底部那条示波器让位。歌词区本来就是"上下渐隐"的，滚到底时最后几行已经很淡；
+   * 再压在会动的频谱下面就是彻底读不了 —— 实测没让位时，最后一行落在条子里面。
+   * 高度取同一个变量，条子改高时这里跟着走。
+   */
+  padding-bottom: var(--visualizer-h);
 }
 
 /* 右栏标签页：歌词 + 插件注册的面板 */

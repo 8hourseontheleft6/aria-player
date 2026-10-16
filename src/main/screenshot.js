@@ -119,8 +119,39 @@ async function runScreenshots ({ win }) {
         viewportH: window.innerHeight,
         stripTop: strip ? Math.round(strip.getBoundingClientRect().top) : null,
         tools: rect('.now-playing__tools'),
+        /*
+         * 歌词是滚动的：要确认它的**可滚动底边**没有伸进示波器那条带子里，
+         * 否则最后几行会被频谱压住（这是加示波器之后新引入的风险）。
+         */
+        lyrics: (() => {
+          // 歌词视图的根类名是 .lyrics-region（lyrics-view.js 的默认 className），滚动容器是 .lyrics
+          const region = document.querySelector('.lyrics-region')
+          const scroller = region ? region.querySelector('.lyrics') : null
+          if (!scroller) return null
+          const box = scroller.getBoundingClientRect()
+          const regionBox = region.getBoundingClientRect()
+          const lines = [...scroller.querySelectorAll('.lyrics__line, .lyrics__plain-line')]
+          /*
+           * 算"最后一行"时必须按**区域裁剪**来判定：区域外还有行（滚动区比可视区大），
+           * 它们被 overflow/mask 裁掉了，肉眼看不着 —— 第一版探针没裁，报出来的
+           * lastLineBottom=741 其实是区域外那一行，会误导成"压到示波器上了"。
+           */
+          const limit = Math.min(regionBox.bottom, window.innerHeight)
+          const visible = lines.filter((line) => {
+            const r = line.getBoundingClientRect()
+            return r.height > 0 && r.top >= regionBox.top && r.bottom <= limit
+          })
+          const last = visible[visible.length - 1]
+          return {
+            scrollBottom: Math.round(box.bottom),
+            regionBottom: Math.round(limit),
+            lastLineBottom: last ? Math.round(last.getBoundingClientRect().bottom) : null,
+            lines: lines.length,
+            visibleLines: visible.length
+          }
+        })(),
         // 画布中心点命中的是谁：应当是控件/内容，而不是这层装饰
-        hitAtCenter: (() => { const r = strip.getBoundingClientRect(); const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)); return el ? (el.className || el.tagName).toString().slice(0, 40) : null })()
+        hitAtCenter: (() => { const r = strip.getBoundingClientRect(); const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)); return el ? ((el.getAttribute && el.getAttribute('class')) || el.tagName).toString().slice(0, 40) : null })()
       }
     })())); return true`)
 
@@ -607,7 +638,15 @@ async function runScreenshots ({ win }) {
           await actions.setSetting({ theme: 'system', visualizerStyle: '${style}' })
           // 显式指定歌词可见，免得受前面几张图留下的状态影响
           actions.openNowPlaying({ lyrics: true })
-          await new Promise((r) => setTimeout(r, 1200))
+          await new Promise((r) => setTimeout(r, 600))
+          /*
+           * 右栏的标签页（歌词 / 歌曲信息）是渲染层状态，会跨图留着 ——
+           * 上一张 03 号切到了「歌曲信息」，不切回来的话歌词视图根本不挂载
+           * （探针里的 lyrics=null 就是这么来的）。这里显式点回「歌词」。
+           */
+          const lyricsTab = [...document.querySelectorAll('.now-playing__tab')].find((t) => (t.textContent || '').includes('歌词'))
+          lyricsTab?.click()
+          await new Promise((r) => setTimeout(r, 800))
           return true`)
         await sleep(500)
         await visualizerProbe()
@@ -624,7 +663,10 @@ async function runScreenshots ({ win }) {
           : null
         if (!track || store.get().playback.status !== 'playing') actions.playTrack(tracks[0])
         actions.openNowPlaying({ lyrics: true })
-        await new Promise((r) => setTimeout(r, 1500))
+        await new Promise((r) => setTimeout(r, 700))
+        const lyricsTab = [...document.querySelectorAll('.now-playing__tab')].find((t) => (t.textContent || '').includes('歌词'))
+        lyricsTab?.click()
+        await new Promise((r) => setTimeout(r, 800))
         return true`)
       await sleep(600)
       await visualizerProbe()

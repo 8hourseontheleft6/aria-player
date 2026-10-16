@@ -940,7 +940,31 @@ async function runSmoke ({ win, ctx }) {
       await actions.setSetting({ reduceMotion: true })
       await settle(500)
       actions.openNowPlaying({ lyrics: true })
-      await settle(1200)
+      await settle(900)
+      // 右栏可能停在「歌曲信息」，先点回「歌词」再量歌词与示波器的关系
+      const lyricsTab = [...document.querySelectorAll('.now-playing__tab')].find((t) => (t.textContent || '').includes('歌词'))
+      lyricsTab?.click()
+      await settle(900)
+      const lyricsProbe = (() => {
+        const region = document.querySelector('.lyrics-region')
+        const scroller = region ? region.querySelector('.lyrics') : null
+        const strip = document.querySelector('.visualizer')
+        if (!scroller || !strip) return { missing: true }
+        const regionBox = region.getBoundingClientRect()
+        const limit = Math.min(regionBox.bottom, window.innerHeight)
+        const lines = [...scroller.querySelectorAll('.lyrics__line, .lyrics__plain-line')]
+        const visible = lines.filter((line) => {
+          const r = line.getBoundingClientRect()
+          return r.height > 0 && r.top >= regionBox.top && r.bottom <= limit
+        })
+        const last = visible[visible.length - 1]
+        return {
+          regionBottom: Math.round(limit),
+          lastLineBottom: last ? Math.round(last.getBoundingClientRect().bottom) : null,
+          stripTop: Math.round(strip.getBoundingClientRect().top),
+          visibleLines: visible.length
+        }
+      })()
       const reducedProbe = (() => {
         const node = document.querySelector('.visualizer__canvas')
         const strip = document.querySelector('.visualizer')
@@ -976,6 +1000,7 @@ async function runSmoke ({ win, ctx }) {
         afterCycle,
         settingsRowCheck,
         reducedProbe,
+        lyricsProbe,
         runningAfterClose: Boolean(document.querySelector('.visualizer')) && store.get().ui.nowPlayingOpen === false
       }
     `)
@@ -1021,6 +1046,19 @@ async function runSmoke ({ win, ctx }) {
       `画布残留 ${visualizerCheck.reducedProbe.paintedPct.toFixed(2)}%、` +
       `dataset.suppressed=${visualizerCheck.reducedProbe.suppressed}、` +
       `按钮禁用=${visualizerCheck.reducedProbe.buttonDisabled}、提示「${visualizerCheck.reducedProbe.buttonTitle}」`)
+
+    /*
+     * 歌词不能钻进底部那条示波器里。
+     * 加示波器之后新引入的风险：歌词是滚动的，区域一直延伸到页面底部，
+     * 最后几行本来就淡（上下渐隐遮罩），再压在会动的频谱下面就是彻底读不了。
+     * 修法是给右栏留出 --visualizer-h 的下边距；这里守住"最后一行在条子之上"。
+     */
+    record('歌词不会钻到示波器底下（右栏为它留出了高度）',
+      visualizerCheck.lyricsProbe.missing !== true &&
+      visualizerCheck.lyricsProbe.lastLineBottom !== null &&
+      visualizerCheck.lyricsProbe.lastLineBottom <= visualizerCheck.lyricsProbe.stripTop - 8,
+      `歌词区底边 ${visualizerCheck.lyricsProbe.regionBottom}、最后一行底边 ${visualizerCheck.lyricsProbe.lastLineBottom}、` +
+      `示波器顶边 ${visualizerCheck.lyricsProbe.stripTop}（可见歌词 ${visualizerCheck.lyricsProbe.visibleLines} 行）`)
 
     const matchDetailCheck = await evaluate(win, `
       const { actions, store } = window.__aria
