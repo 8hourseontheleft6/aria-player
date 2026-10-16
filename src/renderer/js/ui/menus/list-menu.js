@@ -12,6 +12,7 @@
 import { h } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
+import { modLabel, keyHint } from '../../core/format.js'
 
 /**
  * @param {object} options
@@ -37,7 +38,7 @@ export function createListMenuButton ({ actions, getTracks = null, items = [] })
         { title: '列表操作' },
         {
           label: '选择多个歌曲',
-          value: 'Ctrl',
+          value: modLabel(),
           onClick: () => {
             closeAllLayers()
             actions.startSelection()
@@ -45,7 +46,7 @@ export function createListMenuButton ({ actions, getTracks = null, items = [] })
         },
         {
           label: '全选',
-          value: 'Ctrl + A',
+          value: keyHint('A'),
           onClick: () => {
             closeAllLayers()
             actions.startSelection()

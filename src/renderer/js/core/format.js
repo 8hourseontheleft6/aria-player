@@ -1,5 +1,38 @@
 /** 格式化与文本工具 */
 
+import { isMac as bridgeIsMac } from './remote.js'
+
+/**
+ * 当前是不是 macOS。
+ *
+ * 优先读 DOM 上的 `data-platform`（CSS 里的 darwin 规则用的是同一个来源，
+ * 渲染层只留一个真相），拿不到再退回 preload 给的值。
+ * 这样界面上所有和平台有关的文案（⌘ / Ctrl、⌥ / Alt）只需一处判断。
+ */
+export function isMacOS () {
+  const fromDom = document.documentElement?.dataset?.platform
+  if (fromDom) return fromDom === 'darwin'
+  return bridgeIsMac
+}
+
+/** 命令键的写法：macOS 是 ⌘，其它平台是 Ctrl */
+export function modLabel () {
+  return isMacOS() ? '⌘' : 'Ctrl'
+}
+
+/** Option / Alt 键的写法：macOS 是 ⌥ */
+export function altLabel () {
+  return isMacOS() ? '⌥' : 'Alt'
+}
+
+/**
+ * 组合键提示文案。macOS 习惯不带加号（⌘F），Windows / Linux 写 Ctrl+F。
+ * @param {string} combo 例如 'F'、'← / →'、'A'
+ */
+export function keyHint (combo) {
+  return isMacOS() ? `⌘${combo}` : `Ctrl+${combo}`
+}
+
 /** 秒 -> "3:45" / "1:02:33" */
 export function formatDuration (seconds, { forceHours = false } = {}) {
   if (!Number.isFinite(seconds) || seconds < 0) return forceHours ? '0:00:00' : '0:00'

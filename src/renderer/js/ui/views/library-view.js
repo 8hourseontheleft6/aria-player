@@ -2,7 +2,7 @@
 
 import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
-import { formatDurationLong, formatDuration, normalizeForSearch } from '../../core/format.js'
+import { formatDurationLong, formatDuration, normalizeForSearch, keyHint } from '../../core/format.js'
 import { remote } from '../../core/remote.js'
 import { selectVisibleTracks, selectTitle, describeMatch } from '../../core/selectors.js'
 import { EVENTS } from '../../core/bus.js'
@@ -260,7 +260,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
   const searchToggle = h('button', {
     class: 'btn btn--icon',
     type: 'button',
-    title: '搜索（Ctrl + F）',
+    title: `搜索（${keyHint('F')}）`,
     onClick: () => setSearchOpen(!searchSlot.classList.contains('is-open'))
   }, icon('search', { className: 'icon icon--stroke' }))
 

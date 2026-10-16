@@ -3,7 +3,7 @@
 import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { EVENTS } from '../../core/bus.js'
-import { formatDuration, formatRate } from '../../core/format.js'
+import { formatDuration, formatRate, keyHint } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { createArtworkView } from '../widgets/artwork-node.js'
 import { createLyricsView } from '../widgets/lyrics-view.js'
@@ -35,7 +35,7 @@ export function createNowPlayingPanel ({ store, bus, player, artwork, host, acti
   const queueToggle = h('button', {
     class: 'btn btn--icon',
     type: 'button',
-    title: '播放队列 (Ctrl+Q)',
+    title: `播放队列 (${keyHint('Q')})`,
     onClick: () => actions.toggleQueue()
   }, icon('waveform', { className: 'icon icon--stroke' }))
 

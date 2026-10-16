@@ -2,7 +2,7 @@
 
 import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
-import { formatDurationLong } from '../../core/format.js'
+import { formatDurationLong, keyHint } from '../../core/format.js'
 import { flipReorder } from '../../core/reorder.js'
 import { normalizePlaylists } from '../../core/playlists.js'
 import { openPopover, popoverRows } from '../widgets/overlay.js'
@@ -88,7 +88,7 @@ export function createSidebar ({ store, bus, actions }) {
   const collapseButton = h('button', {
     class: 'sidebar__collapse btn btn--icon',
     type: 'button',
-    title: '收起侧栏 (Ctrl+B)',
+    title: `收起侧栏 (${keyHint('B')})`,
     onClick: () => actions.toggleSidebar()
   }, icon('chevronLeft', { className: 'icon icon--stroke' }))
 

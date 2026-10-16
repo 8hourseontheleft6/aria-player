@@ -465,6 +465,44 @@ async function runScreenshots ({ win }) {
           }
         })())); return true`)
       await sleep(300)
+    }],
+    /*
+     * 快捷键文案的**模拟**核对：macOS 上应该是 ⌘ / ⌥，而不是写死的 Ctrl / Alt。
+     * 先切走再切回设置页，逼它重建一遍（文案在渲染时按平台生成）。
+     */
+    ['22-mac-shortcuts-emulated.png', 'macOS 快捷键文案（模拟：⌘ / ⌥）', async () => {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        document.documentElement.dataset.platform = 'darwin'
+        actions.setView('songs')
+        await new Promise((r) => setTimeout(r, 300))
+        actions.setView('settings')
+        await new Promise((r) => setTimeout(r, 900))
+        document.querySelectorAll('.setting-tip').forEach((n) => n.remove())
+        const nav = [...document.querySelectorAll('.settings-nav__item')].find((n) => n.textContent.includes('外观'))
+        nav?.click()
+        await new Promise((r) => setTimeout(r, 700))
+        // 再把「快捷键」那一组滚到顶上，截图里才看得到 ⌘ / ⌥ 的写法
+        const head = [...document.querySelectorAll('.settings__group-head, .settings__group-title')]
+          .find((n) => (n.textContent || '').trim() === '快捷键')
+        head?.scrollIntoView({ block: 'start' })
+        await new Promise((r) => setTimeout(r, 500))
+        return true`)
+      await sleep(400)
+      await evaluate(win, `
+        console.log('[mac-keys] ' + JSON.stringify((() => {
+          const rows = [...document.querySelectorAll('.settings__row')].filter((r) => r.querySelector('.kbd'))
+          const keys = rows.map((r) => (r.querySelector('.kbd') || {}).textContent || '')
+          return {
+            platform: document.documentElement.dataset.platform,
+            rows: rows.length,
+            keys: keys.slice(0, 10),
+            hasCtrl: keys.some((k) => k.includes('Ctrl')),
+            hasAlt: keys.some((k) => k.includes('Alt')),
+            hasCmd: keys.some((k) => k.includes('⌘'))
+          }
+        })())); return true`)
+      await sleep(300)
     }]
   ]
 

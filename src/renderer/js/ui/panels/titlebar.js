@@ -5,6 +5,7 @@ import { icon } from '../../core/icons.js'
 import { remote } from '../../core/remote.js'
 import { flipReorder } from '../../core/reorder.js'
 import { EVENTS } from '../../core/bus.js'
+import { keyHint } from '../../core/format.js'
 import { VIEW_ITEMS, normalizeOrder } from './sidebar.js'
 
 /**
@@ -21,7 +22,7 @@ export function createTitlebar ({ store, bus, actions }) {
   const sidebarToggle = h('button', {
     class: 'btn btn--icon',
     type: 'button',
-    title: '显示/隐藏边栏 (Ctrl+B)',
+    title: `显示/隐藏边栏 (${keyHint('B')})`,
     onClick: () => actions.toggleSidebar()
   }, icon('sidebar', { className: 'icon icon--stroke' }))
 

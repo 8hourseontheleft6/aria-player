@@ -3,7 +3,7 @@
 import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { remote } from '../../core/remote.js'
-import { formatDurationLong, formatRelativeTime, formatRate, formatBytes } from '../../core/format.js'
+import { formatDurationLong, formatRelativeTime, formatRate, formatBytes, modLabel, altLabel } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
 import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
@@ -14,29 +14,40 @@ const THEMES = [
   { id: 'dark', label: '深色' }
 ]
 
-const SHORTCUTS = [
-  ['空格', '播放 / 暂停'],
-  ['Ctrl + ← / →', '上一首 / 下一首'],
-  ['Ctrl + ↑ / ↓', '音量增减 5%'],
-  ['← / →', '快退 / 快进 5 秒（正在播放页）'],
-      ['← / →', '设置页：在分类之间切换（键盘也能跳分类）'],
-  ['Ctrl + L', '打开正在播放与歌词'],
-  ['Ctrl + Q', '播放队列'],
-  ['Ctrl + B', '显示 / 隐藏边栏'],
-  ['Ctrl + O', '添加音乐文件夹'],
-  ['Ctrl + F', '搜索（设置页聚焦设置内搜索，其它页聚焦资料库搜索）'],
-  ['Ctrl + M', '静音'],
-  ['M', '切换播放模式'],
-  ['[ / ]', '播放速度 -0.05× / +0.05×'],
-  ['中键拖动', '媒体墙：任意方向移动整面墙'],
-  ['Alt + 左键拖动', '媒体墙：同上（无中键时）'],
-  ['↑ / ↓、回车', '媒体墙以外的列表：移动选择 / 播放'],
-  ['列表右上角「⋯」', '开始多选（也可以在歌曲上右键 → 开始多选）'],
-  ['Ctrl / ⌘ + 点击', '加进多选（再点一次取消）'],
-  ['Shift + 点击', '从上一首到这一首整段选中'],
-  ['Ctrl + A', '全选当前列表'],
-  ['Esc', '关闭浮层 / 返回上一级 / 收起正在播放 / 退出多选']
-]
+/*
+ * 快捷键说明表。
+ *
+ * 修饰键按平台写：macOS 上是 ⌘ / ⌥，其它平台是 Ctrl / Alt —— 之前这里写死了 "Ctrl + …"，
+ * 于是 Mac 用户（我们正在给她做移植测试的那位）看到的是错的提示。
+ * 做成函数而不是常量：每次渲染时按当前平台生成，与 CSS 的 data-platform 同源。
+ */
+function shortcutRows () {
+  const mod = modLabel()
+  const alt = altLabel()
+  return [
+    ['空格', '播放 / 暂停'],
+    [`${mod} + ← / →`, '上一首 / 下一首'],
+    [`${mod} + ↑ / ↓`, '音量增减 5%'],
+    ['← / →', '快退 / 快进 5 秒（正在播放页）'],
+    ['← / →', '设置页：在分类之间切换（键盘也能跳分类）'],
+    [`${mod} + L`, '打开正在播放与歌词'],
+    [`${mod} + Q`, '播放队列'],
+    [`${mod} + B`, '显示 / 隐藏边栏'],
+    [`${mod} + O`, '添加音乐文件夹'],
+    [`${mod} + F`, '搜索（设置页聚焦设置内搜索，其它页聚焦资料库搜索）'],
+    [`${mod} + M`, '静音'],
+    ['M', '切换播放模式'],
+    ['[ / ]', '播放速度 -0.05× / +0.05×'],
+    ['中键拖动', '媒体墙：任意方向移动整面墙'],
+    [`${alt} + 左键拖动`, '媒体墙：同上（无中键时）'],
+    ['↑ / ↓、回车', '媒体墙以外的列表：移动选择 / 播放'],
+    ['列表右上角「⋯」', '开始多选（也可以在歌曲上右键 → 开始多选）'],
+    [`${mod} + 点击`, '加进多选（再点一次取消）'],
+    ['Shift + 点击', '从上一首到这一首整段选中'],
+    [`${mod} + A`, '全选当前列表'],
+    ['Esc', '关闭浮层 / 返回上一级 / 收起正在播放 / 退出多选']
+  ]
+}
 
 export function createSettingsView ({ store, bus, player, actions, host }) {
   const element = h('div', { class: 'content-inner view-root' })
@@ -762,7 +773,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       }),
       row({
         title: '单击歌曲直接播放',
-        sub: '打开后，单击列表里的歌曲就直接播放（默认需要双击，单击只选中）。这个设置对歌曲列表、专辑详情、艺人详情都生效；多选请用行首的勾选框或 Ctrl / Shift 点击',
+        sub: `打开后，单击列表里的歌曲就直接播放（默认需要双击，单击只选中）。这个设置对歌曲列表、专辑详情、艺人详情都生效；多选请用行首的勾选框或 ${modLabel()} / Shift 点击`,
         control: switchControl(settings.playOnSingleClick === true,
           (value) => actions.setSetting({ playOnSingleClick: value }))
       }),
@@ -1252,7 +1263,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     ], { collapsible: true, sub: '隐私：只发送歌曲信息与本地特征，音频文件不会上传' }))
 
     /* ---------- 快捷键 ---------- */
-    scroll.appendChild(group('快捷键', SHORTCUTS.map(([key, description]) => row({
+    scroll.appendChild(group('快捷键', shortcutRows().map(([key, description]) => row({
       title: description,
       control: h('span', { class: 'kbd', text: key })
     }))))

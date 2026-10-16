@@ -3,7 +3,7 @@
 import { h, on } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
 import { EVENTS } from '../../core/bus.js'
-import { formatDuration, formatRate } from '../../core/format.js'
+import { formatDuration, formatRate, keyHint } from '../../core/format.js'
 import { createSlider } from '../widgets/slider.js'
 import { createArtworkView } from '../widgets/artwork-node.js'
 import { openPopover, showContextMenu } from '../widgets/overlay.js'
@@ -52,7 +52,7 @@ export function createPlayerBar ({ store, bus, player, artwork, actions }) {
   const prevButton = h('button', {
     class: 'btn btn--icon',
     type: 'button',
-    title: '上一首 (Ctrl+←)',
+    title: `上一首 (${keyHint('←')})`,
     onClick: () => player.prev()
   }, icon('prev'))
 
@@ -66,7 +66,7 @@ export function createPlayerBar ({ store, bus, player, artwork, actions }) {
   const nextButton = h('button', {
     class: 'btn btn--icon',
     type: 'button',
-    title: '下一首 (Ctrl+→)',
+    title: `下一首 (${keyHint('→')})`,
     onClick: () => player.next()
   }, icon('next'))
 
@@ -107,7 +107,7 @@ export function createPlayerBar ({ store, bus, player, artwork, actions }) {
   const queueButton = h('button', {
     class: 'btn btn--icon',
     type: 'button',
-    title: '播放队列 (Ctrl+Q)',
+    title: `播放队列 (${keyHint('Q')})`,
     onClick: () => actions.toggleQueue()
   }, icon('waveform', { className: 'icon icon--stroke' }))
 

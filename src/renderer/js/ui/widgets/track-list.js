@@ -5,7 +5,7 @@
 
 import { h, on, clear } from '../../core/dom.js'
 import { icon } from '../../core/icons.js'
-import { formatDuration } from '../../core/format.js'
+import { formatDuration, keyHint } from '../../core/format.js'
 import { highlightParts } from '../../core/selectors.js'
 import { openPlaylistPicker } from '../menus/playlist-picker.js'
 import { createScrollIndicator, marksFromTracks } from './scroll-indicator.js'
@@ -30,7 +30,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   const headCheck = h('button', {
     class: 'tracklist__check',
     type: 'button',
-    title: '全选 / 取消全选 (Ctrl+A)',
+    title: `全选 / 取消全选 (${keyHint('A')})`,
     onClick: () => {
       const selected = new Set(store.get().ui.selection)
       const all = tracks.length > 0 && tracks.every((track) => selected.has(track.id))
@@ -77,7 +77,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     class: 'btn btn--sm',
     type: 'button',
     text: '全选',
-    title: '选中当前列表里的全部歌曲 (Ctrl+A)',
+    title: `选中当前列表里的全部歌曲 (${keyHint('A')})`,
     onClick: () => {
       const selected = new Set(store.get().ui.selection)
       const all = tracks.length > 0 && tracks.every((track) => selected.has(track.id))
