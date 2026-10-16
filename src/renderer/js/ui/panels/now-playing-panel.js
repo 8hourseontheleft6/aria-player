@@ -7,15 +7,29 @@ import { formatDuration, formatRate, reservedKeyHint } from '../../core/format.j
 import { createSlider } from '../widgets/slider.js'
 import { createArtworkView } from '../widgets/artwork-node.js'
 import { createLyricsView } from '../widgets/lyrics-view.js'
+import { createVisualizer } from '../widgets/visualizer.js'
 import { openPopover, popoverRows, closeAllLayers } from '../widgets/overlay.js'
 import { presetOptions, matchPreset, PRESETS } from '../../core/equalizer-presets.js'
 
 const RATE_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
-export function createNowPlayingPanel ({ store, bus, player, artwork, host, actions }) {
+export function createNowPlayingPanel ({ store, bus, player, engine, artwork, host, actions }) {
   /* ---------------- 背景 ---------------- */
   const artBackground = h('div', { class: 'now-playing__art-bg' })
   const veil = h('div', { class: 'now-playing__veil' })
+  // 专辑色光晕：让底部那条示波器「融」进背景，而不是硬贴在页面上
+  const glow = h('div', { class: 'now-playing__glow' })
+  /*
+   * 沉浸式示波器：横贯页面底部的一条（纯装饰，不接收鼠标 —— 见 visualizer.js 里的说明）。
+   * 样式存在设置里，点顶栏那颗小按钮循环切换。
+   */
+  const visualizer = createVisualizer({
+    engine,
+    store,
+    bus,
+    getStyle: () => store.get().settings.visualizerStyle || 'bars',
+    onPickStyle: (style) => actions.setSetting({ visualizerStyle: style })
+  })
 
   /* ---------------- 顶栏 ---------------- */
   const closeButton = h('button', {
@@ -107,6 +121,8 @@ export function createNowPlayingPanel ({ store, bus, player, artwork, host, acti
     h('div', { class: 'now-playing__caption', text: '正在播放' }),
     h('div', { class: 'now-playing__spacer' }),
     revealButton,
+    // 可视化样式切换（底部那条只是装饰，不接收鼠标，所以切换入口放在这里）
+    visualizer.button,
     eqButton,
     lyricsToggle,
     queueToggle
@@ -369,9 +385,13 @@ export function createNowPlayingPanel ({ store, bus, player, artwork, host, acti
   }
 
   /* ---------------- 主结构 ---------------- */
+  /*
+   * 层级（见 nowplaying.css 里的 z-index 一组）：封面底 0 → 玻璃/光晕 1 → 示波器 2 → 内容 3 → 顶栏 4。
+   * 示波器压在内容之下、玻璃之上，所以既看得见又不会挡住任何可点的东西。
+   */
   const body = h('div', { class: 'now-playing__body' }, left, right)
   const element = h('section', { class: 'now-playing', id: 'now-playing', hidden: true },
-    artBackground, veil, topbar, body)
+    artBackground, veil, glow, visualizer.element, topbar, body)
 
   /* ---------------- 时间显示 ---------------- */
   function updateTimes (time, duration) {
@@ -435,7 +455,10 @@ export function createNowPlayingPanel ({ store, bus, player, artwork, host, acti
       element.classList.remove('is-closing')
       updateTimes(player.getTime(), player.getDuration())
       requestAnimationFrame(() => lyricsView.alignToActive({ animated: false }))
+      // 只在面板打开时绘帧；关掉就停，别在后台空转（暂停时它自己还会降到 ~6 帧）
+      visualizer.start()
     } else if (!element.hidden) {
+      visualizer.stop()
       element.classList.add('is-closing')
       setTimeout(() => {
         if (!store.get().ui.nowPlayingOpen) element.hidden = true

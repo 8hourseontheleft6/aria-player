@@ -105,6 +105,11 @@ export function initialState () {
       audioOutputDevice: '',
       equalizer: { enabled: false, auto: true, preset: 'flat' },
       styleAnalysis: true,
+      /*
+       * 音频可视化样式：bars（频谱+波形）| wave（示波器）| ring（环形）| off。
+       * 顶栏那颗小按钮循环切换。off 时不建 WebAudio 接入点，播放路径保持原生。
+       */
+      visualizerStyle: 'bars',
       ai: { enabled: false, useForStyle: true, baseUrl: '', key: '', model: '', timeout: 30000 },
       // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
       sidebarOrder: ['songs', 'albums', 'artists', 'wall'],

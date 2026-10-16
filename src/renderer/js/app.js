@@ -806,7 +806,7 @@ async function main () {
   })
   const settingsView = createSettingsView({ store, bus, player, actions, host })
   const playerBar = createPlayerBar({ store, bus, player, artwork, actions })
-  const nowPlayingPanel = createNowPlayingPanel({ store, bus, player, artwork, host, actions })
+  const nowPlayingPanel = createNowPlayingPanel({ store, bus, player, engine, artwork, host, actions })
   const queuePanel = createQueuePanel({ store, bus, player, artwork, actions })
   const dropZone = createDropZone({ bus, actions })
   const fpsOverlay = createFpsOverlay({ store })

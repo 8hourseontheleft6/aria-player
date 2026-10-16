@@ -65,6 +65,60 @@ html[data-theme="light"] .now-playing__veil {
   background: color-mix(in srgb, var(--bg-window) 72%, transparent);
 }
 
+/* ---------------- 沉浸式示波器（底部一条） ----------------
+ *
+ * 层级不用重新编号：主体内容与顶栏本来就是 z-index 2，示波器给 1 就正好压在
+ * 「背景（auto）之上、内容（2）之下」。于是它既看得见，又不会挡住任何可点的东西。
+ * 另外它是**纯装饰**：pointer-events: none —— 早先那版铺满底部又接收鼠标，
+ * 把播放控件与底部工具条的点击全吃了（用户反馈「示波器阻挡 UI 按键」）。
+ */
+.now-playing__glow {
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  bottom: -12%;
+  height: 44%;
+  pointer-events: none;
+  background: radial-gradient(
+    60% 70% at 50% 100%,
+    color-mix(in srgb, var(--tint) 32%, transparent),
+    transparent 72%
+  );
+  filter: blur(28px);
+}
+
+.visualizer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  /*
+   * 高度 72px 是**量出来的**，不是拍脑袋：本机实测底部工具条（播放模式 / 倍速 / 歌词）
+   * 的底边在视口 -78px（781 的视口里是 703），所以留 72px 让示波器整条落在工具条**下方** ——
+   * 这样控件永远不会压在频谱上（当年那版把 132px 的条铺到工具条下面，
+   * 图标压在亮色频谱上读不清，只能再叠一层玻璃；不重叠就不需要那层玻璃）。
+   */
+  height: 72px;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--tint) 26%, transparent) 0%,
+    color-mix(in srgb, var(--tint) 12%, transparent) 38%,
+    transparent 78%
+  );
+}
+
+.visualizer__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 略压一点，让夜色/浅色下都不刺眼 */
+  opacity: 0.82;
+}
+
 /* ---------------- 顶栏 ---------------- */
 
 .now-playing__topbar {
