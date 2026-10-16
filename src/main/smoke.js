@@ -3392,6 +3392,94 @@ async function runSmoke ({ win, ctx }) {
       `在线封面 禁用=${switchState.offCoversDisabled}、在线艺人头像 存在=${switchState.hasArtistsRow} 禁用=${switchState.offArtistsDisabled}。` +
       `总闸开：禁用=${switchState.on?.disabled}、点一下设置变成 ${switchState.lyricsAfterEnabledClick}`)
 
+    /* ---------- 每个开关都得真的改到某个设置 ----------
+     *
+     * 判据是两条**不变量**，而不是枚举"哪个开关对应哪个键"：
+     *   ① 点一下必须至少改动一个**已有的**设置 —— 否则这颗开关是死的；
+     *   ② 点一下**不能凭空多出新的设置键** —— 键名写错的典型症状就是
+     *      `setSetting({ showRowArtworkTypo: true })`：store 里多出一个没人读的键，
+     *      而界面看着"点了有反应"（开关自己会翻），极难靠肉眼发现。这条能抓住它。
+     * 每颗开关点两次（原样还原），跑完再核对一遍"设置回到了初始值、键集合没变"。
+     * 禁用的开关（依赖总闸的那些）跳过不点 —— 它们本来就点不动。
+     */
+    const wiringTabTitles = ['音乐库', '播放与音效', '外观与系统', '在线与扩展', '关于']
+    const switchWiring = { results: [], seen: new Set() }
+    // 先记下初始状态，收尾时核对"审计没留下痕迹"
+    const wiringStart = await evaluate(win, `
+      const { store } = window.__aria
+      return { keys: Object.keys(store.get().settings).sort().join(','), settings: JSON.stringify(store.get().settings) }
+    `)
+    switchWiring.keysAtStart = wiringStart.keys
+    switchWiring.settingsAtStart = wiringStart.settings
+    for (const tabTitle of wiringTabTitles) {
+      const pageResult = await evaluate(win, `
+        const settle = async (ms = 450) => { await new Promise((r) => setTimeout(r, ms)) }
+        const { store } = window.__aria
+        const tab = [...document.querySelectorAll('.settings-nav__item')].find((n) => (n.textContent || '').includes(${JSON.stringify(tabTitle)}))
+        if (!tab) return { results: [] }
+        tab.click()
+        await settle(600)
+        /*
+         * 去重：设置页把各分类的行**都留在 DOM 里**（切分类只是显示/隐藏），
+         * 所以按分类循环会拿到同一批开关 —— 第一版就是这样把 24 颗点成了 120 颗
+         * （读数"共点过 120 颗"，而且白花了四倍时间）。
+         */
+        const already = new Set(${JSON.stringify([...switchWiring.seen])}) 
+        const titles = [...document.querySelectorAll('.settings__row .switch')].map((n) => {
+          const row = n.closest('.settings__row')
+          return (row && row.dataset ? row.dataset.settingId : '') || ''
+        }).filter((title) => title && !already.has(title))
+        const results = []
+        for (const title of titles) {
+          const selector = '.settings__row[data-setting-id="' + title + '"] .switch'
+          let node = document.querySelector(selector)
+          if (!node || node.classList.contains('is-disabled')) {
+            results.push({ title, skipped: true, changed: [], added: [] })
+            continue
+          }
+          const beforeCopy = JSON.parse(JSON.stringify(store.get().settings))
+          const beforeKeys = new Set(Object.keys(store.get().settings))
+          node.click()
+          await settle(500)
+          const after = store.get().settings
+          results.push({
+            title,
+            skipped: false,
+            changed: Object.keys(after).filter((key) => JSON.stringify(after[key]) !== JSON.stringify(beforeCopy[key])),
+            added: Object.keys(after).filter((key) => !beforeKeys.has(key))
+          })
+          // 重新查一次再点回去：点开关会触发设置页重渲染，之前那个引用可能已经脱离文档
+          node = document.querySelector(selector)
+          if (node) { node.click(); await settle(450) }
+        }
+        return { results }
+      `)
+      switchWiring.results.push(...pageResult.results)
+      for (const item of pageResult.results) switchWiring.seen.add(item.title)
+    }
+    /*
+     * 收尾：整轮点完之后，键集合必须与开始时一致、设置也必须回到原样。
+     * 这条不变量同时保护后面所有检查 —— 免得我的审计把设置留成别的样子。
+     */
+    const wiringAfter = await evaluate(win, `
+      const { actions, store } = window.__aria
+      actions.setView('songs')
+      await new Promise((r) => setTimeout(r, 300))
+      return { keys: Object.keys(store.get().settings).sort().join(','), settings: JSON.stringify(store.get().settings) }
+    `)
+    const clicked = switchWiring.results.filter((item) => !item.skipped)
+    const inert = clicked.filter((item) => item.changed.length === 0)
+    const invented = clicked.filter((item) => item.added.length > 0)
+    record('设置里的每颗开关都改到了某个已有设置（且没有凭空造出新键）',
+      clicked.length >= 8 && inert.length === 0 && invented.length === 0 &&
+      // 审计不能留下痕迹：键集合与设置值都要回到原样（这两条也保护后面的检查）
+      wiringAfter.keys === switchWiring.keysAtStart && wiringAfter.settings === switchWiring.settingsAtStart,
+      `共点过 ${clicked.length} 颗（另 ${switchWiring.results.length - clicked.length} 颗因依赖总闸被禁用、跳过）：` +
+      clicked.map((item) => `${item.title}→${item.changed.join('/') || '无 ✗'}`).join('；') +
+      (inert.length ? `；**没改到任何设置**：${inert.map((i) => i.title).join('、')}` : '') +
+      (invented.length ? `；**造出了新键**：${invented.map((i) => i.title + ':' + i.added.join(',')).join('、')}` : '') +
+      `；设置回到原样=${wiringAfter.settings === switchWiring.settingsAtStart}`)
+
     /* ---------- 标题栏接缝：那一条"很明显的条"不能再出现 ----------
      *
      * 用户给了批注截图："中间有一个很明显的条，改一下" —— 说的是标题栏与内容之间那条硬边：
