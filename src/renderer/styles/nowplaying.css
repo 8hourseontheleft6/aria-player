@@ -741,6 +741,16 @@ html[data-platform="darwin"] .now-playing__topbar {
   color: var(--label-2);
 }
 
+/*
+ * 焦点环：与仓库里其它按钮同一套令牌（--focus-ring = 3px 的 --accent-soft）。
+ * 不写这一条的话，新控件在键盘 Tab 到时会"看不见焦点"。
+ */
+.now-playing__cover-hint:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
 .now-playing__cover-hint[hidden] {
   display: none;
 }

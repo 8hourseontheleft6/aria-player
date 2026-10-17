@@ -2258,6 +2258,93 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `文件不存在 ${imported.missing} 首、不在音乐文件夹 ${imported.notInLibrary} 首`)
 
 
+    /*
+     * 无障碍与设置搜索（T2.4 / T2.5）：
+     *   · 设置搜索能命中新加的「主题色来源」（搜索是按 DOM 文本走的，这条等于把承诺钉住）；
+     *   · 「主题色来源」的分段控件键盘可达（是 <button>，能 Tab 到、能回车触发）；
+     *   · 示波器那颗切换按钮有可访问名（aria-label，且随样式变化更新）；
+     *   · 新增的「没有封面…」提示是 button：能聚焦、焦点环可见（不是看不见的控件）。
+     */
+    const a11y = await evaluate(win, `
+      const { actions } = window.__aria
+      actions.setView('settings')
+      await new Promise((r) => setTimeout(r, 400))
+
+      /* ① 搜索「主题色来源」 */
+      const searchInput = document.querySelector('.search--settings input')
+      let searchHit = null
+      let searchCount = ''
+      if (searchInput) {
+        searchInput.value = '主题色来源'
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }))
+        await new Promise((r) => setTimeout(r, 400))
+        const hits = [...document.querySelectorAll('.settings__row.is-search-hit')]
+        searchHit = hits.some((row) => (row.textContent || '').includes('主题色来源'))
+        const countNode = document.querySelector('.search--settings .search__count')
+        searchCount = countNode ? (countNode.textContent || '').trim() : ''
+        searchInput.value = ''
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }))
+        await new Promise((r) => setTimeout(r, 200))
+      }
+
+      /* ② 分段控件是 button（键盘可达） */
+      const segmentedButtons = [...document.querySelectorAll('.segmented__item')]
+      const tintRow = [...document.querySelectorAll('.settings__row')]
+        .find((row) => (row.textContent || '').includes('主题色来源'))
+      const tintButtons = tintRow ? [...tintRow.querySelectorAll('button')] : []
+      const allFocusable = tintButtons.length > 0 && tintButtons.every((node) => node.tagName === 'BUTTON' && node.tabIndex >= 0)
+
+      /* ③ 示波器按钮的可访问名 */
+      const vizButton = [...document.querySelectorAll('button')]
+        .find((node) => (node.getAttribute('aria-label') || '').startsWith('音频可视化'))
+      const vizLabel = vizButton ? vizButton.getAttribute('aria-label') : ''
+
+      /*
+       * ④ 新提示的焦点环：**扫样式表**里有没有 .now-playing__cover-hint:focus-visible 且带 --focus-ring。
+       * 不能靠 hint.focus() 再读 outline —— 程序化 focus 不触发 :focus-visible，
+       * 而且这个项目的焦点环是 box-shadow（--focus-ring 令牌），不是 outline。
+       */
+      const hint = document.querySelector('.now-playing__cover-hint')
+      let hintRing = false
+      for (const sheet of document.styleSheets) {
+        let rules = []
+        try { rules = sheet.cssRules || [] } catch { continue }
+        for (const rule of rules) {
+          const selector = rule.selectorText || ''
+          if (!selector.includes('.now-playing__cover-hint:focus-visible')) continue
+          const shadow = rule.style && rule.style.boxShadow ? rule.style.boxShadow : ''
+          if (shadow.includes('--focus-ring')) hintRing = true
+        }
+      }
+
+      actions.setView('songs')
+      await new Promise((r) => setTimeout(r, 200))
+      return {
+        searchHit,
+        searchCount,
+        segmented: segmentedButtons.length,
+        tintButtons: tintButtons.length,
+        allFocusable,
+        vizLabel,
+        hintRing,
+        hintIsButton: Boolean(hint) && hint.tagName === 'BUTTON'
+      }
+    `)
+    record('设置搜索能命中「主题色来源」，分段控件键盘可达',
+      a11y.searchHit === true &&
+      a11y.tintButtons >= 2 &&
+      a11y.allFocusable === true,
+      `搜「主题色来源」→ 命中=${a11y.searchHit}（计数「${a11y.searchCount}」）；` +
+      `该行按钮 ${a11y.tintButtons} 个、全部是可聚焦 <button>=${a11y.allFocusable}`)
+
+    record('示波器按钮有可访问名，新增提示按钮能聚焦且焦点环可见',
+      a11y.vizLabel.length > 0 &&
+      a11y.hintIsButton === true &&
+      a11y.hintRing === true,
+      `示波器 aria-label=「${a11y.vizLabel}」；` +
+      `「没有封面…」提示是 button=${a11y.hintIsButton}、样式表里有 :focus-visible + --focus-ring 规则=${a11y.hintRing}`)
+
+
     // media:// 协议：Range 支持与 CORS 头（seek 与 WebAudio 接入点都依赖它们）
     const protocolResult = await evaluate(win, `
       const track = window.__aria.player.currentTrack()

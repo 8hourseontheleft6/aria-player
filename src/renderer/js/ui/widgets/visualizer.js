@@ -67,6 +67,16 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     }
   }, icon('waveform', { className: 'icon icon--stroke' }))
 
+  /*
+   * aria-label 跟着当前样式走：读屏软件念的是"音频可视化：bars（点击切换）"，
+   * 而不是一个没有名字的图标按钮（title 只是悬停提示，不能替代可访问名）。
+   */
+  const syncButtonLabel = () => {
+    button.setAttribute('aria-label', `音频可视化：${visualizerStyleLabel(getStyle())}（点击切换）`)
+  }
+  syncButtonLabel()
+  bus.on('visualizer:style', syncButtonLabel)
+
   const context = canvas.getContext('2d')
 
   let analyser = null
