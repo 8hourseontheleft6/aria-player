@@ -127,6 +127,92 @@ async function visibilitySnapshot (win) {
 }
 
 /**
+ * 回归：**已经在跑的时候又"双击"了另一个音频文件**。
+ *
+ * 现有 smoke 只覆盖"冷启动带文件"；真实的第二次双击走的是 second-instance ——
+ * 新进程被单实例锁挡住，argv 交给**已在运行的**进程。三件事一起验：
+ *   ① argv 要先过滤再投递（原样丢进去会当场抛错，被 promise 吞成"双击没反应"）；
+ *   ② 当前曲目切到新文件（不是继续放旧的）；
+ *   ③ 窗口真的被提到前面（show → moveTop → focus，必要时短暂置顶）。
+ *
+ * z 序 Electron 没有 API 可读，所以 ③ 验的是**机制**：raiseInfo 记录了 raiseWindow 做了哪几步。
+ */
+async function runSecondInstanceCheck ({ win, profile, record, raiseInfo, mediaDir }) {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const { spawn } = require('node:child_process')
+  const { app: electronApp } = require('electron')
+
+  const makeWav = (name, frequency) => {
+    fs.mkdirSync(mediaDir, { recursive: true })
+    const sampleRate = 8000
+    const buffer = Buffer.alloc(44 + sampleRate)
+    buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + sampleRate, 4); buffer.write('WAVE', 8)
+    buffer.write('fmt ', 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20)
+    buffer.writeUInt16LE(1, 22); buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(sampleRate, 28)
+    buffer.writeUInt16LE(1, 32); buffer.writeUInt16LE(8, 34); buffer.write('data', 36)
+    buffer.writeUInt32LE(sampleRate, 40)
+    for (let i = 0; i < sampleRate; i++) {
+      buffer[44 + i] = Math.round(128 + 100 * Math.sin((2 * Math.PI * frequency * i) / sampleRate))
+    }
+    const file = path.join(mediaDir, name)
+    fs.writeFileSync(file, buffer)
+    return file
+  }
+
+  const before = await evaluate(win, `
+    const state = window.__aria.store.get()
+    return { trackId: state.playback.trackId, status: state.playback.status, count: state.library.tracks.length }`)
+  const third = makeWav(`second-instance-${Date.now()}.wav`, 660)
+  const raiseBefore = raiseInfo ? raiseInfo.count : 0
+  if (raiseInfo) raiseInfo.last = null
+
+  /*
+   * 真的再起一个进程（与"用户双击文件"完全一样：同一个 exe + 文件参数）。
+   * 它会在单实例锁上失败并退出，把 argv 交给**当前这个进程**。
+   */
+  const child = spawn(process.execPath, [electronApp.getAppPath(), `--profile=${profile.id}`, third], {
+    detached: true,
+    stdio: 'ignore',
+    env: process.env
+  })
+  child.unref()
+
+  const deadline = Date.now() + 30000
+  let after = null
+  while (Date.now() < deadline) {
+    await sleep(500)
+    after = await evaluate(win, `
+      const state = window.__aria.store.get()
+      const current = state.library.byId.get(state.playback.trackId)
+      return {
+        trackId: state.playback.trackId,
+        status: state.playback.status,
+        currentPath: current ? current.path : '',
+        count: state.library.tracks.length
+      }`)
+    if (after && after.currentPath === third && after.status === 'playing') break
+  }
+
+  const raised = raiseInfo ? raiseInfo.last : null
+  const raiseCount = raiseInfo ? raiseInfo.count : 0
+  record('再双击一个文件：已开的实例接住它（切到新曲目）并把窗口提到前面',
+    Boolean(after) &&
+    after.currentPath === third &&
+    after.status === 'playing' &&
+    after.count === before.count + 1 &&
+    Boolean(raised) &&
+    raised.show === true && raised.moveTop === true && raised.focus === true &&
+    raiseCount === raiseBefore + 1,
+    `第二次启动交给已开实例：当前曲目=${after ? path.basename(after.currentPath || '（无）') : '—'}（应为新文件）` +
+    `、状态=${after ? after.status : '—'}、列表 ${before.count} → ${after ? after.count : '—'} 首；` +
+    `窗口提升：show=${raised ? raised.show : '—'} moveTop=${raised ? raised.moveTop : '—'} ` +
+    `focus=${raised ? raised.focus : '—'} 拿到焦点=${raised ? raised.focused : '—'} ` +
+    `用了置顶兜底=${raised ? raised.burst : '—'}；提升次数 ${raiseBefore} → ${raiseCount}`,
+    { profiles: ['full', 'player'] })
+}
+
+/**
  * 两个产品**共用**的检查（标 full/player）。
  *
  * 这是"同一件事只写一遍"的样板：两套自检都调用这个函数，而不是各自抄一份。
@@ -168,7 +254,7 @@ async function runSharedChecks ({ win, record }) {
  *
  * 第 2 步时它是一个空壳；第 3 步起有了真正的功能，下面的检查也跟着长。
  */
-async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
+async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
   /* ① 主进程挂的服务：一个不多、一个不少 */
   const expectedServices = ['openedFiles', 'settings']
   const services = ctx.list().slice().sort()
@@ -265,6 +351,15 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
 
   /* ⑦ 两个产品共用的检查（标 full/player，同一份实现两边都跑） */
   await runSharedChecks({ win, record })
+
+  /* ⑧ 回归：已经在跑的时候再"双击"一个文件（走 second-instance，而不是冷启动） */
+  await runSecondInstanceCheck({
+    win,
+    profile,
+    record,
+    raiseInfo,
+    mediaDir: require('node:path').join(__dirname, '..', '..', 'tests', 'player-smoke')
+  })
 
   /* ---------- 第 3 步：player 真正的功能（打开文件 / 拖放 / 最近打开） ---------- */
   const playerFs = require('node:fs')
@@ -431,7 +526,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
  * 其余交给"当前档位那一套"去验（player 16 条 / 本体 195 条跑的是同一份实现）。
  * 所以这里按**本次实际档位**分支：一次跑只验它自己那一侧，另一侧由另一条启动路径去跑。
  */
-async function runUnifiedSmoke ({ win, ctx, profile, product, record }) {
+async function runUnifiedSmoke ({ win, ctx, profile, product, record, raiseInfo }) {
   const unifiedFs = require('node:fs')
   const unifiedPath = require('node:path')
   const { app: electronApp, dialog } = require('electron')
@@ -569,6 +664,15 @@ async function runUnifiedSmoke ({ win, ctx, profile, product, record }) {
       `播放状态=${state.status}；解析=${opened ? `${opened.action}/${opened.tracks}首` : '（本次没带文件）'}、弹确认框 ${dialogCalls} 次（应为 0）`,
       { profiles: ['full', 'player'] })
 
+    /* ⑧ 回归：已经在跑的时候再"双击"一个文件（second-instance） */
+    await runSecondInstanceCheck({
+      win,
+      profile,
+      record,
+      raiseInfo,
+      mediaDir: unifiedPath.join(__dirname, '..', '..', 'tests', 'unified-smoke')
+    })
+
     const userDataNames = unifiedFs.readdirSync(actual)
     const forbidden = userDataNames.filter((name) => /^(library|index|artwork|cover)/i.test(name) || /artwork-cache|library\.json/i.test(name))
     record('Unified 的轻量模式不生成资料库索引 / 封面缓存',
@@ -611,7 +715,7 @@ async function runUnifiedSmoke ({ win, ctx, profile, product, record }) {
   }
 }
 
-async function runSmoke ({ win, ctx, profile, product }) {
+async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
   const checks = []
   /*
    * 检查按档位打标（full / player / both）。
@@ -714,13 +818,13 @@ async function runSmoke ({ win, ctx, profile, product }) {
    * 启动路径，任何一条单独跑都只证明一半 —— 所以验收时两边都要跑（见提交信息里的读数）。
    */
   if (product && product.id === 'unified') {
-    await runUnifiedSmoke({ win, ctx, profile, product, record })
+    await runUnifiedSmoke({ win, ctx, profile, product, record, raiseInfo })
     clearInterval(watchdog)
     printSummary()
     return checks.every((check) => check.ok)
   }
   if (profile && profile.id !== 'full') {
-    await runPlayerShellSmoke({ win, ctx, profile, record })
+    await runPlayerShellSmoke({ win, ctx, profile, record, raiseInfo })
     clearInterval(watchdog)
     printSummary()
     return checks.every((check) => check.ok)

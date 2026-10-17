@@ -1,9 +1,10 @@
 'use strict'
 
-const { BrowserWindow, nativeTheme, shell, Menu, app } = require('electron')
+const { BrowserWindow, nativeTheme, shell, Menu, app, screen } = require('electron')
 const path = require('node:path')
 
 const { createTransportIcon, WHITE } = require('./util/raster')
+const { appIdFor } = require('./profile')
 
 const IS_MAC = process.platform === 'darwin'
 const IS_WINDOWS = process.platform === 'win32'
@@ -74,7 +75,7 @@ function applyTaskbarState (win, state, options = {}) {
  *  - macOS 保留原生红绿灯（hiddenInset），窗口其余部分自绘
  *  - Windows / Linux 无边框 + 自绘窗口按钮（由渲染层通过 IPC 控制）
  */
-function createMainWindow (ctx, profile) {
+function createMainWindow (ctx, profile, product) {
   const settings = ctx.get('settings')
   const state = settings.get()
   const saved = state.window || {}
@@ -126,6 +127,21 @@ function createMainWindow (ctx, profile) {
   if (Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
     options.x = saved.x
     options.y = saved.y
+  } else if (profile && profile.id === 'player') {
+    /*
+     * player 的**首次**出现要与完整版错开。
+     *
+     * 两种模式各有自己的 userData（各自记住窗口位置），所以第二次以后就不会重叠；
+     * 但第一次两边都用"居中"的默认值 —— 实测两边都落在 141,43，尺寸也接近，
+     * 于是"完整版开着、又起了 player"在屏幕上看起来只有一个窗口。
+     * 这里只给首次加一点偏移；用户挪过之后各自记住自己的位置。
+     */
+    const { workAreaSize } = screen.getPrimaryDisplay()
+    const offset = 56
+    if (Number.isFinite(workAreaSize.width) && Number.isFinite(workAreaSize.height)) {
+      options.x = Math.max(0, Math.round((workAreaSize.width - options.width) / 2) + offset)
+      options.y = Math.max(0, Math.round((workAreaSize.height - options.height) / 2) + offset)
+    }
   }
 
   const win = new BrowserWindow(options)
@@ -141,6 +157,22 @@ function createMainWindow (ctx, profile) {
   win.webContents.session.setPermissionCheckHandler((_contents, permission) => permission === 'media')
 
   if (!IS_MAC) Menu.setApplicationMenu(null)
+
+  /*
+   * 任务栏身份按**产品 × 档位**给。
+   *
+   * app.setAppUserModelId 只影响进程默认值；窗口级的 setAppDetails 才是让同一个 exe 的
+   * 两个模式在任务栏上分开的关键（否则 Windows 按 exe 路径合并成一个按钮，
+   * 用户点任务栏只会看到完整版）。
+   */
+  if (IS_WINDOWS) {
+    try {
+      win.setAppDetails({ appId: appIdFor(product, profile.id) })
+    } catch (err) {
+      // 旧系统上 setAppDetails 可能不可用；失败只影响任务栏分组，不该挡住开窗
+      console.warn('[window] setAppDetails 失败：', err && err.message)
+    }
+  }
 
   if (saved.maximized) win.maximize()
 
@@ -265,4 +297,36 @@ function applyTheme (ctx, theme) {
   }
 }
 
-module.exports = { createMainWindow, applyTheme, applyTaskbarState, markQuitting, IS_MAC }
+/**
+ * 把窗口提到最前面，并返回"到底做了什么"（自检会读它）。
+ *
+ * 为什么要这么多步：Windows 不给**后台进程**前台权限。用户双击音频时，
+ * 我们的进程不是前台进程，`focus()` 之后窗口仍可能压在别的窗口下面 ——
+ * 现象就是"player 已经在播了、标题也换了，但看到的是完整版的界面"。
+ *
+ * 顺序：show（可能刚从隐藏状态回来）→ moveTop（把窗口移到 z 序顶部）
+ * → focus → **仍然没拿到焦点**时短暂置顶 800ms 再撤掉。
+ * 刻意不长期置顶：那会让它永远压在别人上面，是个更糟的体验。
+ */
+function raiseWindow (win) {
+  const result = { at: Date.now(), show: false, moveTop: false, focus: false, focused: false, burst: false }
+  if (!win || win.isDestroyed()) return result
+  if (win.isMinimized()) win.restore()
+  win.show()
+  result.show = true
+  win.moveTop()
+  result.moveTop = true
+  win.focus()
+  result.focus = true
+  result.focused = win.isFocused()
+  if (!result.focused) {
+    win.setAlwaysOnTop(true)
+    result.burst = true
+    setTimeout(() => {
+      if (!win.isDestroyed()) win.setAlwaysOnTop(false)
+    }, 800)
+  }
+  return result
+}
+
+module.exports = { createMainWindow, applyTheme, applyTaskbarState, markQuitting, raiseWindow, IS_MAC }

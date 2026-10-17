@@ -157,6 +157,8 @@ for (const [id, def] of Object.entries(PROFILES)) {
   const expect = {
     library: (def.services || []).includes('library'),
     lyrics: (def.services || []).includes('lyrics'),
+    // 在线音源是主进程的 musicSources 服务
+    sources: (def.services || []).includes('musicSources'),
     // 在线能力由插件提供（online-media 注册了才有歌词/封面提供者）
     online: (def.plugins || []).includes('onlineMedia')
   }

@@ -7,7 +7,7 @@ const { app, BrowserWindow, session } = require('electron')
 const { createContext } = require('./registry')
 const { registerSchemes, registerProtocols } = require('./protocols')
 const {
-  PROFILES, PRODUCTS, resolveProduct, resolveProfile,
+  PROFILES, PRODUCTS, resolveProduct, resolveProfile, appIdFor,
   audioPathsFrom: audioPathsFromProfile, userDataDirFor
 } = require('./profile')
 const { createSettingsService } = require('./services/settings')
@@ -21,7 +21,7 @@ const { createWatcherService } = require('./services/watcher')
 const { createBackgroundService } = require('./services/background')
 const { createOpenedFilesService } = require('./services/opened-files')
 const { registerIpc } = require('./ipc')
-const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = require('./window')
+const { createMainWindow, applyTheme, applyTaskbarState, markQuitting, raiseWindow } = require('./window')
 const { createOpenFilesBridge } = require('./open-files')
 
 /*
@@ -83,6 +83,16 @@ let deliverOpenedPaths = null
  * 由 openFiles 桥攒着，或在 bootstrap 里从 process.argv 里补取一次。
  */
 let deliverPlayerPaths = null
+/*
+ * second-instance 要用它判断该走哪条链路。不能看"deliverPlayerPaths 是不是函数" ——
+ * 那个函数两个档位都会被赋值；full 档位走进去会碰到 openedFiles 为 null。
+ */
+let hasOpenedFiles = false
+/*
+ * 最近一次"把窗口提到前面"做了什么（show / moveTop / focus / 是否用了置顶兜底）。
+ * 自检读它来证明"再双击一次时窗口真的被提起来了"——z 序本身 Electron 没有 API 可读。
+ */
+const raiseInfo = { last: null, count: 0 }
 const openFiles = createOpenFilesBridge({
   onPaths: (paths) => {
     if (deliverPlayerPaths) {
@@ -215,17 +225,34 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (event, argv) => {
     const [win] = BrowserWindow.getAllWindows()
-    if (win) {
-      if (win.isMinimized()) win.restore()
-      win.focus()
-    }
     /*
-     * 已经在运行时又双击了一个音频文件：Windows 上它作为**新进程的命令行参数**到达，
-     * 被单实例锁挡住后由这里接手（argv 带着那个路径）。player 档位要把它们解析后直接播；
-     * 本体交给 library 的拖放链路（与拖进窗口完全一致）。
+     * 先把窗口提到最前面。
+     *
+     * 只用 focus() 不够：Windows 不给**后台进程**前台权限 —— 双击音频时我们的进程
+     * 不是前台进程，focus() 之后窗口仍然可能压在完整版下面。现象就是
+     * "player 已经在播、标题也换了，用户看到的却是完整版的界面和它原来的歌"。
+     * raiseWindow 里是 show → moveTop → focus，仍拿不到焦点时短暂置顶 800ms 再撤掉。
      */
-    if (typeof deliverPlayerPaths === 'function') deliverPlayerPaths(argv)
-    else if (typeof deliverOpenedPaths === 'function') deliverOpenedPaths(audioPathsFrom(argv))
+    const raised = raiseWindow(win)
+    raiseInfo.last = raised
+    raiseInfo.count += 1
+
+    /*
+     * 再处理"要不要打开这个文件"。
+     *
+     * 三个关键点，缺一个就是"双击没反应"：
+     *   ① **先过滤 argv**：新进程的 argv 里混着 exe 路径、`--profile=…`、`--smoke` 之类，
+     *      原样丢给解析器会当场抛错；
+     *   ② 按**能力**分流：player 档位（挂了 openedFiles）解析后直接播；full 档位交给
+     *      library 的拖放链路（与拖进窗口完全一致）；
+     *   ③ 不能按"deliverPlayerPaths 是不是函数"判断 —— 它在两个档位都被赋值了，
+     *      full 档位走进去会碰到 openedFiles 为 null，抛 TypeError 被 promise 吞掉，
+     *      表现同样是"双击没反应"，而且日志里只剩一条没人看的 rejection。
+     */
+    const audio = audioPathsFrom(argv)
+    if (!audio.length) return
+    if (hasOpenedFiles && typeof deliverPlayerPaths === 'function') deliverPlayerPaths(audio)
+    else if (typeof deliverOpenedPaths === 'function') deliverOpenedPaths(audio)
   })
   bootstrap()
 }
@@ -254,7 +281,7 @@ async function bootstrap () {
    * 任务栏身份按**产品**给：三个产品各有 appId，否则 Windows 会把它们并成同一个任务栏按钮
    * （同时开着时会互相覆盖图标与跳转列表）。前两个产品沿用原值，行为不变。
    */
-  if (process.platform === 'win32') app.setAppUserModelId(product.appId || 'com.aria.player')
+  if (process.platform === 'win32') app.setAppUserModelId(appIdFor(product, profile.id))
 
   const ctx = createContext()
   /*
@@ -284,13 +311,14 @@ async function bootstrap () {
   }
 
   const openedFiles = optional('openedFiles')
+  hasOpenedFiles = Boolean(openedFiles)
   if (openedFiles) await openedFiles.init()
 
 
   registerProtocols(ctx)
   registerIpc(ctx)
 
-  const win = createMainWindow(ctx, profile)
+  const win = createMainWindow(ctx, profile, product)
   const tray = optional('tray')
   if (tray) tray.sync()
 
@@ -363,6 +391,14 @@ async function bootstrap () {
   deliverPlayerPaths = async (paths) => {
     const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean)
     if (!list.length) return
+    /*
+     * 防御：没有 openedFiles 的档位（full）走到这里说明分流写错了。
+     * 早退比抛 TypeError 好 —— 那个异常会被 promise 吞掉，只剩"双击没反应"这一个现象。
+     */
+    if (!openedFiles) {
+      console.warn('[open-file] 本档位没有 openedFiles，忽略（应当走 library 的拖放链路）')
+      return
+    }
     try {
       const result = await openedFiles.resolve(list)
       sendOpened(result)
@@ -384,8 +420,16 @@ async function bootstrap () {
   if (process.platform !== 'darwin') {
     const fromArgv = audioPathsFrom(process.argv)
     if (fromArgv.length) {
-      // 等窗口加载完再推，否则渲染层还没订阅
-      win.webContents.once('did-finish-load', () => { deliverPlayerPaths(fromArgv) })
+      /*
+       * 冷启动也要**把窗口提到前面**：这个进程不是前台进程，Windows 不会因为
+       * "用户双击了文件"就给它前台权限 —— 先 show→moveTop→focus（必要时短暂置顶）。
+       */
+      win.webContents.once('did-finish-load', () => {
+        const raised = raiseWindow(win)
+        raiseInfo.last = raised
+        raiseInfo.count += 1
+        deliverPlayerPaths(fromArgv)
+      })
     }
   }
 
@@ -453,7 +497,7 @@ async function bootstrap () {
   if (process.argv.includes('--smoke')) {
     const { runSmoke } = require('./smoke')
     win.webContents.once('did-finish-load', () => {
-      runSmoke({ win, ctx, profile, product })
+      runSmoke({ win, ctx, profile, product, raiseInfo })
         .then((ok) => app.exit(ok ? 0 : 1))
         .catch((err) => {
           console.error('[smoke] 执行异常:', err)
@@ -502,7 +546,7 @@ async function bootstrap () {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow(ctx)
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow(ctx, profile, product)
   })
 
   app.on('window-all-closed', () => {

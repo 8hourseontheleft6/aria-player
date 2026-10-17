@@ -1072,6 +1072,13 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       } catch {
         list = []
       }
+      /*
+       * 没有音源能力的档位（player）里这两个 IPC 会被兜成 null ——
+       * 直接读 .length 就是 "Cannot read properties of null (reading 'length')"，
+       * 而且它是个 promise 里的异常，界面上什么都不显示，只有控制台里一行。
+       * 整个「在线音源」分组现在按能力不渲染了，这里再兜一层，防止别的路径漏进来。
+       */
+      if (!Array.isArray(list)) list = []
       sourcesCount.textContent = list.length
         ? `${list.filter((item) => item.enabled).length}/${list.length} 已启用`
         : '尚未添加'
@@ -1134,7 +1141,12 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       placeholder: 'https://…/source.js'
     })
 
-    scroll.appendChild(group('在线音源', [
+    /*
+     * 「在线音源」整组也按**能力**渲染：音源是主进程的 musicSources 服务，player 档位没有它。
+     * 以前这组在 player 里照样渲染，于是那段异步代码拿到 null 去读 .length ——
+     * 控制台里就是 "Cannot read properties of null (reading 'length')"（第 3 步的回归检查抓到的）。
+     */
+    if (hasOnlineProviders) scroll.appendChild(group('在线音源', [
       row({
         title: '启用在线音源',
         sub: '打开后，搜索时会同时向已启用的音源查询，结果单独显示在「网络结果」里；可以逐条播放、下载，歌词也会跟着加载。本项目不内置音源，需要你自己导入（脚本访问什么服务、是否合规由你判断）。',

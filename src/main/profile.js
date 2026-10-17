@@ -50,7 +50,7 @@ const PROFILES = {
      * 与其在几十处写空值防御，不如让渲染层问一句"这个产品有没有资料库能力"。
      * 这三个标记**必须与 services / plugins 一致**，check-profiles 会逐条交叉验证。
      */
-    capabilities: { library: true, online: true, lyrics: true },
+    capabilities: { library: true, online: true, lyrics: true, sources: true },
     // 侧栏是数据驱动的（store.js 的 sidebarOrder），短清单即可
     sidebar: ['songs', 'albums', 'artists', 'wall']
   },
@@ -66,7 +66,7 @@ const PROFILES = {
     // 一个插件都不注册：没有在线歌词/封面，也没有曲目信息面板
     plugins: [],
     // 三个能力都没有 —— 与上面的 services / plugins 严格对应
-    capabilities: { library: false, online: false, lyrics: false },
+    capabilities: { library: false, online: false, lyrics: false, sources: false },
     /*
      * 只有一份列表（打开的文件）。视图 id 仍叫 songs —— 渲染层的歌曲列表是"一列曲目"
      * 这个通用件，player 里它渲染的就是当前打开的文件（第 3 步接线）。
@@ -246,6 +246,22 @@ function profileUserDataDir (appDataDir, profile) {
   return require('node:path').join(appDataDir, `${profile.productName} (${profile.id})`)
 }
 
+/**
+ * Windows 的任务栏身份（AppUserModelID）。
+ *
+ * 为什么要按**模式**再分一层：Aria Unified 的两种模式是两个进程、两套 userData，
+ * 但它们的 exe 是同一个文件 —— Windows 会按 exe 路径把它们并成**一个任务栏按钮**，
+ * 于是"完整版开着、又起了 player"在任务栏上看起来只有一个窗口，点它就是完整版。
+ * 加上模式后缀（.full / .player）之后，两者各自一个按钮、各自可以单独切换。
+ *
+ * 前两个产品不受影响：Aria 仍是 com.aria.player、Aria Player 仍是 com.aria.player.lite。
+ */
+function appIdFor (product, profileId) {
+  if (!product) return 'com.aria.player'
+  if (product.id === 'unified') return `${product.appId}.${profileId}`
+  return product.appId
+}
+
 module.exports = {
   PROFILES,
   DEFAULT_PROFILE,
@@ -255,6 +271,7 @@ module.exports = {
   resolveProduct,
   resolveProfile,
   audioPathsFrom,
+  appIdFor,
   userDataDirName,
   userDataDirFor,
   profileUserDataDir
