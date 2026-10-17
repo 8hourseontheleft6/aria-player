@@ -64,9 +64,10 @@ or `xattr -dr com.apple.quarantine /Applications/Aria.app`. On Apple Silicon an 
 - **No content is provided.** The repository contains no audio, no artwork and no lyrics, and ships no
   online sources. Online sources are scripts *you* import yourself.
 - For personal use and learning only. Play files you own or are allowed to use.
-- Online features: the master switch and **online lyrics are ON by default** (it queries LRCLIB only when
-  a local `.lrc` is missing), **online covers are OFF by default**. Turn the master switch off and the app
-  works fully offline. Requests come from your machine; nothing is proxied or collected.
+- Online features are **OFF by default** — the master switch, online lyrics, online covers and online
+  artist avatars all start disabled. The app is fully usable offline. Turn the master switch on yourself if
+  you want LRCLIB lyrics or iTunes/Deezer covers; the UI states which services it will contact. Requests come
+  from your machine; nothing is proxied or collected.
 - Not affiliated with Apple Inc. "iOS"/"macOS"/"Windows" are mentioned only to describe compatibility.
 
 ## Contributing

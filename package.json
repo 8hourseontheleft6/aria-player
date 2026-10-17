@@ -5,7 +5,10 @@
   "private": true,
   "description": "Aria —— iOS 设计风格的本地音乐播放器（Electron）",
   "main": "src/main/main.js",
-  "author": "Aria contributors (TODO: 填真实姓名或 GitHub 名，见 ISSUE/PR 或 README 维护者)",
+  "author": "deepseek",
+  "contributors": [
+    "8左边的白马6"
+  ],
   "license": "MIT",
   "scripts": {
     "start": "electron .",

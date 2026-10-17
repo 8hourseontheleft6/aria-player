@@ -8702,11 +8702,16 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
     const coversWhenMasterOff = await online.fetchCover(sample)
     settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })
     await sleep(150)
-    record('联网总开关：默认开着（歌词自动匹配、封面需单独打开），关掉则两者一起停',
-      defaultOnline === true &&
+    /*
+     * 规格变更（开源前）：默认**关闭**所有在线功能。
+     * 断言的严格程度没变（仍然是 === false / === true 的相等判断），只是期望值跟着新规格走：
+     * 默认关 → 关掉总开关时歌词与封面都必须 skipped。
+     */
+    record('联网总开关：默认关闭（要在线补全得自己去设置里打开），关掉则歌词与封面一起停',
+      defaultOnline === false &&
       lyricsWhenMasterOff.skipped === true &&
       coversWhenMasterOff.skipped === true,
-      `默认 onlineFeatures=${defaultOnline}（应为 true）；关掉总开关时：歌词 skipped=${lyricsWhenMasterOff.skipped}、` +
+      `默认 onlineFeatures=${defaultOnline}（应为 false）；关掉总开关时：歌词 skipped=${lyricsWhenMasterOff.skipped}、` +
       `封面 skipped=${coversWhenMasterOff.skipped}（都应为 true）`)
 
     settingsService.set({ onlineFeatures: true, onlineLyrics: true, onlineCovers: true })

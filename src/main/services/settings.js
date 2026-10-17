@@ -92,15 +92,21 @@ const DEFAULTS = {
   taskbarProgress: true,
   watchFolders: true,
   /*
-   * 联网总开关：默认开着 —— 没有本地 .lrc 的歌自动联网匹配歌词。
-   * 封面**默认不再自动匹配**（用户反馈匹配来的封面用处不大）。
-   * 想彻底断网：关掉总开关，歌词与封面一起停；想单独开封面：把下面 onlineCovers 设为 true。
+   * 联网总开关：**默认关闭**。
+   *
+   * 为什么是关：这是一个本地播放器，开源发布的默认姿态应当是"不联网也能完整使用"。
+   * 想用在线补全（歌词 / 封面 / 艺人头像）就在设置里自己打开总开关 —— 打开的瞬间会明确
+   * 告诉用户它要访问哪些服务（LRCLIB / Deezer / iTunes），请求由用户机器直接发出。
+   * 分项开关仍是"总闸之下"的细化：onlineLyrics / onlineCovers / onlineArtists。
    */
-  onlineFeatures: true,
-  onlineLyrics: true,
+  onlineFeatures: false,
+  onlineLyrics: false,
   onlineCovers: false,
-  // 艺人头像：默认**在线查**（不再拿专辑封面顶替，合作曲目会挂错人）
-  onlineArtists: true,
+  /*
+   * 艺人头像：**默认关**（和总开关保持一致）。打开总开关后可以单独把它打开 ——
+   * 在线查头像比拿专辑封面顶替更准（合作曲目不会挂错人），但那要联网，得用户自己选。
+   */
+  onlineArtists: false,
   window: { width: 1180, height: 780, x: null, y: null, maximized: false },
   lastTrackPath: null,
   lastView: 'songs'
