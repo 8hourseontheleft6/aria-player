@@ -17,6 +17,35 @@ extraMetadata:
 directories:
   output: release-player
 
+# 文件关联：双击音频就用 Aria Player 打开（需求点名的 5 种，其余常见格式一并带上）。
+# 只有这个产品注册关联 —— 本体是资料库管理器，不该抢走系统里"双击 .mp3"的默认动作。
+# 注意：关联只在**安装版**（Setup/nsis）里写注册表；portable 版不写，这是 electron-builder 的行为。
+fileAssociations:
+  - ext: mp3
+    name: MP3 音频
+    description: MP3 音频文件
+    role: Viewer
+  - ext: m4a
+    name: M4A 音频
+    description: M4A 音频文件
+    role: Viewer
+  - ext: flac
+    name: FLAC 音频
+    description: FLAC 无损音频文件
+    role: Viewer
+  - ext: wav
+    name: WAV 音频
+    description: WAV 音频文件
+    role: Viewer
+  - ext: ogg
+    name: OGG 音频
+    description: OGG 音频文件
+    role: Viewer
+  - ext: opus
+    name: Opus 音频
+    description: Opus 音频文件
+    role: Viewer
+
 win:
   artifactName: Aria-Player-Setup-${version}.${ext}
 

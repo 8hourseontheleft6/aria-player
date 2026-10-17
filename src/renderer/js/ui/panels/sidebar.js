@@ -12,7 +12,11 @@ import { EVENTS } from '../../core/bus.js'
 export const VIEW_ITEMS = {
   songs: {
     iconName: 'list',
-    label: '全部歌曲',
+    /*
+     * player 档位这份列表装的是"打开过的文件"，叫「全部歌曲」会让人以为有资料库；
+     * 有人打开过文件的产品里它叫「最近打开」。判据是能力（有没有 window.aria.opened）。
+     */
+    label: (typeof window !== 'undefined' && window.aria && window.aria.opened) ? '最近打开' : '全部歌曲',
     count: ({ state }) => state.library.tracks.length,
     selected: (state) => state.ui.view === 'songs' && state.ui.source.type === 'all',
     /*
@@ -374,23 +378,29 @@ export function createSidebar ({ store, bus, actions }) {
     }))
     scroll.appendChild(librarySection)
 
-    /* ---------------- 文件夹 ---------------- */
+    /* ---------------- 文件夹（只有带资料库的产品才有这一块） ---------------- */
+    /*
+     * player 档位没有"音乐文件夹"这个概念：它的按钮是「打开文件 / 打开文件夹」，
+     * 而且打开过的文件夹不进侧栏（不建索引、不监听）。所以这一整块按能力隐藏 ——
+     * 不是把提示改成别的字，而是这块东西在这款产品里没有意义。
+     */
     const folders = library.folders
-    const folderSection = h('div', { class: 'sidebar__section' },
-      h('div', { class: 'sidebar__section-head' },
-        h('span', { text: '音乐文件夹' }),
-        h('button', {
-          class: 'sidebar__row-action',
-          type: 'button',
-          title: '添加文件夹',
-          onClick: () => actions.addFolder()
-        }, icon('plus', { className: 'icon icon--stroke' }))
+    if (!(window.aria && window.aria.opened)) {
+      const folderSection = h('div', { class: 'sidebar__section' },
+        h('div', { class: 'sidebar__section-head' },
+          h('span', { text: '音乐文件夹' }),
+          h('button', {
+            class: 'sidebar__row-action',
+            type: 'button',
+            title: '添加文件夹',
+            onClick: () => actions.addFolder()
+          }, icon('plus', { className: 'icon icon--stroke' }))
+        )
       )
-    )
 
-    if (!folders.length) {
-      folderSection.appendChild(h('div', { class: 'sidebar__hint', text: '还没有音乐文件夹，点右上角 + 添加。' }))
-    } else {
+      if (!folders.length) {
+        folderSection.appendChild(h('div', { class: 'sidebar__hint', text: '还没有音乐文件夹，点右上角 + 添加。' }))
+      } else {
       for (const folder of folders) {
         const name = folder.split(/[\\/]/).filter(Boolean).pop() || folder
         const count = library.tracks.filter((track) => track.path.startsWith(folder)).length
@@ -414,9 +424,9 @@ export function createSidebar ({ store, bus, actions }) {
           }, icon('close', { className: 'icon icon--stroke' }))
         }))
       }
+      }
+      scroll.appendChild(folderSection)
     }
-
-    scroll.appendChild(folderSection)
 
     /* ---------------- 自建播放列表 ---------------- */
     const playlists = normalizePlaylists(state.settings.playlists)

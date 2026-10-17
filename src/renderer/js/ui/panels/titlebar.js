@@ -207,6 +207,15 @@ export function createTitlebar ({ store, bus, actions }) {
     document.title = track ? `${track.title} — ${track.artist}` : productName
   })
 
+  /*
+   * 启动时也设一次：TRACK_CHANGED 只在"换歌"时触发，没播过歌的话标题会一直停在
+   * index.html 里那个写死的「Aria」（第 3 步的自检就是在这条上红的）。
+   */
+  {
+    const productName = (window.aria && window.aria.profile && window.aria.profile.productName) || 'Aria'
+    document.title = productName
+  }
+
   store.select((state) => state.ui.scanProgress, (progress) => {
     if (!progress || progress.phase === 'done') {
       scanStatus.classList.add('hidden')

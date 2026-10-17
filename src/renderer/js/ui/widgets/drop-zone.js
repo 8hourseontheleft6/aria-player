@@ -82,10 +82,14 @@ export function createDropZone ({ bus, actions }) {
       return
     }
 
-    if (result.action === 'play' && result.trackIds.length) {
-      actions.playDroppedTracks(result.trackIds)
-      return
-    }
+    /*
+     * 交给 actions.applyDropResult 统一处理：它会把 player 档位解析出来的曲目收进列表，
+     * 再按 id 播放（本体返回的结果不带 tracks，行为与改动前一致）。
+     * 放在 action 里而不是这里，是为了让自检能测到真正跑的那条链。
+     */
+    const applied = actions.applyDropResult(result)
+    if (applied.played) return
+    if (Array.isArray(result.tracks) && result.tracks.length) return
 
     if (result.action === 'added') {
       bus.emit(EVENTS.TOAST, {

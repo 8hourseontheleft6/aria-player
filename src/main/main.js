@@ -1,6 +1,7 @@
 'use strict'
 
 const path = require('node:path')
+const fs = require('node:fs')
 const { app, BrowserWindow, session } = require('electron')
 
 const { createContext } = require('./registry')
@@ -60,8 +61,18 @@ const SERVICE_FACTORIES = {
  * 冷启动期间到达的路径由桥先攒着（见 open-files.js），等 bootstrap 里交出处理函数后再一次送进来。
  */
 let deliverOpenedPaths = null
+/*
+ * player 档位的「打开文件」投递器：把路径解析成曲目后交给渲染层去播放。
+ * bootstrap 里赋值（那时窗口与 openedFiles 服务都就绪了）；在此之前到达的路径
+ * 由 openFiles 桥攒着，或在 bootstrap 里从 process.argv 里补取一次。
+ */
+let deliverPlayerPaths = null
 const openFiles = createOpenFilesBridge({
   onPaths: (paths) => {
+    if (deliverPlayerPaths) {
+      deliverPlayerPaths(paths)
+      return
+    }
     if (!deliverOpenedPaths) {
       // 理论上到不了这里（bootstrap 里是「先设处理函数、再 ready」），留个日志以防万一
       console.warn('[open-file] 还没有接收方，忽略', paths)
@@ -176,14 +187,39 @@ registerSchemes()
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (event, argv) => {
     const [win] = BrowserWindow.getAllWindows()
     if (win) {
       if (win.isMinimized()) win.restore()
       win.focus()
     }
+    /*
+     * 已经在运行时又双击了一个音频文件：Windows 上它作为**新进程的命令行参数**到达，
+     * 被单实例锁挡住后由这里接手（argv 带着那个路径）。player 档位要把它们解析后直接播；
+     * 本体交给 library 的拖放链路（与拖进窗口完全一致）。
+     */
+    if (typeof deliverPlayerPaths === 'function') deliverPlayerPaths(argv)
+    else if (typeof deliverOpenedPaths === 'function') deliverOpenedPaths(audioPathsFrom(argv))
   })
   bootstrap()
+}
+
+/**
+ * 从命令行里挑出音频文件路径。
+ * Electron 的 argv 里混着可执行文件、`--profile=player`、`--smoke` 之类，只留真实存在的音频文件。
+ */
+function audioPathsFrom (argv = []) {
+  const list = []
+  for (const arg of argv) {
+    if (typeof arg !== 'string' || !arg || arg.startsWith('-')) continue
+    if (!/\.(mp3|m4a|flac|wav|ogg|oga|opus|aac|wma|aiff|aif)$/i.test(arg)) continue
+    try {
+      if (fs.statSync(arg).isFile()) list.push(arg)
+    } catch {
+      // 路径不存在就当没给过
+    }
+  }
+  return list
 }
 
 /**
@@ -287,20 +323,51 @@ async function bootstrap () {
   if (library) await library.init()
 
   /*
-   * macOS 的 open-file：双击 / 拖到 Dock 的路径交给**本档位的"打开文件"链路**。
+   * 「打开文件」链路的两端：把路径解析成曲目，然后交给渲染层去播放/入列表。
+   *
+   *   · player：openedFiles.resolve（只解析这次打开的文件，进临时队列 ——
+   *     不建索引、不扫目录、不读封面、不联网、也不弹确认框），
+   *     解析结果通过 opened:incoming 推给渲染层（渲染层那边收进列表并直接播）
    *   · full：library.resolveDrop（与「拖进窗口」完全同一条链路 —— 文件夹会弹确认、
-   *           库内的歌直接播、库外的问要不要把所在文件夹加进来）
-   *   · player：openedFiles.add（只记进"最近打开"，不建索引、不扫目录、不查在线）
-   * 先设处理函数再 ready()，冷启动攒下的路径会在 ready() 那一刻一次性送进来。
+   *     库内的歌直接播、库外的问要不要把所在文件夹加进来）
+   *
+   * 三个入口都要能走这条链路，缺一个就是"双击没反应"：
+   *   ① macOS 的 open-file（双击 / 拖到 Dock）—— 由 open-files 桥转发到 deliverOpenedPaths / deliverPlayerPaths
+   *   ② Windows 的文件关联（双击 .mp3）—— 路径在 process.argv 里（冷启动）
+   *   ③ 程序已经在跑时再次双击 —— 新进程被单实例锁挡掉，路径在 second-instance 的 argv 里
    */
-  if (process.platform === 'darwin') {
-    deliverOpenedPaths = (paths) => {
-      const handled = library
-        ? library.resolveDrop(paths)
-        : openedFiles.add(paths)
-      Promise.resolve(handled).catch((err) => console.warn('[open-file] 导入失败:', err && err.message))
+  const sendOpened = (payload) => {
+    if (!win.isDestroyed() && payload && (payload.tracks || []).length) {
+      win.webContents.send('opened:incoming', payload)
     }
-    openFiles.ready()
+  }
+  deliverPlayerPaths = async (paths) => {
+    const list = (Array.isArray(paths) ? paths : [paths]).filter(Boolean)
+    if (!list.length) return
+    try {
+      const result = await openedFiles.resolve(list)
+      sendOpened(result)
+    } catch (err) {
+      console.warn('[open-file] 解析失败:', err && err.message)
+    }
+  }
+  deliverOpenedPaths = (paths) => {
+    if (openedFiles) {
+      deliverPlayerPaths(paths)
+      return
+    }
+    const handled = library ? library.resolveDrop(paths) : null
+    Promise.resolve(handled).catch((err) => console.warn('[open-file] 导入失败:', err && err.message))
+  }
+  if (process.platform === 'darwin') openFiles.ready()
+
+  /* ② Windows 文件关联：冷启动时命令行里带着要打开的文件（mac 走上面的 open-file，不重复取） */
+  if (process.platform !== 'darwin') {
+    const fromArgv = audioPathsFrom(process.argv)
+    if (fromArgv.length) {
+      // 等窗口加载完再推，否则渲染层还没订阅
+      win.webContents.once('did-finish-load', () => { deliverPlayerPaths(fromArgv) })
+    }
   }
 
   /** 监听目录 / 开关的指纹，只有它变了才需要重建 watcher（player 档位没有 watcher） */

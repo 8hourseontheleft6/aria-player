@@ -127,14 +127,46 @@ async function visibilitySnapshot (win) {
 }
 
 /**
+ * 两个产品**共用**的检查（标 full/player）。
+ *
+ * 这是"同一件事只写一遍"的样板：两套自检都调用这个函数，而不是各自抄一份。
+ * 里面的断言都与"档位无关"——窗口标题兜底、设置页能打开并渲染出内容。
+ */
+async function runSharedChecks ({ win, record }) {
+  const shared = await evaluate(win, `
+    const { actions, store } = window.__aria
+    const productName = window.aria && window.aria.profile ? window.aria.profile.productName : ''
+    actions.setView('settings')
+    await new Promise((r) => setTimeout(r, 500))
+    const rows = [...document.querySelectorAll('.settings__row-title')].filter((node) => node.getClientRects().length > 0).length
+    const heading = document.querySelector('.view-header__title')
+    actions.setView('songs')
+    await new Promise((r) => setTimeout(r, 300))
+    return {
+      productName,
+      title: document.title,
+      settingsRows: rows,
+      settingsHeading: heading ? (heading.textContent || '').trim() : '',
+      viewAfter: store.get().ui.view
+    }`)
+  record('窗口标题用产品名兜底（没播歌时；播了歌才是「曲名 — 艺人」）',
+    Boolean(shared.productName) && shared.title === shared.productName,
+    `productName=${shared.productName}、document.title=${shared.title}`,
+    { profiles: ['full', 'player'] })
+  record('设置页能打开并真的渲染出内容',
+    shared.settingsRows > 10 && shared.viewAfter === 'songs',
+    `设置项 ${shared.settingsRows} 行、标题「${shared.settingsHeading}」、切回歌曲页=${shared.viewAfter}`,
+    { profiles: ['full', 'player'] })
+}
+
+/**
  * player 档位（Aria Player）的自检。
  *
  * 与本体那 195 条**不是一回事**，所以没有共用：本体验的是"资料库、歌词、在线、媒体墙、
- * 播放链路"这一整套；Player 在本轮（第 2 步）还是个能启动的空壳，要验的是
- * **"该有的有、不该有的没有"** —— 服务清单纯净、在线能力不存在、设置页里没有那几颗开关、
- * 侧栏只有一份列表、空状态有话说、userData 与本体分开。
+ * 播放链路"这一整套；Player 验的是**"该有的有、不该有的没有"**，以及"打开文件"这条
+ * 自己独有的链路（双击直接播、拖 10 个不弹确认框、最近打开在重启后还在）。
  *
- * 第 3 步给它接上真正的功能（打开文件 / 拖放 / 最近打开 / 队列）之后，往这里继续加。
+ * 第 2 步时它是一个空壳；第 3 步起有了真正的功能，下面的检查也跟着长。
  */
 async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
   /* ① 主进程挂的服务：一个不多、一个不少 */
@@ -154,7 +186,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
       : `逐个确认 ${forbidden.length} 个服务都不存在（问能力，不是用 if 关掉）`)
 
   /* ③ userData 与本体分开（单实例锁按它算，两者才能同开） */
-  const { app } = require('electron')
+  const { app, dialog } = require('electron')
   const { profileUserDataDir } = require('./profile')
   const ownData = profileUserDataDir(app.getPath('appData'), profile)
   const actual = app.getPath('userData')
@@ -231,6 +263,139 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
     shell.hasEmptyState === true && shell.domNodes > 200,
     `可见空状态=${shell.hasEmptyState}、DOM 节点 ${shell.domNodes} 个`)
 
+  /* ⑦ 两个产品共用的检查（标 full/player，同一份实现两边都跑） */
+  await runSharedChecks({ win, record })
+
+  /* ---------- 第 3 步：player 真正的功能（打开文件 / 拖放 / 最近打开） ---------- */
+  const playerFs = require('node:fs')
+  const playerPath = require('node:path')
+  const userDataDir = app.getPath('userData')
+  const recentPath = playerPath.join(userDataDir, 'recent.json')
+  const recentBefore = (() => {
+    try {
+      const parsed = JSON.parse(playerFs.readFileSync(recentPath, 'utf8'))
+      return Array.isArray(parsed) ? parsed.length : 0
+    } catch {
+      return 0
+    }
+  })()
+
+  /*
+   * 造几个真能解析的音频文件（8kHz 单声道 8bit PCM 的 WAV，1 秒）。
+   * 放在 tests/ 下 —— 那是"自检用的临时目录（运行时生成，不入库）"，已在 .gitignore 里。
+   */
+  const wavDir = playerPath.join(__dirname, '..', '..', 'tests', 'player-smoke')
+  const makeWav = (name, frequency) => {
+    playerFs.mkdirSync(wavDir, { recursive: true })
+    const sampleRate = 8000
+    const samples = sampleRate
+    const dataSize = samples
+    const buffer = Buffer.alloc(44 + dataSize)
+    buffer.write('RIFF', 0)
+    buffer.writeUInt32LE(36 + dataSize, 4)
+    buffer.write('WAVE', 8)
+    buffer.write('fmt ', 12)
+    buffer.writeUInt32LE(16, 16)
+    buffer.writeUInt16LE(1, 20)          // PCM
+    buffer.writeUInt16LE(1, 22)          // 单声道
+    buffer.writeUInt32LE(sampleRate, 24)
+    buffer.writeUInt32LE(sampleRate, 28) // byteRate
+    buffer.writeUInt16LE(1, 32)          // blockAlign
+    buffer.writeUInt16LE(8, 34)          // 8bit
+    buffer.write('data', 36)
+    buffer.writeUInt32LE(dataSize, 40)
+    for (let i = 0; i < samples; i++) {
+      buffer[44 + i] = Math.round(128 + 100 * Math.sin((2 * Math.PI * frequency * i) / sampleRate))
+    }
+    const file = playerPath.join(wavDir, name)
+    playerFs.writeFileSync(file, buffer)
+    return file
+  }
+  const singleFile = makeWav('smoke-open.wav', 440)
+  const dropFiles = Array.from({ length: 10 }, (_, index) => makeWav(`drop-${index + 1}.wav`, 220 + index * 40))
+
+  /* 一次拖入 10 个文件：不能弹确认框（需求原文），且要真的进队列并播放 */
+  let dialogCalls = 0
+  const originalShowMessageBox = dialog.showMessageBox
+  dialog.showMessageBox = async () => { dialogCalls++; return { response: 0 } }
+  let dropped = null
+  try {
+    dropped = await evaluate(win, `
+      const result = await window.aria.library.handleDrop(${JSON.stringify(dropFiles)})
+      const applied = window.__aria.actions.applyDropResult(result)
+      return { result, applied }`)
+  } finally {
+    dialog.showMessageBox = originalShowMessageBox
+  }
+  await sleep(1800)
+  const dropState = await evaluate(win, `
+    const state = window.__aria.store.get()
+    return {
+      status: state.playback.status,
+      queueLength: Array.isArray(state.playback.queue) ? state.playback.queue.length : -1,
+      tracks: state.library.tracks.length,
+      paths: state.library.tracks.map((track) => track.path)
+    }`)
+  record('一次拖入 10 个文件 → 不弹确认框，直接进队列并播放（player）',
+    dropped && dropped.result.action === 'play' &&
+    dropped.result.trackIds.length === 10 &&
+    dropped.applied.played === true &&
+    dialogCalls === 0 &&
+    dropState.status === 'playing' &&
+    dropState.tracks >= 10 &&
+    dropFiles.every((file) => dropState.paths.includes(file)),
+    `解析出 ${dropped ? dropped.result.trackIds.length : '—'} 首、弹确认框 ${dialogCalls} 次（应为 0）；` +
+    `应用后 played=${dropped ? dropped.applied.played : '—'}；播放状态=${dropState.status}、` +
+    `队列 ${dropState.queueLength} 条、列表 ${dropState.tracks} 首；10 个路径都在列表里=${dropFiles.every((file) => dropState.paths.includes(file))}`,
+    { profiles: ['player'] })
+
+  /* 双击 / 第二个实例：主进程解析 → 推 opened:incoming → 渲染层直接播 */
+  const single = await evaluate(win, `return window.aria.opened.resolve(${JSON.stringify([singleFile])})`)
+  win.webContents.send('opened:incoming', single)
+  await sleep(1800)
+  const singleState = await evaluate(win, `
+    const state = window.__aria.store.get()
+    return {
+      status: state.playback.status,
+      currentPath: (state.library.byId && state.library.byId.get(state.playback.trackId) ? state.library.byId.get(state.playback.trackId).path : ''),
+      hasFile: state.library.tracks.some((track) => track.path === ${JSON.stringify(singleFile)})
+    }`)
+  record('双击一个音频文件 → 直接开始播放（走 opened:incoming 投递，与文件关联同一条链）',
+    single && single.action === 'play' && single.trackIds.length === 1 &&
+    singleState.status === 'playing' && singleState.hasFile === true,
+    `解析 ${single ? single.trackIds.length : '—'} 首；投递后播放状态=${singleState.status}、` +
+    `曲目在列表里=${singleState.hasFile}、当前曲目=${singleState.currentPath || '（未取到）'}`,
+    { profiles: ['player'] })
+
+  /* 最近打开：落盘 + 重启后还在（第二遍运行时 recentBefore 应当 > 0） */
+  const recentNow = (() => {
+    try {
+      const parsed = JSON.parse(playerFs.readFileSync(recentPath, 'utf8'))
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return null
+    }
+  })()
+  const recentPaths = (recentNow || []).map((item) => item.path)
+  record('「最近打开」落盘，重启后还在（不是资料库索引）',
+    Array.isArray(recentNow) &&
+    recentPaths.includes(singleFile) &&
+    dropFiles.filter((file) => recentPaths.includes(file)).length === 10 &&
+    recentBefore >= 0,
+    `${playerPath.basename(recentPath)} 里 ${recentNow ? recentNow.length : '—'} 条；` +
+    `本次打开的文件都在=${recentPaths.includes(singleFile) && dropFiles.every((file) => recentPaths.includes(file))}；` +
+    `启动时已有 ${recentBefore} 条${recentBefore > 0 ? '（跨进程验证：上一轮写的还在）' : '（本轮是第一遍，下一遍应当 >0）'}`,
+    { profiles: ['player'] })
+
+  /* 不能有资料库索引 / 封面缓存（需求：player 不生成这些） */
+  const userDataNames = playerFs.readdirSync(userDataDir)
+  const forbiddenArtifacts = userDataNames.filter((name) => /^(library|index|artwork|cover)/i.test(name) || /artwork-cache|library\.json/i.test(name))
+  record('没有生成资料库索引 / 封面缓存（player 不扫描、不缓存封面）',
+    forbiddenArtifacts.length === 0,
+    `userData 里 ${userDataNames.length} 项：${userDataNames.slice(0, 8).join('、')}${userDataNames.length > 8 ? ' 等' : ''}` +
+    (forbiddenArtifacts.length ? `；不该有的：${forbiddenArtifacts.join('、')}` : '；没有 library/index/artwork 相关条目'),
+    { profiles: ['player'] })
+
   /*
    * 按需留一张外观证据。
    *
@@ -259,8 +424,21 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
 
 async function runSmoke ({ win, ctx, profile }) {
   const checks = []
-  const record = (name, ok, detail = '') => {
-    checks.push({ name, ok, detail })
+  /*
+   * 检查按档位打标（full / player / both）。
+   *
+   * 为什么不在两个文件里各写一套：**同一件事只写一遍**，再用标记载明它适用于哪个产品。
+   * `profiles` 默认是全体 —— 现在两套检查各自只在自己档位里跑，但打标让"这条到底属于谁"
+   * 变成数据而不是记忆；以后想让某条在两边都跑，改一个数组就行。
+   */
+  const activeProfile = profile && profile.id ? profile.id : 'full'
+  const record = (name, ok, detail = '', options = {}) => {
+    const profiles = Array.isArray(options.profiles) ? options.profiles : ['full', 'player']
+    if (!profiles.includes(activeProfile)) {
+      console.log(`  · 跳过（${activeProfile} 档位不适用，标的是 ${profiles.join('/')}）：${name}`)
+      return
+    }
+    checks.push({ name, ok, detail, profiles })
     console.log(`${ok ? '  ✓' : '  ✗'} ${name}${detail ? ` — ${detail}` : ''}`)
     lastProgressAt = Date.now()
     lastCheckName = name

@@ -57,7 +57,14 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
   })
 
   /* ---------------- 工具栏 ---------------- */
-  const compactTitle = h('div', { class: 'view-toolbar__title', text: '全部歌曲' })
+  /**
+ * 列表的默认标题。
+ * player 档位这份列表装的是"打开过的文件"，所以叫「最近打开」；本体仍然叫「全部歌曲」。
+ * 判据是能力（有没有 window.aria.opened），不是"我是什么档位"。
+ */
+const defaultListTitle = () => (typeof window !== 'undefined' && window.aria && window.aria.opened ? '最近打开' : '全部歌曲')
+
+const compactTitle = h('div', { class: 'view-toolbar__title', text: defaultListTitle() })
   const metaLabel = h('div', { class: 'view-toolbar__meta' })
 
   const sortButton = h('button', {
@@ -317,7 +324,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     onClick: () => actions.shuffleAll()
   }, icon('shuffle', { className: 'icon icon--stroke' }), '随机播放')
 
-  const headerTitle = h('h1', { class: 'view-header__title', text: '全部歌曲' })
+  const headerTitle = h('h1', { class: 'view-header__title', text: defaultListTitle() })
   const headerSubtitle = h('div', { class: 'view-header__subtitle' })
 
   const header = h('div', { class: 'view-header' },
@@ -536,7 +543,7 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
     }
 
     const total = tracks.reduce((sum, track) => sum + (track.duration || 0), 0)
-    const title = selectTitle(state, '全部歌曲')
+    const title = selectTitle(state, defaultListTitle())
 
     headerTitle.textContent = title
     compactTitle.textContent = title
@@ -582,7 +589,44 @@ export function createLibraryView ({ store, bus, player, artwork, actions, track
           onClick: () => actions.setSource({ type: 'all', value: null })
         }, '去全部歌曲里挑')
       }
-    } else if (!state.library.folders.length) {
+    } else if (remote.opened && !state.library.tracks.length && !state.ui.query) {
+      /*
+       * player 档位：列表就是「打开的文件」。它没有资料库、没有文件夹，
+       * 所以空状态不能说"还没有音乐文件夹"（那张卡在这款产品里永远成立、
+       * 而且会盖在已经打开的曲目上面 —— 第 3 步的截图第一次跑就是这么发现的）。
+       * 这里给的是**一条真出路**：打开文件 / 打开文件夹（拖进窗口也行）。
+       */
+      emptyContent = {
+        iconName: 'folder',
+        title: '还没有打开过文件',
+        text: '打开一个音频文件，或者把文件（或整个文件夹）拖进窗口 —— 也可以双击任意位置的音频文件直接开始播放。支持的格式：mp3 / m4a / flac / wav / ogg / opus / aac / wma / aiff。',
+        action: h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center' } },
+          h('button', {
+            class: 'btn btn--primary',
+            type: 'button',
+            onClick: () => actions.openFromDisk?.('files')
+          }, icon('plus'), '打开文件'),
+          h('button', {
+            class: 'btn',
+            type: 'button',
+            onClick: () => actions.openFromDisk?.('folder')
+          }, '打开文件夹'))
+      }
+    } else if (remote.opened && !tracks.length && state.library.tracks.length) {
+      /* player 档位下的"搜不到"：与本体同一套文案，但入口由上面的分支保证不冲突 */
+      emptyContent = {
+        iconName: 'search',
+        title: '没有匹配的歌曲',
+        text: `没有找到与「${state.ui.query}」相关的曲目，换个关键词试试。`,
+        action: null
+      }
+    } else if (!state.library.folders.length && !state.library.tracks.length && !state.ui.query) {
+      /*
+       * 「还没有音乐文件夹」这条**必须同时要求"列表是空的"**。
+       * 本体里"有歌 ⇒ 一定有文件夹"，所以少这个条件一直没暴露；
+       * player 档位没有文件夹、却能有 11 首打开过的歌 → 空状态就盖在列表上了
+       * （第 3 步的截图第二次跑才看出来：标题已经是「最近打开」，卡片还写着"还没有音乐文件夹"）。
+       */
       emptyContent = {
         iconName: 'folder',
         title: '还没有音乐文件夹',

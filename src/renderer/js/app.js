@@ -701,6 +701,86 @@ async function main () {
       trackMenu.open(track, event, options)
     },
 
+    /**
+     * 把一批**已经解析好的曲目**收进当前列表（player 档位的"打开的文件"用它）。
+     *
+     * 为什么需要单独一个 action：player 没有资料库，`loadLibrary()` 被能力短路掉了，
+     * 曲目是"用户这次打开的那些文件"，由主进程解析好送上来。这里做的规范化
+     * （_search / _deepSearch 预计算、byId、时长合计）与 loadLibrary 完全一致，
+     * 所以列表、搜索、队列、播放这些下游一件都不用改 —— 它们只认"一份曲目数组"。
+     */
+    ingestOpenedTracks (tracks, { replace = false } = {}) {
+      const list = (Array.isArray(tracks) ? tracks : []).filter((track) => track && track.id)
+      if (!list.length && !replace) return { count: 0 }
+      const previous = replace ? [] : store.get().library.tracks
+      const merged = new Map()
+      for (const track of previous) merged.set(track.id, track)
+      for (const track of list) {
+        // 与 loadLibrary 同一套预计算：搜索要用，缺了这两项深度搜索就不准
+        track._search = normalizeForSearch(`${track.title} ${track.artist} ${track.album} ${track.albumArtist}`)
+        track._deepSearch = normalizeForSearch([
+          track._search,
+          track.genre, track.year, track.file, track.dir, track.path
+        ].filter(Boolean).join(' '))
+        merged.set(track.id, track)
+      }
+      const all = [...merged.values()]
+      const byId = new Map(all.map((track) => [track.id, track]))
+      const totalDuration = all.reduce((sum, track) => sum + (track.duration || 0), 0)
+      store.set((state) => ({
+        ...state,
+        library: { ...state.library, loaded: true, tracks: all, byId, totalDuration }
+      }))
+      bus.emit(EVENTS.LIBRARY_UPDATED, { count: all.length })
+      return { count: list.length, total: all.length }
+    },
+
+    /** player 档位启动时载入「最近打开」 */
+    async loadRecentOpened () {
+      if (!remote.opened) return { count: 0 }
+      const result = await remote.opened.recent()
+      if (result && result.tracks) actions.ingestOpenedTracks(result.tracks)
+      return {
+        count: result && result.tracks ? result.tracks.length : 0,
+        missing: result && result.missing ? result.missing.length : 0,
+        total: result && result.total ? result.total : 0
+      }
+    },
+
+    /** 打开文件 / 打开文件夹（player 档位）—— 解析完成后收进列表并播放第一首 */
+    async openFromDisk (mode) {
+      if (!remote.opened) return { action: 'unsupported' }
+      const result = await remote.opened.pick(mode)
+      if (!result || result.action === 'cancelled') return { action: 'cancelled' }
+      if (result.tracks && result.tracks.length) {
+        actions.ingestOpenedTracks(result.tracks)
+        actions.playDroppedTracks(result.trackIds)
+      } else {
+        toast({ message: '没有可播放的音频文件', type: 'error' })
+      }
+      return result
+    },
+
+    /**
+     * 处理一次"打开/拖入"的结果（主进程返回的统一形状）。
+     *
+     * 拖放浮层与「打开文件」按钮都走这里，自检也直接调它 —— 于是
+     * "主进程解析 → 收进列表 → 播放"这条链只写一遍，测的也就是真正跑的那条。
+     * 判据是"结果里带不带 tracks"（数据驱动）：本体的 resolveDrop 不返回 tracks，
+     * 这里就只做播放那一步，行为与改动前完全一致。
+     */
+    applyDropResult (result) {
+      if (!result || result.action === 'cancelled') return { played: false }
+      if (Array.isArray(result.tracks) && result.tracks.length) {
+        actions.ingestOpenedTracks(result.tracks)
+      }
+      if (result.action === 'play' && Array.isArray(result.trackIds) && result.trackIds.length) {
+        actions.playDroppedTracks(result.trackIds)
+        return { played: true, count: result.trackIds.length }
+      }
+      return { played: false }
+    },
+
     /** 拖入歌曲后播放（主进程已经完成路径校验与资料库归属判断） */
     playDroppedTracks (trackIds) {
       const ids = (trackIds || []).filter(Boolean)
@@ -1653,6 +1733,34 @@ async function main () {
     player.init()
     player.setMode(settings.playbackMode)
 
+    /*
+     * player 档位：启动时载入「最近打开」。
+     *
+     * loadLibrary() 在没有资料库能力时是短路的（返回空数组），所以这里用
+     * window.aria.opened 这个**能力入口**判断要不要去读最近打开清单 ——
+     * 本体没有这个入口，一行都不会走到。
+     * 读的是 userData/recent.json + 解析元数据；不建索引、不读封面、不联网。
+     */
+    if (remote.opened) {
+      try {
+        const loaded = await actions.loadRecentOpened()
+        if (loaded.total) {
+          console.log(`[app] 最近打开：${loaded.count} 首可播 / 共 ${loaded.total} 条（${loaded.missing} 条文件已不在）`)
+        }
+      } catch (err) {
+        console.warn('[app] 载入最近打开失败：', err && err.message)
+      }
+      /*
+       * 双击文件 / 拖到 Dock / 第二个实例带来的路径：主进程解析好后推过来，
+       * 这里收进列表并**直接播放**（需求：双击任意位置的音频能直接播）。
+       */
+      remote.opened.onIncoming((payload) => {
+        if (!payload || !Array.isArray(payload.tracks) || !payload.tracks.length) return
+        actions.ingestOpenedTracks(payload.tracks)
+        if (payload.trackIds && payload.trackIds.length) actions.playDroppedTracks(payload.trackIds)
+      })
+    }
+
     const tracks = await loadLibrary()
 
     // 恢复上次播放的曲目（只加载不播放，避免一启动就出声）
@@ -1668,8 +1776,8 @@ async function main () {
       }
     }
 
-    // 空资料库时直接把设置页推到用户面前
-    if (!tracks.length && !settings.folders.length) {
+    // 空资料库时直接把设置页推到用户面前（player 档位停在列表页 —— 那里有空状态与打开入口）
+    if (!tracks.length && !settings.folders.length && !remote.opened) {
       actions.setView('settings')
     }
 

@@ -12,7 +12,9 @@ const EVENT_CHANNELS = [
   'library:watch-error',
   'window:maximized',
   'media:command',
-  'theme:changed'
+  'theme:changed',
+  /* player 档位：双击文件 / 拖到 Dock / 第二个实例带来的曲目 */
+  'opened:incoming'
 ]
 
 const MEDIA_KEYS = [
@@ -102,7 +104,18 @@ function registerIpc (ctx) {
     'library:artwork': (_event, trackId) => library.getArtwork(trackId),
     'library:artwork-stats': () => library.getArtworkStats(),
     'library:clear-artwork-cache': (_event, options) => library.clearArtworkCache(options || {}),
-    'library:handle-drop': (_event, paths, options) => library.resolveDrop(paths, options || {}),
+    'library:handle-drop': (_event, paths, options) => {
+      /*
+       * 拖放/双击的统一入口，按**能力**分流：
+       *   · 本体：library.resolveDrop（库内的歌直接播、库外的问要不要把文件夹加进资料库）
+       *   · player：openedFiles.resolve（只解析这次打开的文件，进临时队列 ——
+       *     不建索引、不扫目录、不读封面、不联网；**也不弹确认框**）
+       * 两条路都返回同一个形状（action / trackIds / rejected），所以渲染层的拖放处理不用分叉。
+       * 多出来的 `tracks` 只在 player 路径上有 —— 渲染层看到它就先把曲目收进列表再播。
+       */
+      if (ctx.has('library')) return library.resolveDrop(paths, options || {})
+      return ctx.get('openedFiles').resolve(paths)
+    },
     // 深度搜索的歌词部分：只在用户选中「含歌词等」时才调用
     'library:search-lyrics': (_event, input) => library.searchLyrics(input || {}),
     'library:lyrics-index': () => library.getLyricsIndexStats(),
@@ -210,6 +223,39 @@ function registerIpc (ctx) {
        */
       mediaKeys: MEDIA_KEYS.map(([accelerator, command]) => ({ accelerator, command }))
     }),
+    /*
+     * player 档位专属频道：打开文件 / 打开文件夹 / 最近打开。
+     *
+     * 只在真的挂了 openedFiles 的档位里注册 —— 本体没有这个服务，这些频道就不存在
+     * （渲染层问一句 window.aria.opened 有没有就知道该不该显示入口）。
+     * 用条件展开而不是在回调里判断：没注册的频道调不到，比"能调到但内部什么都不做"更干净。
+     */
+    ...(ctx.has('openedFiles')
+      ? {
+          'opened:recent': async () => {
+            const opened = ctx.get('openedFiles')
+            const [recent, resolved] = [opened.getRecent(), await opened.resolveRecent()]
+            return { recent, tracks: resolved.tracks, missing: resolved.missing, total: resolved.total }
+          },
+          'opened:pick': async (_event, mode) => {
+            /*
+             * mode='folder' 时选目录，否则选文件。
+             * 多选与"不建索引"都在 openedFiles.resolve 里统一处理；
+             * 这里只负责把系统对话框的结果变成路径 —— 不做确认框（需求：拖 10 个也不要弹确认）。
+             */
+            const folder = mode === 'folder'
+            const result = await dialog.showOpenDialog({
+              title: folder ? '打开文件夹' : '打开文件',
+              properties: folder ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections'],
+              filters: folder ? undefined : [{ name: '音频文件', extensions: ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'oga', 'opus', 'aac', 'wma', 'aiff', 'aif'] }]
+            })
+            if (result.canceled || !result.filePaths.length) return { action: 'cancelled' }
+            return ctx.get('openedFiles').resolve(result.filePaths)
+          },
+          /* 供自检使用：直接给一批路径，走与拖放/双击完全相同的解析链路 */
+          'opened:resolve': (_event, paths) => ctx.get('openedFiles').resolve(paths)
+        }
+      : {}),
     'shell:open-external': (_event, url) => {
       if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url)
       return true

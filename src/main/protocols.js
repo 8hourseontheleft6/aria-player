@@ -172,9 +172,17 @@ function registerMediaHandler (ctx) {
       return new Response('Bad Request', { status: 400, headers: CORS_HEADERS })
     }
 
-    // 只允许播放用户已加入资料库的目录内的文件
+    /*
+     * 白名单：**两个产品各有一套，但都不放开整个磁盘**。
+     *   · 本体：只允许资料库目录内的文件（行为与改动前完全一致）
+     *   · player：没有资料库，就只允许"用户真的打开过"的文件（openedFiles 记着）
+     * 少了 player 这一支会怎样：media:// 一律 403，音频加载失败、播放状态直接变 error ——
+     * 第 3 步的自检第一次跑就是这么红的（拖进去 10 首、队列里 10 条，但一首也放不出来）。
+     */
     const roots = ctx.has('library') ? ctx.get('library').getAllowedRoots() : []
-    if (!isInsideRoots(filePath, roots)) {
+    const opened = ctx.has('openedFiles') ? ctx.get('openedFiles') : null
+    const permitted = isInsideRoots(filePath, roots) || Boolean(opened && opened.isAllowed(filePath))
+    if (!permitted) {
       return new Response('Forbidden', { status: 403, headers: CORS_HEADERS })
     }
 

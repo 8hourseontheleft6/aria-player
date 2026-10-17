@@ -16,6 +16,8 @@ const EVENT_CHANNELS = new Set([
   'window:maximized',
   'media:command',
   'theme:changed',
+  /* player 档位：双击文件 / 拖到 Dock / 第二个实例带来的曲目（主进程解析好后推过来） */
+  'opened:incoming',
   // 在线音源下载进度（主进程按 uid 推送）
   'sources:download-progress',
   // 最小化 / 收进托盘时通知渲染层释放后台占用，回来时通知恢复
@@ -72,6 +74,22 @@ contextBridge.exposeInMainWorld('aria', {
     /** 最小化 / 收进托盘的释放与恢复通知（payload: { phase: 'release' | 'resume' }） */
     onBackgroundChange: (handler) => on('app:background', handler)
   },
+
+  /*
+   * player 档位专属：打开文件 / 打开文件夹 / 最近打开。
+   *
+   * 只在**真的没有资料库能力的档位**里出现 —— 主进程那边这些频道同样只在这种档位注册。
+   * 渲染层用 `if (window.aria.opened)` 判断入口显不显示（问能力，不问身份）。
+   */
+  opened: profile.capabilities && profile.capabilities.library === false
+    ? {
+        recent: () => ipcRenderer.invoke('opened:recent'),
+        pick: (mode) => ipcRenderer.invoke('opened:pick', mode),
+        resolve: (paths) => ipcRenderer.invoke('opened:resolve', paths),
+        /* 双击文件 / 拖到 Dock / 第二个实例带来的路径：主进程解析好后推过来 */
+        onIncoming: (handler) => on('opened:incoming', handler)
+      }
+    : undefined,
 
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
