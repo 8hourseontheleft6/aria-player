@@ -68,6 +68,22 @@
   pointer-events: none;
 }
 
+/*
+ * 背景模糊图之上叠一层**同一个 --tint** 的色调。
+ *
+ * 为什么要有它：模糊图是封面自己的颜色，光晕与示波器读的是 --tint。
+ * 两者都来自同一张封面时基本一致，但取样会压暗/加饱和（否则太浅太灰），
+ * 于是就出现"背景偏某色、光晕偏另一色"的脏感。这层 30% 的色调把它们拉到同一色系，
+ * 又不至于把封面本身糊掉（父层 opacity 0.55，最终很淡）。
+ */
+.now-playing__art-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--tint) 30%, transparent);
+  pointer-events: none;
+}
+
 .now-playing__veil {
   position: absolute;
   inset: 0;

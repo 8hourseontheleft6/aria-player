@@ -104,7 +104,7 @@ async function main () {
     store,
     services: { engine, playlist, remote }
   })
-  const artwork = createArtworkService({ bus, host })
+  const artwork = createArtworkService({ bus, host, store })
 
   registerBuiltinModes(host)
   /*
@@ -1059,6 +1059,19 @@ async function main () {
     store.set((state) => ({ ...state, theme: resolved }))
   }
 
+  /**
+   * 用当前设置给"正在播放的那首"重新取一次主题色。
+   * 只在「主题色来源」这个设置变化时调用 —— 换歌时由 player-controller 自己取。
+   */
+  function retintCurrentTrack () {
+    const state = store.get()
+    const track = state.playback.trackId ? state.library.byId.get(state.playback.trackId) : null
+    if (!track) return
+    artwork.resolveColor(track)
+      .then((color) => { if (color) artwork.applyTint(color) })
+      .catch(() => { /* 取色失败就保持现有颜色，不打断播放 */ })
+  }
+
   function applySettings (settings) {
     store.set((state) => ({ ...state, settings: { ...state.settings, ...settings } }))
     applyTheme(settings.theme)
@@ -1069,6 +1082,11 @@ async function main () {
     engine.setPreservesPitch(settings.preservesPitch)
     // 均衡器设置变了就落到引擎（自动模式下按当前曲目挑预设）
     actions.applyEqualizer()
+    /*
+     * 主题色来源（封面 / 稳定配色）变了：立刻重新取色。
+     * 不重新取的话要等下一首歌才生效 —— 用户会以为这个开关坏了。
+     */
+    if (settings.tintSource) retintCurrentTrack()
   }
 
   mediaQuery.addEventListener('change', () => {

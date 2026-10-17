@@ -45,7 +45,7 @@ function rgbToHsl (r, g, b) {
   return { h: h * 360, s, l }
 }
 
-export function createArtworkService ({ bus, host = null }) {
+export function createArtworkService ({ bus, host = null, store = null }) {
   /** @type {Map<string, {url: string, blob: boolean}>} */
   const urlCache = new Map()
   /** @type {Map<string, {tint: string, tint2: string}>} */
@@ -177,85 +177,133 @@ export function createArtworkService ({ bus, host = null }) {
     return task
   }
 
-  /** 用 canvas 从封面图取主色调（受 CORS 限制失败时回退到由专辑名生成的稳定配色） */
+  /**
+   * 主题色的**唯一来源**。
+   *
+   * 用户要求"背景、示波器、选项框选中态、光晕必须跟随同一个颜色来源" ——
+   * 这些位置读的都是 CSS 变量 --tint / --tint-2（见 applyTint），所以只要这里只有一条出口，
+   * 它们就必然同色系。两档由设置决定：
+   *   cover   → 从封面取样（默认）
+   *   palette → 「艺人|专辑」哈希出的稳定配色
+   * 取不到色 / 过灰 / 过白时 resolveCoverColor 内部回退到 palette，所以这里不用再兜。
+   */
   async function resolveColor (track) {
-    /*
-     * 默认就用「稳定的随机色」，**不再从封面取样**（用户偏好）：
-     * 封面取色常常发灰发白（大面积白底/灰摄影），不同专辑之间的观感也不稳定；
-     * 由「艺人|专辑」哈希出来的颜色反而更整齐，而且是稳定的（同一张专辑恒定）。
-     *
-     * 下面那段 canvas 取样的实现保留着，将来若要提供「按封面取色」可以直接接回来。
-     */
-    return fallbackColor(track)
+    const source = store ? store.get().settings.tintSource : 'cover'
+    if (source === 'palette') return fallbackColor(track)
+    return resolveCoverColor(track)
   }
 
-  /** 保留：按封面取主色（当前默认不走这里） */
+  /**
+   * 按封面取主色（默认路径）。
+   *
+   * 三个必须：
+   *   · **稳定**：缓存键用 artworkKey(track)（`e:艺人|专辑` / `f:路径`），
+   *     不能用 blob URL —— 那东西每次加载都不同，按它缓存等于没缓存。
+   *   · **不卡**：同一个 key 的并发取样只做一次（inFlight）；失败也缓存（负缓存），不反复重试。
+   *   · **只在内存里做**：canvas + Image，没有任何磁盘写入 —— player 档不能生成封面缓存目录。
+   */
   async function resolveCoverColor (track) {
-    const url = await resolveUrl(track)
-    if (!url) return fallbackColor(track)
-    if (colorCache.has(url)) return colorCache.get(url)
+    const key = artworkKey(track)
+    if (!key) return fallbackColor(track)
+    const cached = colorCache.get(key)
+    if (cached) return cached
+    const flightKey = 'color:' + key
+    if (inFlight.has(flightKey)) return inFlight.get(flightKey)
 
-    try {
-      const image = new Image()
-      image.crossOrigin = 'anonymous'
-      await new Promise((resolve, reject) => {
-        image.onload = resolve
-        image.onerror = () => reject(new Error('封面加载失败'))
-        image.src = url
-        setTimeout(() => reject(new Error('封面加载超时')), 8000)
-      })
+    const task = (async () => {
+      const url = await resolveUrl(track)
+      if (!url) return rememberColor(key, fallbackColor(track))
 
-      const size = 18
-      const canvas = document.createElement('canvas')
-      canvas.width = size
-      canvas.height = size
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })
-      ctx.drawImage(image, 0, 0, size, size)
-      const { data } = ctx.getImageData(0, 0, size, size)
+      try {
+        const image = new Image()
+        image.crossOrigin = 'anonymous'
+        await new Promise((resolve, reject) => {
+          image.onload = resolve
+          image.onerror = () => reject(new Error('封面加载失败'))
+          image.src = url
+          setTimeout(() => reject(new Error('封面加载超时')), 8000)
+        })
 
-      let rSum = 0
-      let gSum = 0
-      let bSum = 0
-      let weight = 0
-      let hueX = 0
-      let hueY = 0
+        const size = 18
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        ctx.drawImage(image, 0, 0, size, size)
+        const { data } = ctx.getImageData(0, 0, size, size)
 
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i + 3] < 128) continue
-        const { h, s, l } = rgbToHsl(data[i], data[i + 1], data[i + 2])
-        if (l < 0.14 || l > 0.92) continue
-        const w = 0.25 + s * s
-        const rad = (h * Math.PI) / 180
-        hueX += Math.cos(rad) * w
-        hueY += Math.sin(rad) * w
-        weight += w
-        rSum += data[i] * w
-        gSum += data[i + 1] * w
-        bSum += data[i + 2] * w
+        let sSum = 0
+        let lSum = 0
+        let weight = 0
+        let hueX = 0
+        let hueY = 0
+
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 128) continue
+          const { h, s, l } = rgbToHsl(data[i], data[i + 1], data[i + 2])
+          /* 跳过近黑与近白的像素：它们对"这张专辑是什么颜色"没有发言权 */
+          if (l < 0.14 || l > 0.92) continue
+          const w = 0.25 + s * s
+          const rad = (h * Math.PI) / 180
+          hueX += Math.cos(rad) * w
+          hueY += Math.sin(rad) * w
+          weight += w
+          /*
+           * 直接累加**每个像素自己的**饱和度/亮度，而不是先把 RGB 平均再转 HSL。
+           * 后者是错的：一张红绿蓝都有的彩色封面，RGB 平均下来就是灰的 ——
+           * 「取出来的颜色偏浅发灰」（旧注释里那句用户反馈）和这次的质量门误判都是它造成的。
+           */
+          sSum += s * w
+          lSum += l * w
+        }
+
+        if (!weight) throw new Error('封面缺少可用像素')
+        const hue = ((Math.atan2(hueY, hueX) * 180) / Math.PI + 360) % 360
+        const sampled = { s: sSum / weight, l: lSum / weight }
+        /*
+         * 整体质量门（用户要求：取样失败、**过灰**、**过白**时回退到稳定配色）。
+         * 逐像素门只去掉黑白像素；一整张灰白摄影仍会算出 s≈0.05 / l≈0.8 的"颜色"，
+         * 那种颜色铺到光晕与示波器上就是一层脏灰。这里直接回退。
+         */
+        /*
+         * 整体质量门（用户要求：取样失败、**过灰**、**过白**时回退到稳定配色）。
+         * 逐像素门已经去掉近黑/近白像素；这里再看整张图的平均饱和与平均亮度：
+         *   · 平均饱和 < 0.12 —— 黑白摄影 / 灰底封面，怎么取都是脏灰；
+         *   · 平均亮度 > 0.85 —— 大面积白底，取出来铺到光晕上会发光过度；
+         *   · 平均亮度 < 0.08 —— 全黑封面。
+         * 三种都回退，并且**缓存**这次回退（负缓存），不反复重试同一张图。
+         */
+        if (sampled.s < 0.12 || sampled.l > 0.85 || sampled.l < 0.08) {
+          return rememberColor(key, fallbackColor(track))
+        }
+
+        return rememberColor(key, makeColor(
+          hue,
+          // 比取样值更深、更实一点：浅色封面取出来的颜色铺在光晕上会发飘
+          Math.min(90, Math.max(54, sampled.s * 122)),
+          Math.min(60, Math.max(38, sampled.l * 86))
+        ))
+      } catch {
+        /* 加载失败 / 超时 / 取不到像素：负缓存，避免每次切歌都重试同一张坏封面 */
+        return rememberColor(key, fallbackColor(track))
       }
+    })()
 
-      if (!weight) throw new Error('封面缺少可用像素')
-      const hue = ((Math.atan2(hueY, hueX) * 180) / Math.PI + 360) % 360
-      const r = Math.round(rSum / weight)
-      const g = Math.round(gSum / weight)
-      const b = Math.round(bSum / weight)
-      const hsl = rgbToHsl(r, g, b)
-
-      const color = makeColor(
-        hue,
-        // 比之前更深、更实一点：用户反馈取出来的颜色偏浅、发灰
-        Math.min(90, Math.max(54, hsl.s * 122)),
-        Math.min(60, Math.max(38, hsl.l * 86))
-      )
-      colorCache.set(url, color)
-      if (colorCache.size > 64) colorCache.delete(colorCache.keys().next().value)
-      return color
-    } catch {
-      const fallback = fallbackColor(track)
-      colorCache.set(url, fallback)
-      return fallback
+    inFlight.set(flightKey, task)
+    try {
+      return await task
+    } finally {
+      inFlight.delete(flightKey)
     }
   }
+
+  /** 写入颜色缓存（带容量上限），返回同一个颜色对象 */
+  function rememberColor (key, color) {
+    colorCache.set(key, color)
+    if (colorCache.size > 64) colorCache.delete(colorCache.keys().next().value)
+    return color
+  }
+
 
   /** 把配色写进 CSS 变量 */
   function applyTint (color) {

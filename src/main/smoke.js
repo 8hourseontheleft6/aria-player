@@ -1857,6 +1857,159 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       return { hasUrl: Boolean(url), tint: getComputedStyle(document.documentElement).getPropertyValue('--tint').trim() }`)
     record('封面与配色', Boolean(tintResult.tint), `--tint = ${tintResult.tint}${tintResult.hasUrl ? '' : '（无封面，使用回退配色）'}`)
 
+    /*
+     * 配色统一（用户点名的验收）：--tint、设置页选中态、示波器必须**同色系**。
+     *
+     * 三者读的都是同一个 CSS 变量 --tint，所以这条检查同时证明两件事：
+     *   ① 只有一条出口（换来源时三者一起变，不会有一个掉队）；
+     *   ② 换来源/换歌后颜色确实跟着走。
+     * 另外验"无封面时回退"：封面档与稳定配色对同一首无封面曲目给出同一个颜色。
+     *
+     * 这里的颜色解析**不用正则**（注入模板里的转义很容易踩坑）：按分隔符拆字符串。
+     */
+    const tintUnity = await evaluate(win, `
+      const { artwork, player } = window.__aria
+      const root = document.documentElement
+      const hueOf = (text) => {
+        if (!text) return null
+        let r
+        let g
+        let b
+        if (text.startsWith('hsl')) {
+          const parts = text.slice(text.indexOf('(') + 1, text.indexOf(')')).split(/[,\\s]+/)
+          return Number(parts[0])
+        }
+        if (text.includes('srgb')) {
+          const parts = text.slice(text.indexOf('srgb') + 4, text.indexOf(')', text.indexOf('srgb'))).trim().split(' ')
+          r = Number(parts[0]) * 255
+          g = Number(parts[1]) * 255
+          b = Number(parts[2]) * 255
+        } else {
+          const open = text.indexOf('(')
+          if (open < 0) return null
+          const parts = text.slice(open + 1, text.indexOf(')', open)).split(',').map((piece) => Number(piece.trim().split(' ')[0]))
+          r = parts[0]
+          g = parts[1]
+          b = parts[2]
+        }
+        if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null
+        const rn = r / 255
+        const gn = g / 255
+        const bn = b / 255
+        const max = Math.max(rn, gn, bn)
+        const min = Math.min(rn, gn, bn)
+        const d = max - min
+        if (d < 0.02) return null
+        let h
+        if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6
+        else if (max === gn) h = ((bn - rn) / d + 2) / 6
+        else h = ((rn - gn) / d + 4) / 6
+        return h * 360
+      }
+      const gap = (a, b) => {
+        if (a == null || b == null) return 999
+        const d = Math.abs(a - b) % 360
+        return d > 180 ? 360 - d : d
+      }
+      const snapshot = () => {
+        const nav = document.querySelector('.settings-nav__item.is-active')
+        const viz = document.querySelector('.visualizer')
+        const tintText = getComputedStyle(root).getPropertyValue('--tint').trim()
+        return {
+          tintText,
+          tint: hueOf(tintText),
+          nav: hueOf(nav ? getComputedStyle(nav).backgroundColor : ''),
+          viz: hueOf(viz ? getComputedStyle(viz).backgroundImage : '')
+        }
+      }
+      const apply = async (source, track) => {
+        window.__aria.store.set((state) => ({ ...state, settings: { ...state.settings, tintSource: source } }))
+        const color = await artwork.resolveColor(track)
+        if (!color) return null
+        artwork.applyTint(color)
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+        return color
+      }
+
+      const track = player.currentTrack()
+      /*
+       * 诊断：封面档到底有没有真的取到色。
+       * 取色回退时两档颜色会一样，"换来源"那条就红 —— 这里把回退原因也读出来。
+       */
+      const fallbackColor = artwork.fallbackColor(track)
+      const coverColor = await artwork.resolveCoverColor(track)
+      const coverIsFallback = coverColor.tint === fallbackColor.tint
+      let loadError = ''
+      try {
+        const probeUrl = await artwork.resolveUrl(track)
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        await new Promise((resolve, reject) => {
+          img.onload = resolve
+          img.onerror = () => reject(new Error('onerror'))
+          img.src = probeUrl
+          setTimeout(() => reject(new Error('timeout')), 5000)
+        })
+        const canvas = document.createElement('canvas')
+        canvas.width = 8
+        canvas.height = 8
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        ctx.drawImage(img, 0, 0, 8, 8)
+        ctx.getImageData(0, 0, 8, 8)
+      } catch (err) {
+        loadError = (err && err.message ? err.message : String(err)).slice(0, 60)
+      }
+      const probe = { coverIsFallback, loadError, scheme: String((await artwork.resolveUrl(track) || '').split(':')[0]) }
+
+      const coverShot = await apply('cover', track)
+      const coveredTint = snapshot()
+      const paletteShot = await apply('palette', track)
+      const paletteTint = snapshot()
+      const backToCover = await apply('cover', track)
+      const backTint = snapshot()
+
+      const bare = { id: 'tint-probe-no-cover', title: '无封面探针', artist: 'probe', albumArtist: 'probe', album: 'no-cover', path: '/nonexistent/tint-probe.mp3' }
+      await apply('palette', bare)
+      const barePalette = snapshot()
+      await apply('cover', bare)
+      const bareCover = snapshot()
+      await apply('cover', track)
+
+      return {
+        coveredTint,
+        paletteTint,
+        backTint,
+        barePalette,
+        bareCover,
+        probe,
+        coveredText: coverShot ? coverShot.tint : '',
+        paletteText: paletteShot ? paletteShot.tint : '',
+        backText: backToCover ? backToCover.tint : ''
+      }`)
+
+    const navGap = Math.abs(((tintUnity.coveredTint.tint - (tintUnity.coveredTint.nav ?? 0)) + 540) % 360 - 180)
+    const vizGap = Math.abs(((tintUnity.coveredTint.tint - (tintUnity.coveredTint.viz ?? 0)) + 540) % 360 - 180)
+    record('配色统一：--tint、设置页选中态、示波器同色系（同一个来源）',
+      tintUnity.coveredTint.tint != null && tintUnity.coveredTint.nav != null && tintUnity.coveredTint.viz != null &&
+      navGap <= 12 && vizGap <= 12,
+      `--tint=${tintUnity.coveredTint.tintText}（色相 ${Number(tintUnity.coveredTint.tint).toFixed(0)}）、` +
+      `设置页选中态色相 ${Number(tintUnity.coveredTint.nav).toFixed(0)}（差 ${navGap.toFixed(1)}°）、` +
+      `示波器色相 ${Number(tintUnity.coveredTint.viz).toFixed(0)}（差 ${vizGap.toFixed(1)}°），都应 ≤12°`)
+
+    record('主题色来源切换：三者一起跟着变（封面 → 稳定配色 → 再切回封面）',
+      Boolean(tintUnity.coveredText) && tintUnity.coveredText !== tintUnity.paletteText &&
+      tintUnity.paletteTint.nav != null && tintUnity.paletteTint.viz != null &&
+      Math.abs(((tintUnity.paletteTint.tint - tintUnity.paletteTint.nav) + 540) % 360 - 180) <= 12 &&
+      Math.abs(((tintUnity.paletteTint.tint - tintUnity.paletteTint.viz) + 540) % 360 - 180) <= 12 &&
+      tintUnity.backText === tintUnity.coveredText,
+      `封面档 ${tintUnity.coveredText} / 稳定配色档 ${tintUnity.paletteText} / 切回后 ${tintUnity.backText}；` +
+      `取样诊断：回退=${tintUnity.probe && tintUnity.probe.coverIsFallback}、协议=${tintUnity.probe && tintUnity.probe.scheme}、错误=${(tintUnity.probe && tintUnity.probe.loadError) || '无'}；` +
+      `稳定配色档里 选中态色相 ${Number(tintUnity.paletteTint.nav).toFixed(0)}、示波器色相 ${Number(tintUnity.paletteTint.viz).toFixed(0)}`)
+
+    record('无封面曲目：封面档回退到稳定配色（同一个颜色，不闪白不报错）',
+      Boolean(tintUnity.bareCover.tintText) && tintUnity.bareCover.tintText === tintUnity.barePalette.tintText,
+      `无封面时：封面档 ${tintUnity.bareCover.tintText} / 稳定配色档 ${tintUnity.barePalette.tintText}（应相同）`)
+
     // media:// 协议：Range 支持与 CORS 头（seek 与 WebAudio 接入点都依赖它们）
     const protocolResult = await evaluate(win, `
       const track = window.__aria.player.currentTrack()

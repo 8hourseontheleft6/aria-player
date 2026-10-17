@@ -10,6 +10,11 @@ import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
 import { createPillSelect } from '../widgets/pill-menu.js'
 import { visualizerChoices } from '../widgets/visualizer.js'
 
+const TINT_SOURCES = [
+  { id: 'cover', label: '封面' },
+  { id: 'palette', label: '稳定配色' }
+]
+
 const THEMES = [
   { id: 'system', label: '跟随系统' },
   { id: 'light', label: '浅色' },
@@ -640,6 +645,16 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       row({
         title: '主题',
         control: segmented(THEMES, settings.theme, (theme) => actions.setTheme(theme))
+      }),
+      /*
+       * 主题色来源：背景、光晕、示波器、选项框选中态读的都是 --tint，
+       * 所以这一个开关同时决定它们四个的颜色来源。
+       */
+      row({
+        title: '主题色来源',
+        sub: '封面：从当前封面上取主色（同一张专辑恒定，取不到色或过灰过白时自动回退）。稳定配色：按「艺人|专辑」哈希，颜色一定整齐。',
+        control: segmented(TINT_SOURCES, settings.tintSource || 'cover',
+          (value) => actions.setSetting({ tintSource: value }))
       }),
       row({
         title: '在列表中显示封面',

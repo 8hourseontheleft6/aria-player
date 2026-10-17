@@ -13,6 +13,13 @@ const DEFAULTS = {
   version: 1,
   folders: [],
   theme: 'system',
+  /*
+   * 主题色来源（--tint）：
+   *   cover   —— 从当前封面取样（默认）。背景模糊图、底部光晕、示波器、选项框选中态，
+   *              全都读 --tint，所以它们自动同一色系。
+   *   palette —— 由「艺人|专辑」哈希出的稳定配色（不联网、不看封面，颜色一定整齐）。
+   */
+  tintSource: 'cover',
   volume: 0.85,
   muted: false,
   playbackRate: 1,
