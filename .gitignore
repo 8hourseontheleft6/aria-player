@@ -17,3 +17,6 @@ tmp-*
 # 打包产物（npm run dist）
 release/
 .tmp/
+
+# Aria Player build output (second product, npm run dist:player)
+release-player/
