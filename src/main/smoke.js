@@ -440,6 +440,227 @@ async function runSecondInstanceCheck ({ win, profile, record, raiseInfo, mediaD
 }
 
 /**
+ * 真实拖动自检（不止 movable=true）。
+ *
+ * 做法：用 PowerShell 的 `[Cursor]::Position` 把**系统光标**真的挪到标题栏上，
+ * 再在渲染层派发 pointerdown（走真实的 pointerdown → preload → IPC → beginWindowDrag 链路），
+ * 然后把光标再挪 80px，断言窗口的位置/尺寸真的跟着变了。
+ *
+ * 为什么要动真光标：拖动循环读的是 screen.getCursorScreenPoint()（不是 mousemove），
+ * 不移动系统光标就根本证明不了"拖得动"。PowerShell 用 stdio:'ignore' 拉起、不 detach
+ * （实测 detach+unref 会让它不生效），每次约 0.6~0.9s。
+ */
+async function runRealDragChecks ({ win, record }) {
+  const { screen } = require('electron')
+  const { spawn } = require('node:child_process')
+  const windowApi = require('./window')
+
+  const moveCursor = (x, y, winForFocus) => {
+    const script = 'Add-Type -AssemblyName System.Windows.Forms; ' +
+      `[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${Math.round(x)}, ${Math.round(y)})`
+    try {
+      // 不 detach、不 unref：detached 的 PowerShell 实测不会真正移动光标
+      spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        stdio: 'ignore',
+        windowsHide: true
+      })
+    } catch (err) {
+      console.warn('  · 移动光标失败：', err && err.message)
+    }
+    /*
+     * PowerShell 会把前台抢走一下。应用有"长时间不在前台就释放媒体墙/停监听"的逻辑，
+     * 一旦被这条逻辑命中，后面的媒体墙检查会全部读到 0 个格子。所以每次挪完光标都把焦点抢回来。
+     */
+    setTimeout(() => {
+      try {
+        if (winForFocus && !winForFocus.isDestroyed()) winForFocus.focus()
+      } catch { /* 忽略 */ }
+    }, 550)
+  }
+
+  const originalCursor = screen.getCursorScreenPoint()
+
+  /** 把某个元素（或点）换算成屏幕坐标 */
+  const screenPointOf = async (selector) => {
+    const rect = await evaluate(win, `
+      const node = document.querySelector(${JSON.stringify(selector)})
+      if (!node) return null
+      const r = node.getBoundingClientRect()
+      return { x: r.left, y: r.top, width: r.width, height: r.height }`)
+    if (!rect) return null
+    const bounds = win.getBounds()
+    return {
+      domX: rect.x + rect.width / 2,
+      domY: rect.y + rect.height / 2,
+      screenX: bounds.x + rect.x + rect.width / 2,
+      screenY: bounds.y + rect.y + rect.height / 2,
+      rect
+    }
+  }
+
+  /** 在元素上按下去 */
+  const press = async (selector) => evaluate(win, `
+    const node = document.querySelector(${JSON.stringify(selector)})
+    if (!node) return false
+    const r = node.getBoundingClientRect()
+    const x = r.left + r.width / 2
+    const y = r.top + Math.min(r.height - 2, Math.max(6, r.height / 2))
+    node.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0,
+      bubbles: true,
+      clientX: x,
+      clientY: y
+    }))
+    return true`)
+
+  /*
+   * 一次完整的拖动：挪光标到位 → 按下 → 光标再挪 (dx,dy) → 断言窗口变化 → 松手。
+   */
+  const drag = async ({ selector, dx, dy, label }) => {
+    win.unmaximize()
+    win.setBounds({ x: 240, y: 200, width: 1100, height: 740 })
+    await sleep(500)
+    const point = await screenPointOf(selector)
+    if (!point) return { ok: false, reason: `没找到 ${selector}` }
+    moveCursor(point.screenX, point.screenY, win)
+    await sleep(900)
+    const before = win.getBounds()
+    const pressed = await press(selector)
+    await sleep(350)
+    moveCursor(point.screenX + dx, point.screenY + dy, win)
+    await sleep(900)
+    const after = win.getBounds()
+    windowApi.endWindowDrag()
+    await evaluate(win, `window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })); return true`)
+    await sleep(250)
+    return { ok: pressed, before, after, deltaX: after.x - before.x, deltaY: after.y - before.y, label }
+  }
+
+  /* ① 标题栏左侧（应用名区域）向下拖 80px */
+  const left = await drag({ selector: '.titlebar__app', dx: 0, dy: 80 })
+  record('普通窗口：按标题栏**左侧（应用名）**拖 80px，窗口真的跟着动',
+    left.ok === true && left.deltaY >= 50 && Math.abs(left.deltaX) <= 3,
+    left.ok
+      ? `位置 ${left.before.x},${left.before.y} → ${left.after.x},${left.after.y}（Δx=${left.deltaX}, Δy=${left.deltaY}，期望 Δy≥50）`
+      : `没能按下（${left.reason || 'unknown'}）`,
+    { profiles: ['full', 'player'] })
+
+  /* ② 标题栏右侧空白向右拖 80px */
+  const right = await drag({ selector: '.titlebar__spacer', dx: 80, dy: 0 })
+  record('普通窗口：按标题栏**右侧空白**拖 80px，窗口真的跟着动',
+    right.ok === true && right.deltaX >= 50 && Math.abs(right.deltaY) <= 3,
+    right.ok
+      ? `位置 ${right.before.x},${right.before.y} → ${right.after.x},${right.after.y}（Δx=${right.deltaX}, Δy=${right.deltaY}，期望 Δx≥50）`
+      : `没能按下（${right.reason || 'unknown'}）`,
+    { profiles: ['full', 'player'] })
+
+  /* ②b 标题栏正中（灵动岛的空隙）：以前这块是"拖不动"的死区 */
+  win.unmaximize()
+  win.setBounds({ x: 240, y: 200, width: 1100, height: 740 })
+  await sleep(500)
+  const islandPoint = await (async () => {
+    const box = await evaluate(win, `
+      const node = document.querySelector('.island')
+      if (!node) return null
+      const r = node.getBoundingClientRect()
+      /* 灵动岛框内的左上角空隙：不是任何 .island__item 的地方 */
+      return { x: r.left + 6, y: r.top + 4, width: r.width, height: r.height }`)
+    if (!box) return null
+    const bounds = win.getBounds()
+    return { domX: box.x, domY: box.y, screenX: bounds.x + box.x, screenY: bounds.y + box.y }
+  })()
+  let islandDrag = { ok: false }
+  if (islandPoint) {
+    moveCursor(islandPoint.screenX, islandPoint.screenY, win)
+    await sleep(900)
+    const beforeIsland = win.getBounds()
+    const pressedIsland = await evaluate(win, `
+      const node = document.elementFromPoint(${islandPoint.domX}, ${islandPoint.domY})
+      if (!node) return false
+      node.dispatchEvent(new PointerEvent('pointerdown', {
+        button: 0,
+        bubbles: true,
+        clientX: ${islandPoint.domX},
+        clientY: ${islandPoint.domY}
+      }))
+      return true`)
+    await sleep(350)
+    moveCursor(islandPoint.screenX, islandPoint.screenY + 70, win)
+    await sleep(900)
+    const afterIsland = win.getBounds()
+    windowApi.endWindowDrag()
+    await evaluate(win, `window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })); return true`)
+    await sleep(250)
+    islandDrag = {
+      ok: pressedIsland,
+      before: beforeIsland,
+      after: afterIsland,
+      deltaY: afterIsland.y - beforeIsland.y
+    }
+  }
+  record('普通窗口：按标题栏**正中（灵动岛空隙）**拖 70px，也能拖动（这里以前是死区）',
+    islandDrag.ok === true && islandDrag.deltaY >= 40,
+    islandDrag.ok
+      ? `位置 ${islandDrag.before.x},${islandDrag.before.y} → ${islandDrag.after.x},${islandDrag.after.y}（Δy=${islandDrag.deltaY}，期望 ≥40）`
+      : '没能按下（灵动岛不在？）',
+    { profiles: ['full', 'player'] })
+
+  /* ③ 窗口最上 4px：拖动是改高度（缩放），不是移动 */
+  win.unmaximize()
+  win.setBounds({ x: 260, y: 220, width: 1100, height: 740 })
+  await sleep(500)
+  const topPoint = {
+    domX: 550,
+    domY: 2,
+    screenX: win.getBounds().x + 550,
+    screenY: win.getBounds().y + 2
+  }
+  moveCursor(topPoint.screenX, topPoint.screenY, win)
+  await sleep(900)
+  const beforeTop = win.getBounds()
+  const pressedTop = await evaluate(win, `
+    const node = document.elementFromPoint(550, 2)
+    if (!node) return { ok: false, cls: '' }
+    const cls = node.className || ''
+    node.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0,
+      bubbles: true,
+      clientX: 550,
+      clientY: 2
+    }))
+    return { ok: true, cls: String(cls) }`)
+  await sleep(350)
+  moveCursor(topPoint.screenX, topPoint.screenY + 70, win)
+  await sleep(900)
+  const afterTop = win.getBounds()
+  windowApi.endWindowResize()
+  require('./window').endWindowDrag()
+  await evaluate(win, `window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })); return true`)
+  await sleep(250)
+  record('窗口最上 4px：拖动是**缩放**（高度变了），不是移动窗口',
+    pressedTop.ok === true && String(pressedTop.cls).includes('resize-handle') &&
+    Math.abs(afterTop.width - beforeTop.width) <= 2 &&
+    beforeTop.height - afterTop.height >= 40,
+    `按下命中的是「${String(pressedTop.cls)}」；高度 ${beforeTop.height} → ${afterTop.height}` +
+    `（减少 ${beforeTop.height - afterTop.height}，期望 ≥40）、宽度 ${beforeTop.width} → ${afterTop.width}（不应变）`,
+    { profiles: ['full', 'player'] })
+
+  /* 收尾：还原光标与窗口几何，并把焦点抢回窗口 */
+  moveCursor(originalCursor.x, originalCursor.y, win)
+  if (win.isMaximized()) win.unmaximize()
+  win.setBounds({ x: 240, y: 200, width: 1100, height: 740 })
+  /*
+   * 每次拉 PowerShell 都会把前台抢走一下。自检跑在窗口里，长期在后台会触发应用自己的
+   * "长时间不在前台"逻辑（停目录监听、释放媒体墙与封面缓存）—— 后面的检查就会撞上
+   * "媒体墙 0 个格子"。所以这里必须把焦点还回来。
+   */
+  win.show()
+  win.focus()
+  await sleep(600)
+}
+
+
+/**
  * 窗口几何与"最大化后拖不动"的回归（两个产品共用）。
  *
  *  ① 保存/恢复时按工作区夹紧：给一个超出工作区的 bounds（实测 player 存过 1298x871 / 工作区高 866），
@@ -552,6 +773,9 @@ async function runWindowChecks ({ win, record }) {
     `右下角把手命中=${handleHit}；尺寸 ${beforeResize.width}x${beforeResize.height} → ` +
     `${afterResize.width}x${afterResize.height}（位置 ${afterResize.x},${afterResize.y}）`,
     { profiles: ['full', 'player'] })
+
+  /* 真实拖动（挪系统光标让窗口真的跟着动） */
+  await runRealDragChecks({ win, record })
 
   /* 普通窗口可拖可缩放（无边框窗口靠这两项开关，被关掉就"拖不动/改不了大小"） */
   record('普通窗口可移动、可缩放',
@@ -3630,9 +3854,14 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       const parts = match[1].split(',').map((value) => Number(value.trim()))
       return parts.length >= 4 ? parts[3] : 1
     }
-    record('灵动岛：这块区域能拖窗口，深色下也看得见',
-      islandSurface.hidden.region === 'drag' &&
-      islandSurface.shown.region === 'drag' &&
+    record('灵动岛：这块区域也能拖窗口（走 JS，不再依赖 app-region），深色下也看得见',
+      /*
+       * 不变量变了：这条以前断言灵动岛的 -webkit-app-region 是 drag（靠系统原生拖动）。
+       * 现在拖动统一成 JS（标题栏一律 no-drag），所以断言 no-drag；
+       * 而"这块区域真的能拖"由 runRealDragChecks 的真拖来证明，不是靠样式猜。
+       */
+      islandSurface.hidden.region === 'no-drag' &&
+      islandSurface.shown.region === 'no-drag' &&
       islandSurface.shown.itemRegion === 'no-drag' &&
       islandSurface.shown.opacity === '1' &&
       alphaOf(islandSurface.dark.background) >= 0.2 &&
@@ -8704,6 +8933,16 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
     // 恢复默认：在线功能保持关闭
     settingsService.set({ onlineFeatures: false })
     await sleep(200)
+
+    /*
+     * 窗口几何与真实拖动：打了 full/player 标记，就必须在本体里也真跑一遍。
+     * **必须放在整套的最末尾**：它会拉起 PowerShell 挪系统光标，那会抢走前台，
+     * 一旦插在中间就会让应用判定"长时间不在前台"而释放媒体墙，后面那些媒体墙检查全读 0。
+     */
+    await runWindowChecks({ win, record })
+    win.show()
+    win.focus()
+    await sleep(500)
   } catch (err) {
     record('执行过程', false, err.message)
   }

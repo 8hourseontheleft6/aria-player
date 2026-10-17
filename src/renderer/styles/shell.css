@@ -79,7 +79,14 @@ html[data-platform="darwin"] {
   align-items: center;
   gap: 12px;
   padding: 0 14px;
-  -webkit-app-region: drag;
+  /*
+   * 拖动**不再交给系统**（-webkit-app-region: drag）。
+   *
+   * 用户反馈普通窗口拖不动，而双击（我们自己的 JS）好用 —— 坏的正是 native drag 这条路。
+   * 现在标题栏一律 no-drag，按下事件到渲染层，由 titlebar.js 调 window:begin-drag
+   * （普通窗口按像素偏移跟随、最大化先还原再按比例跟随，见 main/window.js）。
+   */
+  -webkit-app-region: no-drag;
   position: relative;
   z-index: 20;
 }
@@ -89,17 +96,13 @@ html[data-platform="darwin"] .titlebar {
 }
 
 /*
- * 最大化时把拖拽区交还给渲染层。
- *
- * 无边框窗口最大化之后，Windows 会吃掉 `-webkit-app-region: drag` 的原生拖动 ——
- * 用户按着标题栏拖没有任何反应（只能双击还原或点还原按钮）。这就是「最大化后拖不动」。
- * 改成 no-drag 之后 pointerdown 能到达渲染层，由 titlebar.js 调主进程：
- * 先 unmaximize，再按光标位置驱动窗口移动。
+ * 标题栏里这几块都参与拖动（由 JS 统一处理），显式写出来是为了下次改样式时不会
+ * 顺手把它们设回 drag —— 一旦有一块回到 drag，那里就会重新变成"拖了没反应"。
  */
-body.is-maximized .titlebar,
-body.is-maximized .titlebar__spacer,
-body.is-maximized .titlebar__left,
-body.is-maximized .titlebar__app {
+.titlebar__left,
+.titlebar__app,
+.titlebar__spacer,
+.island {
   -webkit-app-region: no-drag;
 }
 
@@ -117,7 +120,7 @@ body.is-maximized .titlebar__app {
 .titlebar__spacer {
   flex: 1;
   min-width: 12px;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
 .titlebar__right {
@@ -157,13 +160,10 @@ body.is-maximized .titlebar__app {
   pointer-events: none;
   transition: opacity var(--dur) var(--ease-ios);
   /*
-   * 这一块要能拖窗口。
-   * `.titlebar > *` 把标题栏的所有子元素都设成了 no-drag，于是灵动岛（哪怕隐藏着、
-   * opacity: 0）会在标题栏正中留下一块「拖不动」的死区 —— 用户反馈的
-   * 「鼠标在那一块拖动窗口没反应」就是这个。这里显式改回 drag，
-   * 只有里面的分段按钮保持 no-drag。
+   * 这一块要能拖窗口 —— 但拖动由 JS 统一处理（见上），所以这里也是 no-drag。
+   * 只要 pointerdown 能到渲染层，标题栏正中就不会再留"拖不动"的死区。
    */
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
 .titlebar > .island__item,
@@ -731,7 +731,13 @@ body.is-maximized .titlebar__app {
 .resize-handles {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  /*
+   * 19 < 标题栏的 20：顶边把手绝不能盖在标题栏上抢走"移动"的按下。
+   * 注：.app 自己是一个层叠上下文（z-index: 1），所以这里 19 仍然在 .app 之上 ——
+   * 左右/下边的把手必须能收到事件（它们被内容区盖住）。真正保证"标题栏里按下=移动"的是
+   * 下面那条：顶部把手只留窗口最外 4px。
+   */
+  z-index: 19;
   pointer-events: none;
 }
 
@@ -745,16 +751,16 @@ body.is-maximized .titlebar__app {
   display: none;
 }
 
+/* 底边留 6px 好抓；**顶边只留 4px** —— 再往里就是标题栏，必须留给"移动" */
 .resize-handle--n,
 .resize-handle--s {
   left: 8px;
   right: 8px;
-  height: 6px;
   cursor: ns-resize;
 }
 
-.resize-handle--n { top: 0; }
-.resize-handle--s { bottom: 0; }
+.resize-handle--n { top: 0; height: 4px; }
+.resize-handle--s { bottom: 0; height: 6px; }
 
 .resize-handle--e,
 .resize-handle--w {
@@ -775,8 +781,9 @@ body.is-maximized .titlebar__app {
   height: 12px;
 }
 
-.resize-handle--ne { top: 0; right: 0; cursor: nesw-resize; }
-.resize-handle--nw { top: 0; left: 0; cursor: nwse-resize; }
+/* 上边两个角：宽度 12px 好抓，高度也只占最外 4px（同一条理由：不能吃标题栏） */
+.resize-handle--ne { top: 0; right: 0; height: 4px; cursor: nesw-resize; }
+.resize-handle--nw { top: 0; left: 0; height: 4px; cursor: nwse-resize; }
 .resize-handle--se { bottom: 0; right: 0; cursor: nwse-resize; }
 .resize-handle--sw { bottom: 0; left: 0; cursor: nesw-resize; }
 

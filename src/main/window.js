@@ -380,16 +380,21 @@ function raiseWindow (win) {
 }
 
 /**
- * 「最大化后拖不动」的兜底：把窗口从最大化状态拖出来。
+ * 拖动窗口（**唯一的拖动实现**）。
  *
- * 为什么需要它：无边框窗口最大化之后，Windows 会吃掉标题栏的拖拽区（`-webkit-app-region: drag`
- * 在最大化状态下不再触发原生拖动），于是用户按着标题栏拖没有任何反应 —— 只能双击还原或点还原按钮。
+ * 为什么不再用 `-webkit-app-region: drag`：用户那边普通窗口拖不动，而双击（我们自己的 JS）
+ * 好用 —— 说明坏的就是 native drag 这条路。现在标题栏所有区域都是 no-drag，
+ * 事件一律到渲染层，由这里驱动：
+ *   · 普通窗口：按**精确偏移**（光标在窗口内的像素位置）算 —— 不能用比例，
+ *     因为标题栏高度只有四十来像素，比例换算会把窗口往下跳一段；
+ *   · 最大化窗口：先 unmaximize，再按**比例**把光标位置映射到还原后的窗口上
+ *     （还原后窗口小了一圈，按比例才能让"光标下面那一点"继续跟着光标）。
  *
- * 做法：最大化时把标题栏的拖拽区改成 no-drag（见 shell.css 的 .is-maximized），
- * 渲染层在 pointerdown 里调这里 —— 先 unmaximize，再**用光标位置**驱动 setPosition，
- * 直到渲染层说松手（pointerup）。光标位置从 screen.getCursorScreenPoint() 读，
- * 不依赖渲染层收到 mousemove（指针移出窗口后就收不到了）。
+ * 光标位置从 screen.getCursorScreenPoint() 读：不依赖渲染层收到 mousemove
+ * （指针移出窗口后就收不到了）。
  */
+const clamp01 = (value, fallback) => (Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback)
+
 let dragLoop = null
 function endWindowDrag () {
   if (dragLoop && dragLoop.timer) clearInterval(dragLoop.timer)
@@ -402,14 +407,12 @@ function beginWindowDrag (win, offset = {}) {
   const wasMaximized = win.isMaximized()
   if (wasMaximized) win.unmaximize()
   const bounds = win.getBounds()
-  /*
-   * 光标在窗口里的相对位置（0~1）。还原之后窗口小了一圈，
-   * 用比例换算能让"光标下面那一点"继续跟着光标，手感接近原生。
-   */
-  const ratioX = Number.isFinite(offset.ratioX) ? Math.min(1, Math.max(0, offset.ratioX)) : 0.5
-  const ratioY = Number.isFinite(offset.ratioY) ? Math.min(1, Math.max(0, offset.ratioY)) : 0.05
-  const grabX = Math.round(bounds.width * ratioX)
-  const grabY = Math.round(bounds.height * ratioY)
+  const grabX = wasMaximized
+    ? Math.round(bounds.width * clamp01(offset.ratioX, 0.5))
+    : Math.round(Number.isFinite(offset.offsetX) ? Math.max(0, Math.min(bounds.width, offset.offsetX)) : bounds.width / 2)
+  const grabY = wasMaximized
+    ? Math.round(bounds.height * clamp01(offset.ratioY, 0.03))
+    : Math.round(Number.isFinite(offset.offsetY) ? Math.max(0, Math.min(bounds.height, offset.offsetY)) : 22)
   const started = Date.now()
   const timer = setInterval(() => {
     if (!dragLoop || win.isDestroyed()) { endWindowDrag(); return }

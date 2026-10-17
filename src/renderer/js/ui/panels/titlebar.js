@@ -206,10 +206,7 @@ export function createTitlebar ({ store, bus, actions }) {
   paintThumb()
 
   /*
-   * 最大化 / 还原的状态同步：
-   *   · titlebar 与 body 加 is-maximized（CSS 据此把拖拽区从 drag 改成 no-drag，
-   *     否则最大化时按下拖动的事件根本到不了渲染层 —— 这就是「最大化后拖不动」的根因）；
-   *   · 按钮换成还原图标 + 「还原」提示。
+   * 最大化 / 还原的状态同步（只影响图标与提示；拖动不再分状态，见下）。
    */
   const applyMaximized = (maximized) => {
     const on = Boolean(maximized)
@@ -222,17 +219,33 @@ export function createTitlebar ({ store, bus, actions }) {
   remote.window.onMaximizedChange((maximized) => applyMaximized(maximized))
 
   /*
-   * 最大化状态下按压标题栏 → 先还原、再跟着光标移动（见 main/window.js 的 beginWindowDrag）。
-   * 非最大化时这一段不生效：CSS 里拖拽区仍是 drag，交给系统原生拖动（手感最好，不去抢）。
+   * 拖动窗口：**唯一的一条路**，普通窗口与最大化窗口都走这里。
+   *
+   * 为什么不再交给 `-webkit-app-region: drag`：用户那边普通窗口拖不动，而双击（我们自己的 JS）
+   * 好用 —— 坏的正是 native drag 这条路。所以标题栏所有区域都改成 no-drag（shell.css），
+   * 按下时把两种信息都交给主进程：
+   *   · offsetX/offsetY：光标在窗口内的**像素**位置（普通状态用它，窗口不会跳）；
+   *   · ratioX/ratioY：光标在标题栏内的**比例**（最大化还原后窗口变小，按比例映射才不跳）。
+   * 主进程按"当前是否最大化"自己选一种（beginWindowDrag 里 wasMaximized 那句）。
    */
   on(element, 'pointerdown', (event) => {
     if (event.button !== 0) return
-    if (event.target.closest('button, .island, input')) return
-    if (!element.classList.contains('is-maximized')) return
+    /*
+     * 只有真正的控件不参与拖动（窗口按钮、灵动岛里的按钮、输入框）。
+     * 以前把整个 .island 排除掉了 —— 那会在标题栏正中留一块"拖不动"的死区
+     * （用户反馈过这件事）。现在灵动岛的空隙也能拖。
+     */
+    if (event.target.closest('button, input, .win-controls')) return
     const rect = element.getBoundingClientRect()
     const ratioX = rect.width ? (event.clientX - rect.left) / rect.width : 0.5
     const ratioY = rect.height ? (event.clientY - rect.top) / rect.height : 0.05
-    Promise.resolve(remote.window.beginDrag({ ratioX, ratioY })).catch(() => {})
+    Promise.resolve(remote.window.beginDrag({
+      ratioX,
+      ratioY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top
+    })).catch(() => {})
+    event.preventDefault()
     const stop = () => {
       Promise.resolve(remote.window.endDrag()).catch(() => {})
       window.removeEventListener('pointerup', stop)
