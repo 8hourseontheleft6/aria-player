@@ -28,29 +28,35 @@ directories:
 # 文件关联指向**自己**（Aria Unified），不是 Aria Player —— 双击音频时由谁接管
 # 取决于用户在系统里把哪个产品设为默认；两个产品各注册各的，互不覆盖。
 # 注意：关联只在安装版（nsis）里写注册表；portable 版不写，这是 electron-builder 的行为。
+#
+# name = **ProgId**，必须是 ASCII：它直接变成注册表键名
+#   HKCU\Software\Classes\<ProgId>            ← 键的默认值 = 菜单里显示的名字（= description）
+#   HKCU\Software\Classes\.mp3\OpenWithProgids ← 值名就是这个 ProgId
+# 以前写成「MP3 音频（Aria Unified）」这种中文，ProgId 里带非 ASCII 会让注册表键名不可预测，
+# 关联不稳定。现在统一成 Aria.Unified.<ext>，与 Aria Player 的 Aria.Player.<ext> 互不覆盖。
 fileAssociations:
   - ext: mp3
-    name: MP3 音频（Aria Unified）
+    name: Aria.Unified.mp3
     description: 用 Aria Unified 打开 MP3 音频
     role: Viewer
   - ext: m4a
-    name: M4A 音频（Aria Unified）
+    name: Aria.Unified.m4a
     description: 用 Aria Unified 打开 M4A 音频
     role: Viewer
   - ext: flac
-    name: FLAC 音频（Aria Unified）
+    name: Aria.Unified.flac
     description: 用 Aria Unified 打开 FLAC 音频
     role: Viewer
   - ext: wav
-    name: WAV 音频（Aria Unified）
+    name: Aria.Unified.wav
     description: 用 Aria Unified 打开 WAV 音频
     role: Viewer
   - ext: ogg
-    name: OGG 音频（Aria Unified）
+    name: Aria.Unified.ogg
     description: 用 Aria Unified 打开 OGG 音频
     role: Viewer
   - ext: opus
-    name: Opus 音频（Aria Unified）
+    name: Aria.Unified.opus
     description: 用 Aria Unified 打开 Opus 音频
     role: Viewer
 

@@ -199,8 +199,13 @@ if (!fs.existsSync(unifiedYmlPath)) {
       problems.push(`electron-builder.unified.yml 的 fileAssociations 里没有 ${ext}`)
     }
   }
-  if (!/name:\s*.*Aria Unified/.test(unifiedYml)) {
-    problems.push('electron-builder.unified.yml 的文件关联名字里没有 Aria Unified（关联要指向自己，不是 Aria Player）')
+  /*
+   * 关联必须指向**自己**（第三产品）。判据从"名字里出现 Aria Unified"换成了
+   * "ProgId 前缀就是 Aria.Unified" —— 更严也更具体：旧判据在 ASCII ProgId 下会误报，
+   * 而这一条同时保证了"不与 Aria Player 的 Aria.Player.* 互相覆盖"。
+   */
+  if (!/name:\s*Aria\.Unified\./.test(unifiedYml)) {
+    problems.push('electron-builder.unified.yml 的关联 ProgId 前缀应当是 Aria.Unified（关联要指向自己，不是 Aria Player）')
   }
 }
 
@@ -313,6 +318,42 @@ if (PRODUCTS.player && PRODUCTS.player.presetProfile !== 'player') {
       if (!value) { problems.push(`${item.label} 的 ${field} 没读到`); continue }
       if (seen.has(value)) problems.push(`${item.label} 与 ${seen.get(value)} 的 ${field} 相同（「${value}」）—— 三个产品的安装身份不许撞`)
       else seen.set(value, item.label)
+    }
+  }
+}
+
+/*
+ * 文件关联的 ProgId 必须是 **ASCII** 且形如 `<产品>.<扩展名>`。
+ *
+ * 为什么这条值得单列：`name:` 直接变成注册表键名（HKCU\Software\Classes\<ProgId>，
+ * 以及 .<ext>\OpenWithProgids 下的值名）。写成「MP3 音频」这种中文时，键名会变得不可预测，
+ * 资源管理器里的关联就不稳定 —— 这是真装一次才看出来的那类问题。
+ * 顺带把 description（= 菜单里显示的名字）也钉住：Aria Player 的六项都必须是「Aria Player」。
+ */
+{
+  const associationRules = [
+    { file: 'electron-builder.player.yml', prefix: 'Aria.Player', description: 'Aria Player' },
+    { file: 'electron-builder.unified.yml', prefix: 'Aria.Unified', description: null }
+  ]
+  for (const rule of associationRules) {
+    const full = path.join(root, rule.file)
+    if (!fs.existsSync(full)) continue
+    const text = fs.readFileSync(full, 'utf8')
+    const block = /fileAssociations:([\s\S]*?)(?:\r?\n[A-Za-z]|\r?\n# |$)/.exec(text)
+    if (!block) { problems.push(`${rule.file} 里没有 fileAssociations 段`); continue }
+    const pairs = [...block[1].matchAll(/- ext:\s*(\w+)\s*\r?\n\s*name:\s*(.+?)\s*\r?\n\s*description:\s*(.+?)\s*(?:\r?\n|$)/g)]
+    if (pairs.length < 5) problems.push(`${rule.file} 的 fileAssociations 条目只解析出 ${pairs.length} 个`)
+    for (const [, ext, name, description] of pairs) {
+      if (!/^[\x20-\x7E]+$/.test(name)) {
+        problems.push(`${rule.file}：${ext} 的 ProgId「${name}」不是 ASCII —— 注册表键名会不可预测`)
+      }
+      if (name !== `${rule.prefix}.${ext}`) {
+        problems.push(`${rule.file}：${ext} 的 ProgId 应当是 ${rule.prefix}.${ext}，现在是「${name}」`)
+      }
+      if (!description) problems.push(`${rule.file}：${ext} 的 description（菜单显示名）不能为空`)
+      if (rule.description && description !== rule.description) {
+        problems.push(`${rule.file}：${ext} 的菜单显示名应当是「${rule.description}」，现在是「${description}」`)
+      }
     }
   }
 }
