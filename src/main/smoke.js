@@ -2345,6 +2345,84 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `「没有封面…」提示是 button=${a11y.hintIsButton}、样式表里有 :focus-visible + --focus-ring 规则=${a11y.hintRing}`)
 
 
+    /*
+     * 取色性能（T2.6）：810 首连续切歌时，封面取样不能"每切一首就卡一下"。
+     *
+     * 取 50 首（低于颜色缓存上限 64，保证第二轮能全部命中）分三轮量：
+     *   ① 冷：逐个取样（每首都要真的加载封面 + canvas 取样）；
+     *   ② 热：立刻再来一遍 —— 必须命中缓存，总耗时与最慢一次都要显著更低；
+     *   ③ 同一首并发要 8 次 —— 只应真正取一次（同 key 并发去重），结果必须一致；
+     *   ④ 无封面曲目要来两次 —— 第二次必须走负缓存，不能比第一次慢。
+     *
+     * 断言用的是"相对关系"（热 < 冷/3、热最慢 < 20ms、去重后只有 1 种颜色），
+     * 不是绝对毫秒数 —— 机器快慢不该决定这条检查红不红。
+     */
+    const tintPerf = await evaluate(win, `
+      const { artwork, store } = window.__aria
+      const tracks = store.get().library.tracks.filter((track) => track.path).slice(0, 50)
+      const sample = tracks
+      const timeIt = async (fn) => {
+        const started = performance.now()
+        const value = await fn()
+        return { ms: performance.now() - started, value }
+      }
+
+      /*
+       * 先清空封面/颜色缓存再量"冷"那一轮。
+       * 不清的话前面那些检查早就把颜色取过了 —— 量到的"冷"其实是热，
+       * 读数会漂亮到不真实（第一次跑出来"50 首 41ms"就是这个原因）。
+       */
+      artwork.releaseMemory()
+      await new Promise((r) => setTimeout(r, 100))
+
+      const coldRuns = []
+      for (const track of sample) coldRuns.push(await timeIt(() => artwork.resolveColor(track)))
+      const warmRuns = []
+      for (const track of sample) warmRuns.push(await timeIt(() => artwork.resolveColor(track)))
+
+      const target = sample[0]
+      const concurrent = await Promise.all(
+        Array.from({ length: 8 }, () => artwork.resolveColor(target))
+      )
+      const dedupeColors = new Set(concurrent.map((color) => (color ? color.tint : 'null')))
+
+      const bare = {
+        id: 'perf-bare-cover',
+        title: '无封面性能探针',
+        artist: 'probe',
+        albumArtist: 'probe',
+        album: 'no-cover',
+        path: '/nonexistent/perf-bare.mp3'
+      }
+      const bareFirst = await timeIt(() => artwork.resolveColor(bare))
+      const bareSecond = await timeIt(() => artwork.resolveColor(bare))
+
+      const sum = (runs) => runs.reduce((total, run) => total + run.ms, 0)
+      return {
+        count: sample.length,
+        coldTotal: sum(coldRuns),
+        coldWorst: Math.max(...coldRuns.map((run) => run.ms)),
+        warmTotal: sum(warmRuns),
+        warmWorst: Math.max(...warmRuns.map((run) => run.ms)),
+        dedupeColors: dedupeColors.size,
+        bareFirst: bareFirst.ms,
+        bareSecond: bareSecond.ms,
+        bareSame: bareFirst.value && bareSecond.value ? bareFirst.value.tint === bareSecond.value.tint : false
+      }`)
+
+    record('取色性能：第二轮全部命中缓存，同一首并发只取一次，坏封面不重试',
+      tintPerf.count === 50 &&
+      tintPerf.warmTotal < tintPerf.coldTotal / 3 + 50 &&
+      tintPerf.warmWorst < 20 &&
+      tintPerf.dedupeColors === 1 &&
+      tintPerf.bareSame === true &&
+      tintPerf.bareSecond <= tintPerf.bareFirst + 5,
+      `50 首：清掉应用缓存后 ${tintPerf.coldTotal.toFixed(0)}ms（最慢 ${tintPerf.coldWorst.toFixed(0)}ms，≈逐首切换成本）→ ` +
+      `再切一遍（命中颜色缓存）${tintPerf.warmTotal.toFixed(0)}ms（最慢 ${tintPerf.warmWorst.toFixed(1)}ms，应 <20）；` +
+      `同一首并发 8 次得到 ${tintPerf.dedupeColors} 种颜色（应为 1）；` +
+      `无封面 ${tintPerf.bareFirst.toFixed(1)}ms → ${tintPerf.bareSecond.toFixed(1)}ms（负缓存，颜色一致=${tintPerf.bareSame}）`)
+
+
     // media:// 协议：Range 支持与 CORS 头（seek 与 WebAudio 接入点都依赖它们）
     const protocolResult = await evaluate(win, `
       const track = window.__aria.player.currentTrack()
