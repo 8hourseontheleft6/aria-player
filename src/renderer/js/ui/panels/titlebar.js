@@ -137,6 +137,21 @@ export function createTitlebar ({ store, bus, actions }) {
 
   const right = h('div', { class: 'titlebar__right' }, scanStatus)
 
+  /*
+   * 最大化 / 还原按钮：必须在**窗口按钮组之前**定义 —— 按钮组里直接引用它。
+   * （第一版放在 element 之前，也就是引用之后，于是运行时 TDZ：
+   *   "Cannot access 'maximizeButton' before initialization"，渲染层整个起不来。）
+   */
+  const MAXIMIZE_PATH = 'M6.2 6.2h11.6v11.6H6.2z'
+  const RESTORE_PATH = 'M9.2 6.2h8.6v8.6M6.2 9.2h8.6v8.6H6.2z'
+  const maximizeIcon = icon('maximize', { className: 'icon icon--stroke' })
+  const maximizeButton = h('button', {
+    class: 'win-controls__btn',
+    type: 'button',
+    title: '最大化',
+    onClick: () => remote.window.toggleMaximize()
+  }, maximizeIcon)
+
   // Windows / Linux 自绘窗口按钮；macOS 用系统红绿灯
   if (!store.get().app.isMac) {
     right.appendChild(h('div', { class: 'win-controls' },
@@ -146,12 +161,11 @@ export function createTitlebar ({ store, bus, actions }) {
         title: '最小化',
         onClick: () => remote.window.minimize()
       }, icon('minus', { className: 'icon icon--stroke' })),
-      h('button', {
-        class: 'win-controls__btn',
-        type: 'button',
-        title: '最大化',
-        onClick: () => remote.window.toggleMaximize()
-      }, icon('maximize', { className: 'icon icon--stroke' })),
+      /*
+       * 最大化 / 还原按钮：图标与提示随状态切换（icons.js 里本来就有 restore 图形）。
+       * 以前无论什么状态都是「最大化」图标 —— 最大化之后点它其实是还原，图标却在骗人。
+       */
+      maximizeButton,
       h('button', {
         class: 'win-controls__btn win-controls__btn--close',
         type: 'button',
@@ -190,6 +204,45 @@ export function createTitlebar ({ store, bus, actions }) {
   // 挂载后各段才有真实宽度（此时可能还没进 DOM，量到 0 也没关系，
   // ResizeObserver 会在真正布局完成后补一次）
   paintThumb()
+
+  /*
+   * 最大化 / 还原的状态同步：
+   *   · titlebar 与 body 加 is-maximized（CSS 据此把拖拽区从 drag 改成 no-drag，
+   *     否则最大化时按下拖动的事件根本到不了渲染层 —— 这就是「最大化后拖不动」的根因）；
+   *   · 按钮换成还原图标 + 「还原」提示。
+   */
+  const applyMaximized = (maximized) => {
+    const on = Boolean(maximized)
+    document.body.classList.toggle('is-maximized', on)
+    element.classList.toggle('is-maximized', on)
+    maximizeIcon.setAttribute('d', on ? RESTORE_PATH : MAXIMIZE_PATH)
+    maximizeButton.title = on ? '还原' : '最大化'
+  }
+  applyMaximized(Boolean(store.get().settings.window && store.get().settings.window.maximized))
+  remote.window.onMaximizedChange((maximized) => applyMaximized(maximized))
+
+  /*
+   * 最大化状态下按压标题栏 → 先还原、再跟着光标移动（见 main/window.js 的 beginWindowDrag）。
+   * 非最大化时这一段不生效：CSS 里拖拽区仍是 drag，交给系统原生拖动（手感最好，不去抢）。
+   */
+  on(element, 'pointerdown', (event) => {
+    if (event.button !== 0) return
+    if (event.target.closest('button, .island, input')) return
+    if (!element.classList.contains('is-maximized')) return
+    const rect = element.getBoundingClientRect()
+    const ratioX = rect.width ? (event.clientX - rect.left) / rect.width : 0.5
+    const ratioY = rect.height ? (event.clientY - rect.top) / rect.height : 0.05
+    Promise.resolve(remote.window.beginDrag({ ratioX, ratioY })).catch(() => {})
+    const stop = () => {
+      Promise.resolve(remote.window.endDrag()).catch(() => {})
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      window.removeEventListener('blur', stop)
+    }
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    window.addEventListener('blur', stop)
+  })
 
   // 双击标题栏空白处切换最大化（Windows 习惯）
   on(element, 'dblclick', (event) => {

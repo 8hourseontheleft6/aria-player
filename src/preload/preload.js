@@ -164,7 +164,10 @@ contextBridge.exposeInMainWorld('aria', {
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
     close: () => ipcRenderer.invoke('window:close'),
     state: () => ipcRenderer.invoke('window:state'),
-    onMaximizedChange: (handler) => on('window:maximized', handler)
+    onMaximizedChange: (handler) => on('window:maximized', handler),
+    /* 最大化状态下拖标题栏：先还原、再跟着光标移动（见 main/window.js 的 beginWindowDrag） */
+    beginDrag: (offset) => ipcRenderer.invoke('window:begin-drag', offset),
+    endDrag: () => ipcRenderer.invoke('window:end-drag')
   },
 
   media: {

@@ -193,6 +193,19 @@ function registerIpc (ctx) {
 
     /* ---------- 窗口控制（自绘标题栏） ---------- */
     'window:minimize': (event) => BrowserWindow.fromWebContents(event.sender)?.minimize(),
+    /*
+     * 最大化状态下拖标题栏：渲染层 pointerdown 时调这里（最大化时拖拽区改成 no-drag，
+     * 于是事件能到达渲染层）。先 unmaximize，再按光标位置驱动窗口移动，松手时结束。
+     */
+    'window:begin-drag': (event, offset) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return { ok: false }
+      return require('./window').beginWindowDrag(win, offset || {})
+    },
+    'window:end-drag': () => {
+      require('./window').endWindowDrag()
+      return true
+    },
     'window:toggle-maximize': (event) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return false

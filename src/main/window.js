@@ -125,8 +125,17 @@ function createMainWindow (ctx, profile, product) {
   }
 
   if (Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
-    options.x = saved.x
-    options.y = saved.y
+    /* 恢复时也夹一次：老旧档案里可能存着超出工作区的尺寸（实测 player 存过 1298x871 / 工作区高 866） */
+    const clamped = clampToWorkArea({
+      x: saved.x,
+      y: saved.y,
+      width: options.width,
+      height: options.height
+    })
+    options.x = clamped.x
+    options.y = clamped.y
+    options.width = clamped.width
+    options.height = clamped.height
   } else if (profile && profile.id === 'player') {
     /*
      * player 的**首次**出现要与完整版错开。
@@ -240,6 +249,14 @@ function createMainWindow (ctx, profile, product) {
    */
   const automated = ['--smoke', '--shots', '--perf', '--audit'].some((flag) => process.argv.includes(flag))
   let saveTimer = null
+  /*
+   * 保存前**按工作区夹紧**。
+   *
+   * 为什么不夹会出问题：窗口被拖到屏幕外、或者显示器换了/任务栏变了，
+   * 记下来的 bounds 可能比工作区还大（实测 player 存成 1298x871，而工作区只有 866 高），
+   * 下次启动就会开出一个超出屏幕的窗口，底部（播放条）永远够不到。
+   * 多显示器用 getDisplayMatching：按窗口所在那块屏的工作区算，而不是主屏。
+   */
   const persistGeometry = () => {
     if (automated) return
     if (saveTimer) clearTimeout(saveTimer)
@@ -247,7 +264,8 @@ function createMainWindow (ctx, profile, product) {
       saveTimer = null
       if (win.isDestroyed()) return
       const maximized = win.isMaximized()
-      const bounds = win.getNormalBounds ? win.getNormalBounds() : win.getBounds()
+      const raw = win.getNormalBounds ? win.getNormalBounds() : win.getBounds()
+      const bounds = clampToWorkArea(raw)
       settings.setWindowState({
         width: bounds.width,
         height: bounds.height,
@@ -298,6 +316,29 @@ function applyTheme (ctx, theme) {
 }
 
 /**
+ * 恢复/保存窗口大小时按**工作区**夹紧。
+ *
+ * 多显示器用 getDisplayMatching：按窗口所在那块屏的工作区算，而不是主屏。
+ * 以前不夹的后果：player 存成 1298x871，而工作区只有 866 高 —— 下次启动窗口超出屏幕，
+ * 底部播放条永远够不到。
+ */
+function clampToWorkArea (bounds) {
+  const display = screen.getDisplayMatching({
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.max(1, Math.round(bounds.width)),
+    height: Math.max(1, Math.round(bounds.height))
+  })
+  const area = display && display.workArea ? display.workArea : null
+  if (!area) return bounds
+  const width = Math.min(Math.round(bounds.width), area.width)
+  const height = Math.min(Math.round(bounds.height), area.height)
+  const x = Math.min(Math.max(Math.round(bounds.x), area.x), area.x + area.width - width)
+  const y = Math.min(Math.max(Math.round(bounds.y), area.y), area.y + area.height - height)
+  return { x, y, width, height }
+}
+
+/**
  * 把窗口提到最前面，并返回"到底做了什么"（自检会读它）。
  *
  * 为什么要这么多步：Windows 不给**后台进程**前台权限。用户双击音频时，
@@ -329,4 +370,57 @@ function raiseWindow (win) {
   return result
 }
 
-module.exports = { createMainWindow, applyTheme, applyTaskbarState, markQuitting, raiseWindow, IS_MAC }
+/**
+ * 「最大化后拖不动」的兜底：把窗口从最大化状态拖出来。
+ *
+ * 为什么需要它：无边框窗口最大化之后，Windows 会吃掉标题栏的拖拽区（`-webkit-app-region: drag`
+ * 在最大化状态下不再触发原生拖动），于是用户按着标题栏拖没有任何反应 —— 只能双击还原或点还原按钮。
+ *
+ * 做法：最大化时把标题栏的拖拽区改成 no-drag（见 shell.css 的 .is-maximized），
+ * 渲染层在 pointerdown 里调这里 —— 先 unmaximize，再**用光标位置**驱动 setPosition，
+ * 直到渲染层说松手（pointerup）。光标位置从 screen.getCursorScreenPoint() 读，
+ * 不依赖渲染层收到 mousemove（指针移出窗口后就收不到了）。
+ */
+let dragLoop = null
+function endWindowDrag () {
+  if (dragLoop && dragLoop.timer) clearInterval(dragLoop.timer)
+  dragLoop = null
+}
+
+function beginWindowDrag (win, offset = {}) {
+  if (!win || win.isDestroyed()) return { ok: false }
+  endWindowDrag()
+  const wasMaximized = win.isMaximized()
+  if (wasMaximized) win.unmaximize()
+  const bounds = win.getBounds()
+  /*
+   * 光标在窗口里的相对位置（0~1）。还原之后窗口小了一圈，
+   * 用比例换算能让"光标下面那一点"继续跟着光标，手感接近原生。
+   */
+  const ratioX = Number.isFinite(offset.ratioX) ? Math.min(1, Math.max(0, offset.ratioX)) : 0.5
+  const ratioY = Number.isFinite(offset.ratioY) ? Math.min(1, Math.max(0, offset.ratioY)) : 0.05
+  const grabX = Math.round(bounds.width * ratioX)
+  const grabY = Math.round(bounds.height * ratioY)
+  const started = Date.now()
+  const timer = setInterval(() => {
+    if (!dragLoop || win.isDestroyed()) { endWindowDrag(); return }
+    /* 安全阀：松手事件丢了也不能永远跟着光标跑 */
+    if (Date.now() - started > 20000) { endWindowDrag(); return }
+    const point = screen.getCursorScreenPoint()
+    win.setPosition(Math.round(point.x - grabX), Math.round(point.y - grabY))
+  }, 16)
+  dragLoop = { timer, win, wasMaximized }
+  return { ok: true, wasMaximized }
+}
+
+module.exports = {
+  createMainWindow,
+  applyTheme,
+  applyTaskbarState,
+  markQuitting,
+  raiseWindow,
+  beginWindowDrag,
+  endWindowDrag,
+  clampToWorkArea,
+  IS_MAC
+}

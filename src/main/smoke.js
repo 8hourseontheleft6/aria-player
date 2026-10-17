@@ -300,6 +300,104 @@ async function runSecondInstanceCheck ({ win, profile, record, raiseInfo, mediaD
 }
 
 /**
+ * 窗口几何与"最大化后拖不动"的回归（两个产品共用）。
+ *
+ *  ① 保存/恢复时按工作区夹紧：给一个超出工作区的 bounds（实测 player 存过 1298x871 / 工作区高 866），
+ *     夹紧后的结果必须落在工作区内；
+ *  ② 最大化状态下按压标题栏 → 先 unmaximize、再跟着光标移动（窗口位置确实变了）；
+ *  ③ 双击标题栏空白处切换最大化/还原（两个方向都验）。
+ *
+ * 拖动手感跟的是**真实光标**（screen.getCursorScreenPoint），自动测不了手感，
+ * 但"是否触发了还原、窗口是否真的移动了"是可以断言的。
+ */
+async function runWindowChecks ({ win, record }) {
+  const { screen } = require('electron')
+  const windowApi = require('./window')
+
+  /* ① 夹紧 */
+  const workArea = screen.getDisplayMatching(win.getBounds()).workArea
+  const oversized = {
+    x: workArea.x + 40,
+    y: workArea.y + 40,
+    width: workArea.width + 260,
+    height: workArea.height + 120
+  }
+  const clamped = windowApi.clampToWorkArea(oversized)
+  const fits = clamped.x >= workArea.x && clamped.y >= workArea.y &&
+    clamped.x + clamped.width <= workArea.x + workArea.width &&
+    clamped.y + clamped.height <= workArea.y + workArea.height
+  record('窗口 bounds 超出工作区时会被夹回去（保存与恢复共用同一处）',
+    fits && clamped.width <= workArea.width && clamped.height <= workArea.height,
+    `工作区 ${workArea.width}x${workArea.height}；输入 ${oversized.width}x${oversized.height}` +
+    `@${oversized.x},${oversized.y} → 夹成 ${clamped.width}x${clamped.height}@${clamped.x},${clamped.y}` +
+    `（落在工作区内=${fits}）`,
+    { profiles: ['full', 'player'] })
+
+  /* ② 最大化 → 按压标题栏 → 还原并移动 */
+  const normalBounds = win.getBounds()
+  win.maximize()
+  await sleep(600)
+  const wasMaximized = win.isMaximized()
+  const maximizedBounds = win.getBounds()
+  const dragged = await evaluate(win, `
+    const bar = document.querySelector('.titlebar')
+    if (!bar) return { dispatched: false, hasClass: false }
+    const rect = bar.getBoundingClientRect()
+    bar.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0,
+      bubbles: true,
+      clientX: Math.round(rect.left + rect.width * 0.5),
+      clientY: Math.round(rect.top + rect.height * 0.5)
+    }))
+    return { dispatched: true, hasClass: document.body.classList.contains('is-maximized') }`)
+  await sleep(700)
+  const afterBounds = win.getBounds()
+  const stillMax = win.isMaximized()
+  windowApi.endWindowDrag()
+  const moved = afterBounds.x !== maximizedBounds.x || afterBounds.y !== maximizedBounds.y
+  record('最大化状态下按压标题栏 → 还原成普通窗口并跟着光标移动',
+    wasMaximized === true && dragged.dispatched === true &&
+    stillMax === false && moved === true,
+    `最大化=${wasMaximized}（${maximizedBounds.width}x${maximizedBounds.height}）、` +
+    `按下时 is-maximized 类=${dragged.hasClass}；之后 最大化=${stillMax}、` +
+    `位置 ${maximizedBounds.x},${maximizedBounds.y} → ${afterBounds.x},${afterBounds.y}（移动了=${moved}）`,
+    { profiles: ['full', 'player'] })
+
+  /* ③ 双击切换最大化/还原 */
+  const doubleClick = async () => evaluate(win, `
+    const bar = document.querySelector('.titlebar')
+    if (!bar) return false
+    const rect = bar.getBoundingClientRect()
+    bar.dispatchEvent(new MouseEvent('dblclick', {
+      bubbles: true,
+      clientX: Math.round(rect.left + rect.width * 0.5),
+      clientY: Math.round(rect.top + rect.height * 0.5)
+    }))
+    return true`)
+  const firstDispatch = await doubleClick()
+  await sleep(600)
+  const afterFirst = win.isMaximized()
+  await doubleClick()
+  await sleep(600)
+  const afterSecond = win.isMaximized()
+  record('双击标题栏空白处能切换最大化 / 还原（两个方向都验）',
+    firstDispatch === true && afterFirst !== stillMax && afterSecond !== afterFirst,
+    `双击一次：最大化 ${stillMax} → ${afterFirst}；再双击：→ ${afterSecond}`,
+    { profiles: ['full', 'player'] })
+
+  /* 普通窗口可拖可缩放（无边框窗口靠这两项开关，被关掉就"拖不动/改不了大小"） */
+  record('普通窗口可移动、可缩放',
+    win.isMovable() === true && win.isResizable() === true,
+    `movable=${win.isMovable()}, resizable=${win.isResizable()}`,
+    { profiles: ['full', 'player'] })
+
+  /* 收尾：把窗口放回测前的位置/大小，别影响后面的检查 */
+  if (win.isMaximized()) win.unmaximize()
+  win.setBounds(normalBounds)
+  await sleep(500)
+}
+
+/**
  * 两个产品**共用**的检查（标 full/player）。
  *
  * 这是"同一件事只写一遍"的样板：两套自检都调用这个函数，而不是各自抄一份。
@@ -346,6 +444,9 @@ async function runSharedChecks ({ win, record }) {
     `有当前曲目=${shared.hasTrack}${shared.hasTrack ? `（期望「${shared.playingTitle}」）` : '（期望产品名）'}` +
     `、在播=${shared.playing}`,
     { profiles: ['full', 'player'] })
+  /* 窗口几何 / 最大化后拖不动（两个产品都验） */
+  await runWindowChecks({ win, record })
+
   record('设置页能打开并真的渲染出内容',
     shared.settingsRows > 10 && shared.viewAfter === 'songs',
     `设置项 ${shared.settingsRows} 行、标题「${shared.settingsHeading}」、切回歌曲页=${shared.viewAfter}`,

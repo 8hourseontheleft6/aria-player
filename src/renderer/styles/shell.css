@@ -88,6 +88,21 @@ html[data-platform="darwin"] .titlebar {
   padding-left: 84px;
 }
 
+/*
+ * 最大化时把拖拽区交还给渲染层。
+ *
+ * 无边框窗口最大化之后，Windows 会吃掉 `-webkit-app-region: drag` 的原生拖动 ——
+ * 用户按着标题栏拖没有任何反应（只能双击还原或点还原按钮）。这就是「最大化后拖不动」。
+ * 改成 no-drag 之后 pointerdown 能到达渲染层，由 titlebar.js 调主进程：
+ * 先 unmaximize，再按光标位置驱动窗口移动。
+ */
+body.is-maximized .titlebar,
+body.is-maximized .titlebar__spacer,
+body.is-maximized .titlebar__left,
+body.is-maximized .titlebar__app {
+  -webkit-app-region: no-drag;
+}
+
 .titlebar > * {
   -webkit-app-region: no-drag;
 }
