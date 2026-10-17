@@ -798,7 +798,11 @@ async function main () {
         }
       }))
       bus.emit(EVENTS.LIBRARY_UPDATED, { count: 0 })
-      toast(`已清除 ${cleared} 条历史记录（音频文件没有被删除）`)
+      /*
+       * toast 的签名是 toast({ message, type, icon, duration }) —— 收**对象**。
+       * 之前传了字符串，解构出来 message 是 undefined，于是提示框里只有一颗图标、没有字。
+       */
+      toast({ message: `已清除 ${cleared} 条历史记录（音频文件没有被删除）`, type: 'success' })
       return { cleared }
     },
 

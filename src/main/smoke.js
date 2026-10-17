@@ -245,6 +245,19 @@ async function runPlayerUiChecks ({ win, record, mediaDir, ctx }) {
       visible: Boolean(button) && button.getClientRects().length > 0,
       emptyState: [...document.querySelectorAll('.empty')].some((node) => node.getClientRects().length > 0)
     }`)
+  /*
+   * 提示框（toast）：清除之后必须**有文字**。toast 的签名收对象，
+   * 传字符串就会只剩一颗图标 —— 用户报的就是这个（"提示框只有一个符号"）。
+   */
+  const toastState = await evaluate(win, `
+    const nodes = [...document.querySelectorAll('.toast')]
+    const last = nodes[nodes.length - 1]
+    return {
+      count: nodes.length,
+      text: last ? (last.textContent || '').trim() : '',
+      hasIcon: last ? Boolean(last.querySelector('.icon')) : false
+    }`)
+
   const recentAfter = (() => {
     try {
       const file = path.join(require('electron').app.getPath('userData'), 'recent.json')
@@ -254,14 +267,15 @@ async function runPlayerUiChecks ({ win, record, mediaDir, ctx }) {
       return 0
     }
   })()
-  record('一键清除历史：列表、播放、recent.json 一起清干净，按钮随之隐藏',
+  record('一键清除历史：列表、播放、recent.json 一起清干净，提示框有文字，按钮随之隐藏',
     clicked === true && beforeClear.visible === true && beforeClear.tracks > 0 &&
     afterClear.tracks === 0 && afterClear.trackId === null && afterClear.status !== 'playing' &&
-    afterClear.visible === false && recentAfter === 0,
+    afterClear.visible === false && recentAfter === 0 && toastState.text !== '',
     `清除前 ${beforeClear.tracks} 首（按钮可见=${beforeClear.visible}、状态=${beforeClear.status}）→ ` +
     `清除后 ${afterClear.tracks} 首、状态=${afterClear.status}、` +
     `trackId=${afterClear.trackId === null ? 'null' : afterClear.trackId}、按钮可见=${afterClear.visible}、` +
-    `空状态出现=${afterClear.emptyState}、recent.json ${recentAfter} 条`,
+    `空状态出现=${afterClear.emptyState}、recent.json ${recentAfter} 条、` +
+    `提示框「${toastState.text}」${toastState.hasIcon ? '（带图标）' : ''}`,
     { profiles: ['player'] })
 }
 
