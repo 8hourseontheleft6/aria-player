@@ -361,6 +361,78 @@ async function main () {
       return playlist
     },
 
+    /**
+     * 把当前播放列表导出成 m3u（T2.2）。
+     *
+     * 路径由主进程写成"相对 m3u 文件所在目录"（跨盘才退回绝对路径）——
+     * 这样把 m3u 和音乐一起拷到别的机器也能用。
+     */
+    async exportCurrentPlaylistM3u () {
+      const state = store.get()
+      const id = state.ui.source && state.ui.source.type === 'playlist' ? state.ui.source.value : null
+      const playlist = id ? findPlaylist(actions.playlists(), id) : null
+      if (!playlist) {
+        toast({ message: '先打开一个播放列表，再导出', type: 'info' })
+        return { saved: false }
+      }
+      const tracks = tracksOf(playlist, state.library.byId)
+      if (!tracks.length) {
+        toast({ message: '这个播放列表还是空的', type: 'info' })
+        return { saved: false }
+      }
+      const result = await remote.playlist.exportM3u({
+        name: playlist.name,
+        tracks: tracks.map((track) => ({
+          path: track.path,
+          title: track.title,
+          artist: track.artist,
+          duration: track.duration
+        }))
+      })
+      if (result && result.saved) {
+        toast({
+          message: `已导出 ${result.count} 首（${result.relative} 首相对路径${result.absolute ? `，${result.absolute} 首绝对路径` : ''}）`,
+          type: 'success'
+        })
+      }
+      return result
+    },
+
+    /**
+     * 从 m3u 导入成一个新播放列表（T2.2）。
+     *
+     * 只把"已经在资料库里的"对进去（按 path 精确匹配）—— 不在资料库的曲目没有曲目对象，
+     * 硬塞进来会得到一堆播不了的条目。没命中的在 toast 里报数并给下一步提示。
+     * `file` 只给自检用（不传就弹文件对话框）。
+     */
+    async importPlaylistM3u ({ file = '' } = {}) {
+      const result = await remote.playlist.importM3u({ file })
+      if (!result || !result.imported) return { imported: false }
+
+      const state = store.get()
+      const byPath = new Map(state.library.tracks.map((track) => [track.path, track.id]))
+      const ids = []
+      for (const entry of result.entries) {
+        const id = byPath.get(entry.path)
+        if (id) ids.push(id)
+      }
+      const notInLibrary = result.entries.length - ids.length
+
+      const playlist = makePlaylist(result.name || '导入的播放列表')
+      const next = ids.length
+        ? addTracksToPlaylistIn([...actions.playlists(), { ...playlist, trackIds: [] }], playlist.id, ids).playlists
+        : [...actions.playlists(), playlist]
+      await actions.setSetting({ playlists: next })
+      actions.setSource({ type: 'playlist', value: playlist.id })
+
+      const parts = [`导入 ${ids.length} 首`]
+      if (result.missing) parts.push(`${result.missing} 个文件不存在`)
+      if (result.skipped) parts.push(`${result.skipped} 个不是可播格式`)
+      if (notInLibrary) parts.push(`${notInLibrary} 首不在音乐文件夹里（先把所在文件夹加入资料库再导入）`)
+      toast({ message: parts.join('，'), type: ids.length ? 'success' : 'info' })
+      return { imported: true, added: ids.length, notInLibrary, missing: result.missing, skipped: result.skipped }
+    },
+
     async renamePlaylist (id, name) {
       const playlists = renamePlaylistIn(this.playlists(), id, name)
       await actions.setSetting({ playlists })

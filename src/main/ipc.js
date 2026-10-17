@@ -256,6 +256,61 @@ function registerIpc (ctx) {
      * （渲染层问一句 window.aria.opened 有没有就知道该不该显示入口）。
      * 用条件展开而不是在回调里判断：没注册的频道调不到，比"能调到但内部什么都不做"更干净。
      */
+    /*
+     * m3u 播放列表：导入 / 导出。
+     *
+     * 两者都支持显式 `file`（自检用：不弹对话框），不传时才走 dialog。
+     * 解析与序列化在 services/m3u.js（纯函数），这里只负责对话框与读写盘。
+     */
+    'playlist:export': async (event, payload = {}) => {
+      const { dialog } = require('electron')
+      const path = require('node:path')
+      const fsp = require('node:fs/promises')
+      const { serialize } = require('./services/m3u')
+      const suggested = String(payload.name || '播放列表').replace(/[\\/:*?"<>|]/g, '_')
+      let file = typeof payload.file === 'string' && payload.file ? payload.file : ''
+      if (!file) {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        const result = await dialog.showSaveDialog(win, {
+          title: '导出播放列表',
+          defaultPath: suggested.endsWith('.m3u') ? suggested : suggested + '.m3u',
+          filters: [{ name: 'M3U 播放列表', extensions: ['m3u', 'm3u8'] }]
+        })
+        if (result.canceled || !result.filePath) return { saved: false }
+        file = result.filePath
+      }
+      const { text, relative, absolute } = serialize({ file, tracks: payload.tracks || [] })
+      await fsp.writeFile(file, text, 'utf8')
+      return { saved: true, file: path.resolve(file), count: (payload.tracks || []).length, relative, absolute }
+    },
+    'playlist:import': async (event, payload = {}) => {
+      const { dialog } = require('electron')
+      const path = require('node:path')
+      const fsp = require('node:fs/promises')
+      const { parse } = require('./services/m3u')
+      let file = typeof payload.file === 'string' && payload.file ? payload.file : ''
+      if (!file) {
+        const win = BrowserWindow.fromWebContents(event.sender)
+        const result = await dialog.showOpenDialog(win, {
+          title: '导入播放列表',
+          properties: ['openFile'],
+          filters: [{ name: 'M3U 播放列表', extensions: ['m3u', 'm3u8'] }]
+        })
+        if (result.canceled || !result.filePaths.length) return { imported: false }
+        file = result.filePaths[0]
+      }
+      const text = await fsp.readFile(file, 'utf8')
+      const parsed = parse({ file, text, exists: (candidate) => require('node:fs').existsSync(candidate) })
+      return {
+        imported: true,
+        file: path.resolve(file),
+        name: path.basename(file, path.extname(file)),
+        entries: parsed.entries,
+        missing: parsed.missing,
+        skipped: parsed.skipped
+      }
+    },
+
     ...(ctx.has('openedFiles')
       ? {
           'opened:recent': async () => {

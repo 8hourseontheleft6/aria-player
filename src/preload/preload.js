@@ -95,6 +95,12 @@ contextBridge.exposeInMainWorld('aria', {
       }
     : undefined,
 
+  /** m3u 播放列表（导入 / 导出；file 是自检用的显式路径，不传才弹对话框） */
+  playlist: {
+    exportM3u: (payload) => ipcRenderer.invoke('playlist:export', payload),
+    importM3u: (payload) => ipcRenderer.invoke('playlist:import', payload)
+  },
+
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),

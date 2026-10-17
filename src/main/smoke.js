@@ -2135,6 +2135,129 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `同一帧读到的中间值 ${tintTransition.mid}（应为红蓝之间的插值，不是纯蓝）；` +
       `减少动画时 transition-property=${tintTransition.reduced}（应为 none）`)
 
+    /*
+     * m3u 播放列表导入 / 导出（T2.2）。
+     *
+     * 分三层验：
+     *   ① 纯函数层：序列化写相对路径、解析能吃注释/BOM/坏行；
+     *   ② 端到端：把两首**真曲目**导出到临时文件，再解析回来，条数/相对路径/时长都对；
+     *   ③ 渲染层：`actions.importPlaylistM3u({ file })` 真的建出新播放列表并切过去。
+     */
+    const m3uApp = require('electron').app
+    const m3uModule = require('./services/m3u.js')
+    const m3uPath = require('node:path')
+    const m3uFs = require('node:fs')
+
+    const unitFile = m3uPath.join(m3uApp.getPath('temp'), 'aria-m3u-unit', 'unit.m3u')
+    m3uFs.mkdirSync(m3uPath.dirname(unitFile), { recursive: true })
+    const unitOut = m3uModule.serialize({
+      file: unitFile,
+      tracks: [
+        { path: m3uPath.join(m3uPath.dirname(unitFile), 'a', 'one.mp3'), title: 'One', artist: 'A', duration: 61.4 },
+        { path: 'Z:\\elsewhere\\two.flac', title: 'Two', artist: 'B', duration: 0 }
+      ]
+    })
+    const unitParsed = m3uModule.parse({
+      file: unitFile,
+      text: '\uFEFF#EXTM3U\r\n#EXTINF:61,Artist One - Song One\r\na/one.mp3\r\n\r\n# 这行是注释\r\nnot-audio.txt\r\nmissing.mp3\r\n',
+      /* 让 a/one.mp3 "存在"：这样它能进 entries，missing 只剩那个真不存在的 */
+      exists: (candidate) => candidate.split(String.fromCharCode(92)).join('/').endsWith('a/one.mp3')
+    })
+    record('m3u 纯函数：导出写相对路径、解析能吃 BOM/CRLF/注释/坏行',
+      unitOut.text.startsWith('#EXTM3U') &&
+      unitOut.relative === 1 && unitOut.absolute === 1 &&
+      unitOut.text.includes('a/one.mp3') &&
+      unitParsed.missing === 1 && unitParsed.skipped === 1 && unitParsed.entries.length === 1,
+      
+      `序列化：相对 ${unitOut.relative} 首、绝对 ${unitOut.absolute} 首（第二首在 Z: 盘，取不到相对路径）；` +
+      `解析：missing=${unitParsed.missing}、skipped=${unitParsed.skipped}、entries=${unitParsed.entries.length}` +
+      `（txt 被跳过、missing.mp3 不存在、a/one.mp3 进 entries）`)
+
+    /* ---------- ② 端到端：用真曲目导一次再读回来 ---------- */
+    /* 诊断：渲染层到底能不能看到 remote.playlist（看不到就说明 preload 没暴露出去） */
+    const m3uApi = await evaluate(win, `
+      return {
+        aria: typeof window.aria,
+        playlist: typeof (window.aria && window.aria.playlist),
+        exportM3u: typeof (window.aria && window.aria.playlist && window.aria.playlist.exportM3u),
+        importM3u: typeof (window.aria && window.aria.playlist && window.aria.playlist.importM3u)
+      }`)
+    console.log('  · m3u 诊断：window.aria=' + m3uApi.aria + '、playlist=' + m3uApi.playlist +
+      '、exportM3u=' + m3uApi.exportM3u + '、importM3u=' + m3uApi.importM3u)
+
+    const m3uTracks = await evaluate(win, `
+      const { store } = window.__aria
+      const tracks = store.get().library.tracks.filter((track) => track.path).slice(0, 2)
+      return tracks.map((track) => ({ path: track.path, title: track.title, artist: track.artist, duration: track.duration }))`)
+    let m3uRoundTrip = { ok: false }
+    if (m3uTracks.length === 2) {
+      const exportFile = m3uPath.join(m3uApp.getPath('temp'), 'aria-m3u-unit', 'round-trip.m3u')
+      const exported = await evaluate(win, `
+        const result = await window.aria.playlist.exportM3u(${JSON.stringify({ name: '往返测试', tracks: m3uTracks, file: exportFile })})
+        return result`).catch((err) => ({ saved: false, error: err && err.message }))
+      const text = m3uFs.existsSync(exportFile) ? m3uFs.readFileSync(exportFile, 'utf8') : ''
+      const back = m3uModule.parse({
+        file: exportFile,
+        text,
+        exists: (candidate) => m3uFs.existsSync(candidate)
+      })
+      m3uRoundTrip = {
+        ok: Boolean(exported && exported.saved) &&
+          exported.count === 2 &&
+          exported.relative === 2 &&
+          back.entries.length === 2 &&
+          back.entries.every((entry, index) => m3uPath.normalize(entry.path) === m3uPath.normalize(m3uTracks[index].path)),
+        detail: `导出 ${exported && exported.count} 首（相对 ${exported && exported.relative} / 绝对 ${exported && exported.absolute}）` +
+          (exported && exported.error ? ` 错误=${exported.error}` : '') + `；` +
+          `读回 ${back.entries.length} 首、missing ${back.missing}、skipped ${back.skipped}`
+      }
+    }
+    record('m3u 端到端：两首真曲目导出 → 读回，路径与条数一致（且用相对路径）',
+      m3uRoundTrip.ok === true,
+      m3uTracks.length === 2 ? m3uRoundTrip.detail : '资料库里取不到两首带 path 的曲目，跳过')
+
+    /* ---------- ③ 渲染层：导入真的建出播放列表 ---------- */
+    const importFile = m3uPath.join(m3uApp.getPath('temp'), 'aria-m3u-unit', 'import-src.m3u')
+    if (m3uTracks.length >= 1) {
+      const baseDir = m3uPath.dirname(importFile)
+      const lines = ['#EXTM3U']
+      for (const track of m3uTracks) {
+        const relative = m3uPath.relative(baseDir, track.path).split(m3uPath.sep).join('/')
+        lines.push(`#EXTINF:${Math.round(track.duration || 0)},${track.artist} - ${track.title}`)
+        lines.push(relative)
+      }
+      lines.push('D:/definitely-missing/nope.mp3')
+      m3uFs.mkdirSync(baseDir, { recursive: true })
+      m3uFs.writeFileSync(importFile, lines.join('\n') + '\n', 'utf8')
+    }
+    const imported = m3uTracks.length >= 1
+      ? await evaluate(win, `
+          const result = await window.__aria.actions.importPlaylistM3u({ file: ${JSON.stringify(importFile)} })
+          const state = window.__aria.store.get()
+          const playlists = state.settings.playlists || []
+          const current = state.ui.source.type === 'playlist' ? playlists.find((item) => item.id === state.ui.source.value) : null
+          /*
+           * 收尾：导入会把 ui.source 切到新播放列表（这是产品行为），但后面的搜索检查
+           * 期望的是"全部歌曲"。这里还原来源并删掉这个临时列表 —— 否则搜索只剩 2 首，
+           * 深度档会渲染 0 行（假红，实际是自检自己改了上下文）。
+           */
+          const createdId = current ? current.id : null
+          const snapshot = { ...result, playlists: playlists.length, currentName: current ? current.name : '', currentTracks: current ? current.trackIds.length : 0 }
+          window.__aria.actions.setSource({ type: 'all', value: null })
+          if (createdId) await window.__aria.actions.deletePlaylist(createdId)
+          return snapshot
+        `).catch((err) => ({ imported: false, error: err && err.message }))
+      : { imported: false }
+    record('m3u 导入：命中的建出新播放列表并切过去，缺文件/不在库里的按数报出来',
+      imported.imported === true &&
+      imported.added === m3uTracks.length &&
+      imported.currentTracks === m3uTracks.length &&
+      imported.missing === 1 &&
+      imported.currentName.length > 0,
+      `导入 added=${imported.added}（应为 ${m3uTracks.length}）、新播放列表「${imported.currentName}」里有 ${imported.currentTracks} 首、` +
+      `文件不存在 ${imported.missing} 首、不在音乐文件夹 ${imported.notInLibrary} 首`)
+
+
     // media:// 协议：Range 支持与 CORS 头（seek 与 WebAudio 接入点都依赖它们）
     const protocolResult = await evaluate(win, `
       const track = window.__aria.player.currentTrack()

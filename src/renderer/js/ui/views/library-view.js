@@ -322,6 +322,31 @@ const compactTitle = h('div', { class: 'view-toolbar__title', text: defaultListT
             closeAllLayers()
             actions.rescan()
           }
+        },
+        { separator: true },
+        /*
+         * m3u（T2.2）。入口放在这个 ⋯ 里 —— 仓库里没有右键菜单体系，
+         * 而这里已经是"列表级低频操作"的既定入口（定位到正在播放 / 重新扫描也在这）。
+         */
+        {
+          label: '从 m3u 导入播放列表…',
+          value: '',
+          onClick: () => {
+            closeAllLayers()
+            actions.importPlaylistM3u().catch((err) => {
+              toast({ message: `导入失败：${err && err.message}`, type: 'error' })
+            })
+          }
+        },
+        {
+          label: '导出当前播放列表为 m3u…',
+          value: '',
+          onClick: () => {
+            closeAllLayers()
+            actions.exportCurrentPlaylistM3u().catch((err) => {
+              toast({ message: `导出失败：${err && err.message}`, type: 'error' })
+            })
+          }
         }
       ]
     })
