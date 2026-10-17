@@ -145,6 +145,29 @@ for (const [label, source] of [['settings.js', settingsSource], ['store.js', sto
   }
 }
 
+/* ---------- ⑨ 能力标记必须与"挂了哪些服务/插件"一致 ---------- */
+/*
+ * 渲染层靠 profile.capabilities 判断"这个产品有没有资料库/在线能力"，
+ * 而主进程靠 services / plugins 决定"到底挂不挂"。两者是同一个事实的两种表述，
+ * 一旦不一致就是典型的"界面说有、实际没有"（第 2 步就是在这里抓到
+ * "tracks is not iterable" 的：渲染层以为有资料库，主进程根本没挂 library）。
+ */
+for (const [id, def] of Object.entries(PROFILES)) {
+  const caps = def.capabilities || {}
+  const expect = {
+    library: (def.services || []).includes('library'),
+    lyrics: (def.services || []).includes('lyrics'),
+    // 在线能力由插件提供（online-media 注册了才有歌词/封面提供者）
+    online: (def.plugins || []).includes('onlineMedia')
+  }
+  for (const [name, value] of Object.entries(expect)) {
+    if (caps[name] !== value) {
+      problems.push(`档位 ${id} 的能力标记 capabilities.${name}=${caps[name]}，但按服务/插件算应当是 ${value} —— ` +
+        '两者必须同源，否则界面会说有、实际没有（或反过来）')
+    }
+  }
+}
+
 /* ---------- 报告 ---------- */
 console.log(`档位检查：full 服务 ${full ? full.services.length : 0} 个 / 插件 ${full ? full.plugins.length : 0} 个；` +
   `player 服务 ${player ? player.services.length : 0} 个（${player ? player.services.join('、') : '—'}）/ 插件 ${player ? player.plugins.length : 0} 个；` +

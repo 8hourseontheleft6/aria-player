@@ -1,7 +1,7 @@
 {
   "name": "aria-player",
   "productName": "Aria",
-  "version": "0.1.0-beta.47",
+  "version": "0.1.0-beta.48",
   "private": true,
   "description": "Aria —— iOS 设计风格的本地音乐播放器（Electron）",
   "main": "src/main/main.js",
@@ -28,7 +28,10 @@
     "make:mac-zip": "node scripts/make-mac-source-zip.js",
     "check:mac-config": "node scripts/checks/check-mac-config.js",
     "check:frosted": "node scripts/checks/check-frosted.js",
-    "check:profiles": "node scripts/checks/check-profiles.js"
+    "check:profiles": "node scripts/checks/check-profiles.js",
+    "dist:player": "electron-builder --config electron-builder.player.yml --win --x64",
+    "dist:player:portable": "electron-builder --config electron-builder.player.yml --win portable --x64",
+    "dist:player:mac": "electron-builder --config electron-builder.player.yml --mac --publish never"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"
@@ -36,98 +39,5 @@
   "devDependencies": {
     "electron": "43.7.9",
     "electron-builder": "^26.15.3"
-  },
-  "build": {
-    "appId": "com.aria.player",
-    "productName": "Aria",
-    "asar": true,
-    "files": [
-      "src/**/*",
-      "package.json",
-      "!**/*.md",
-      "!docs/**",
-      "!scripts/**",
-      "!release/**",
-      "!tests/**",
-      "!src/main/smoke.js",
-      "!src/main/screenshot.js",
-      "!src/main/perf.js",
-      "!src/main/visual-audit.js"
-    ],
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "afterPack": "scripts/mac-adhoc-sign.js",
-    "win": {
-      "icon": "build/icon.png",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "Aria-Setup-${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "shortcutName": "Aria"
-    },
-    "portable": {
-      "artifactName": "Aria-${version}-portable.${ext}"
-    },
-    "mac": {
-      "icon": "build/icon.png",
-      "category": "public.app-category.music",
-      "darkModeSupport": true,
-      "identity": null,
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false,
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "Aria-${version}-${arch}.${ext}"
-    },
-    "dmg": {
-      "title": "Aria ${version}",
-      "iconSize": 128,
-      "contents": [
-        {
-          "x": 140,
-          "y": 190,
-          "type": "file"
-        },
-        {
-          "x": 400,
-          "y": 190,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ]
-    }
   }
 }

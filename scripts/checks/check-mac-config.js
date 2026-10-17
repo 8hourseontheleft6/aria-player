@@ -25,7 +25,29 @@ const path = require('node:path')
 const ROOT = path.join(__dirname, '..', '..')
 const problems = []
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
-const build = pkg.build || {}
+
+/*
+ * 打包配置的位置变了：从 package.json 的 build 段搬到 electron-builder*.yml
+ * （两个产品共用一份基座，避免两处配置各自漂移）。这条检查于是"读不到配置"报了一串红 ——
+ * 它没错，是位置变了，所以这里跟着改。
+ *
+ * 用**文本判定**而不是 yaml 解析：本项目没有 yaml 依赖，而这里的每一条判据
+ * （identity / hardenedRuntime / gatekeeperAssess / afterPack / mac 的 target 与 arch /
+ * dmg 里的 /Applications 链接 / files 的排除项）都是"配置里有没有这样一行"。
+ * 三个文件拼在一起看 —— 谁覆盖谁对这几条没有影响（这些只写在基座里）。
+ */
+const builderYml = ['electron-builder.base.yml', 'electron-builder.yml', 'electron-builder.player.yml']
+  .map((name) => {
+    const full = path.join(ROOT, name)
+    return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : ''
+  })
+  .join('\n')
+const build = {
+  afterPack: (/^\s*afterPack:\s*(\S+)\s*$/m.exec(builderYml) || [])[1],
+  hasIdentityNull: /^\s*identity:\s*null\s*$/m.test(builderYml),
+  hasHardenedRuntimeFalse: /^\s*hardenedRuntime:\s*false\s*$/m.test(builderYml),
+  hasGatekeeperAssessFalse: /^\s*gatekeeperAssess:\s*false\s*$/m.test(builderYml)
+}
 
 /* ---------- 1. 图标 ---------- */
 const iconPath = path.join(ROOT, 'build', 'icon.png')
@@ -46,10 +68,9 @@ if (!fs.existsSync(iconPath)) {
 }
 
 /* ---------- 2. 不签名三件套 ---------- */
-const mac = build.mac || {}
-if (mac.identity !== null) problems.push('build.mac.identity 不是 null —— 没有证书时会让签名阶段报错（我们要的是「不签名」）')
-if (mac.hardenedRuntime !== false) problems.push('build.mac.hardenedRuntime 不是 false —— 加固运行时要求签名与 entitlements')
-if (mac.gatekeeperAssess !== false) problems.push('build.mac.gatekeeperAssess 不是 false —— 不签名的包不需要 Gatekeeper 评估')
+if (!build.hasIdentityNull) problems.push('mac.identity 不是 null —— 没有证书时会让签名阶段报错（我们要的是「不签名」）')
+if (!build.hasHardenedRuntimeFalse) problems.push('mac.hardenedRuntime 不是 false —— 加固运行时要求签名与 entitlements')
+if (!build.hasGatekeeperAssessFalse) problems.push('mac.gatekeeperAssess 不是 false —— 不签名的包不需要 Gatekeeper 评估')
 
 /* ---------- 3. afterPack 钩子存在，且非 darwin 空转 ---------- */
 if (!build.afterPack) {
@@ -73,27 +94,29 @@ if (!build.afterPack) {
 }
 
 /* ---------- 4. 目标与架构 ---------- */
-const targets = Array.isArray(mac.target) ? mac.target : []
-const kinds = new Set(targets.map((t) => (typeof t === 'string' ? t : t && t.target)))
+/* yml 里 mac.target 是嵌套列表：`- target: dmg` + 下一行 `arch: [arm64, x64]`。
+ * 只取"出现过的 target 名"与"出现过的架构"，判据与原来一致（dmg 与 zip 都要有、两个架构都要有）。 */
+const kinds = new Set([...builderYml.matchAll(/-\s*target:\s*([a-zA-Z]+)/g)].map((m) => m[1]))
 const arches = new Set()
-for (const t of targets) for (const arch of (t && t.arch) || []) arches.add(arch)
+for (const match of builderYml.matchAll(/arch:\s*\[([^\]]+)\]/g)) {
+  for (const arch of match[1].split(',')) arches.add(arch.trim())
+}
 for (const kind of ['dmg', 'zip']) {
-  if (!kinds.has(kind)) problems.push(`build.mac.target 里没有 ${kind}（dmg 给朋友装，zip 是 dmg 打不开时的备选）`)
+  if (!kinds.has(kind)) problems.push(`mac.target 里没有 ${kind}（dmg 给朋友装，zip 是 dmg 打不开时的备选）`)
 }
 for (const arch of ['arm64', 'x64']) {
-  if (!arches.has(arch)) problems.push(`build.mac.target 里没有 ${arch} 架构（Apple Silicon 与 Intel 都要能跑）`)
+  if (!arches.has(arch)) problems.push(`mac.target 里没有 ${arch} 架构（Apple Silicon 与 Intel 都要能跑）`)
 }
 
 /* ---------- 5. dmg 里的 Applications 快捷方式 ---------- */
-const contents = (build.dmg && build.dmg.contents) || []
-const hasApplicationsLink = contents.some((item) => item && item.type === 'link' && item.path === '/Applications')
-if (!hasApplicationsLink) problems.push('build.dmg.contents 里没有指向 /Applications 的快捷方式 —— 朋友拖不进应用程序')
+const hasApplicationsLink = /^\s*path:\s*\/Applications\s*$/m.test(builderYml)
+if (!hasApplicationsLink) problems.push('dmg.contents 里没有指向 /Applications 的快捷方式 —— 朋友拖不进应用程序')
 
 /* ---------- 6. 成品不该带开发脚本 ---------- */
-const files = build.files || []
 for (const devOnly of ['smoke.js', 'screenshot.js', 'perf.js', 'visual-audit.js']) {
-  if (!files.some((rule) => rule.includes(devOnly))) {
-    problems.push(`build.files 没有排除 src/main/${devOnly} —— 开发自检脚本会进成品`)
+  // 基座里以 `- '!src/main/smoke.js'` 这种排除项出现
+  if (!builderYml.includes(devOnly)) {
+    problems.push(`files 没有排除 src/main/${devOnly} —— 开发自检脚本会进成品`)
   }
 }
 
@@ -123,9 +146,9 @@ if (!distMacArm.includes('--mac') || !distMacArm.includes('--arm64')) {
 }
 
 /* ---------- 报告 ---------- */
-console.log(`macOS 打包配置检查：图标 ${fs.existsSync(iconPath) ? '有' : '缺'}、` +
+console.log(`macOS 打包配置检查（读 electron-builder*.yml）：图标 ${fs.existsSync(iconPath) ? '有' : '缺'}、` +
   `目标 ${[...kinds].join('+') || '（无）'}、架构 ${[...arches].join('+') || '（无）'}、` +
-  `不签名=${mac.identity === null && mac.hardenedRuntime === false}`)
+  `不签名=${build.hasIdentityNull && build.hasHardenedRuntimeFalse}`)
 for (const problem of problems) console.log('  ✗ ' + problem)
 if (problems.length === 0) console.log('  配置检查：0 问题')
 process.exit(problems.length ? 1 : 0)

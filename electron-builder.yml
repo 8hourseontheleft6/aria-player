@@ -1,0 +1,27 @@
+# Aria 本体（完整功能）。共用部分见 electron-builder.base.yml。
+#
+# 产物名与输出目录刻意保持原样（release/Aria-Setup-<版本>.exe 等）：
+# 这个产品的产物路径已经被文档、脚本和用户习惯引用，改它只会制造麻烦。
+
+extends: ./electron-builder.base.yml
+
+appId: com.aria.player
+productName: Aria
+
+directories:
+  output: release
+
+win:
+  artifactName: Aria-Setup-${version}.${ext}
+
+portable:
+  artifactName: Aria-${version}-portable.${ext}
+
+nsis:
+  shortcutName: Aria
+
+mac:
+  artifactName: Aria-${version}-${arch}.${ext}
+
+dmg:
+  title: Aria ${version}

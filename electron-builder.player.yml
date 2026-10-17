@@ -1,0 +1,33 @@
+# Aria Player（轻量音频播放器）—— 与本体是**两个独立产品**：各自的 appId、产品名、
+# 产物名、userData 目录，因此可以同时安装、同时运行（互不抢单实例锁）。
+#
+# 换入口靠 extraMetadata.main：打包时把产物内 package.json 的 main 指到 main-player.js，
+# 那个文件把 ARIA_PROFILE 设成 player（身份在 requestSingleInstanceLock 之前确定）。
+# 共用部分见 electron-builder.base.yml。
+
+extends: ./electron-builder.base.yml
+
+appId: com.aria.player.lite
+productName: Aria Player
+
+extraMetadata:
+  main: src/main/main-player.js
+  productName: Aria Player
+
+directories:
+  output: release-player
+
+win:
+  artifactName: Aria-Player-Setup-${version}.${ext}
+
+portable:
+  artifactName: Aria-Player-${version}-portable.${ext}
+
+nsis:
+  shortcutName: Aria Player
+
+mac:
+  artifactName: Aria-Player-${version}-${arch}.${ext}
+
+dmg:
+  title: Aria Player ${version}

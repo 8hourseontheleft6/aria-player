@@ -117,6 +117,7 @@ function createMainWindow (ctx, profile) {
         id: profile.id,
         productName: profile.productName,
         plugins: profile.plugins,
+        capabilities: profile.capabilities,
         sidebar: profile.sidebar
       })}`]
     }

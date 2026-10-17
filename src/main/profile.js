@@ -36,6 +36,16 @@ const PROFILES = {
     ],
     // 渲染层插件：能力由"注册不注册"决定，online-media 不注册 = 没有在线歌词/封面
     plugins: ['trackInfoPanel', 'quickActions', 'onlineMedia'],
+    /*
+     * 能力标记：给**渲染层**判断用的、与上面两条同源的布尔量。
+     *
+     * 为什么需要它：渲染层有些启动路径会去问主进程要资料库（例如 app.js 的 loadLibrary），
+     * 而 player 档位没有 library 服务 —— 那个 IPC 会被兜成 null，渲染层再拿它当数组用就报
+     * "tracks is not iterable"（第 2 步的截图抓到的就是这个错误提示）。
+     * 与其在几十处写空值防御，不如让渲染层问一句"这个产品有没有资料库能力"。
+     * 这三个标记**必须与 services / plugins 一致**，check-profiles 会逐条交叉验证。
+     */
+    capabilities: { library: true, online: true, lyrics: true },
     // 侧栏是数据驱动的（store.js 的 sidebarOrder），短清单即可
     sidebar: ['songs', 'albums', 'artists', 'wall']
   },
@@ -50,6 +60,8 @@ const PROFILES = {
     services: ['settings', 'openedFiles'],
     // 一个插件都不注册：没有在线歌词/封面，也没有曲目信息面板
     plugins: [],
+    // 三个能力都没有 —— 与上面的 services / plugins 严格对应
+    capabilities: { library: false, online: false, lyrics: false },
     /*
      * 只有一份列表（打开的文件）。视图 id 仍叫 songs —— 渲染层的歌曲列表是"一列曲目"
      * 这个通用件，player 里它渲染的就是当前打开的文件（第 3 步接线）。
@@ -74,6 +86,12 @@ function resolveProfile (argv = process.argv) {
     if (arg.startsWith('--profile=')) requested = arg.slice('--profile='.length)
     else if (arg === '--profile') requested = argv[i + 1]
   }
+  /*
+   * 命令行优先，其次是**构建期默认值**（ARIA_PROFILE 环境变量，由第二个入口
+   * src/main/main-player.js 设置）。两个产品共用一份代码，而 electron-builder 只能给一个
+   * `main` —— 让"第二个入口"自己声明身份，比在打包配置里改 argv 干净，也不会污染用户命令行。
+   */
+  if (requested === null || requested === '') requested = process.env.ARIA_PROFILE || null
   if (requested === null || requested === '') {
     return { id: DEFAULT_PROFILE, requested: null, error: null, profile: PROFILES[DEFAULT_PROFILE] }
   }
@@ -94,4 +112,17 @@ function resolveProfile (argv = process.argv) {
   return { id, requested: id, error: null, profile: PROFILES[id] }
 }
 
-module.exports = { PROFILES, DEFAULT_PROFILE, resolveProfile }
+/**
+ * 每个产品自己的 userData 目录。
+ *
+ * full 档位返回 null —— 它继续用 Electron 的默认目录（现有用户的设置与缓存在原处，
+ * 升级后不会出现"我的资料库不见了"）。
+ * 独立目录有两个作用：① 两个产品的设置与缓存不共享；② Electron 的单实例锁按 userData 算，
+ * 于是本体与 Player **可以同时开着**（需求原文如此）。
+ */
+function profileUserDataDir (appDataDir, profile) {
+  if (!profile || profile.id === DEFAULT_PROFILE) return null
+  return require('node:path').join(appDataDir, `${profile.productName} (${profile.id})`)
+}
+
+module.exports = { PROFILES, DEFAULT_PROFILE, resolveProfile, profileUserDataDir }

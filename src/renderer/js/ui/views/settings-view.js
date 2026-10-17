@@ -954,7 +954,16 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       })
     ], { collapsible: true }))
 
-    scroll.appendChild(group('在线功能', [
+    /*
+     * 「在线功能」整组只在**这个档位真的提供在线能力**时出现。
+     *
+     * 判据是"扩展点有没有人实现"，不是"我是不是 player 档位"：
+     * 在线歌词/封面由插件 online-media 提供，player 档位不注册它，这一组就自然整组消失
+     * （需求：player 档位下这两个开关不出现）。用 if (profile === 'player') 去藏，会把
+     * "能力"和"身份"绑死 —— 以后任何档位少装这个插件，都得再补一处判断。
+     */
+    const hasOnlineProviders = host.list('lyricsProvider').length > 0 || host.list('artworkProvider').length > 0
+    if (hasOnlineProviders) scroll.appendChild(group('在线功能', [
       row({
         title: '在线补全（歌词 / 封面）',
         sub: '开启后会向 LRCLIB（歌词）与 Deezer / iTunes（封面）发起请求。这是本项目联网行为的总闸（歌词与封面都走它），**默认开启**（歌词自动匹配；封面默认不匹配，需要时可在下面单独打开）；想彻底断网就把这里关掉，两者一起停。请求全部由主进程发出，页面本身仍然不能联网。',

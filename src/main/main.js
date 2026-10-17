@@ -5,7 +5,7 @@ const { app, BrowserWindow, session } = require('electron')
 
 const { createContext } = require('./registry')
 const { registerSchemes, registerProtocols } = require('./protocols')
-const { PROFILES, resolveProfile } = require('./profile')
+const { PROFILES, resolveProfile, profileUserDataDir } = require('./profile')
 const { createSettingsService } = require('./services/settings')
 const { createLibraryService } = require('./services/library')
 const { createLyricsService } = require('./services/lyrics')
@@ -139,6 +139,35 @@ if (automationFlag) {
   const automationProfile = process.env.ARIA_USER_DATA || path.join(app.getPath('temp'), 'aria-dev-profile')
   app.setPath('userData', automationProfile)
   console.log(`[main] 自动化模式 ${automationFlag}：使用独立用户数据目录 ${automationProfile}，不影响你自己的设置与缓存`)
+}
+
+/*
+ * ARIA_USER_DATA 覆盖：**任何模式**都生效（原来只在自动化模式里读）。
+ *
+ * 用途是调试与测试：想在隔离档案里启动一次（例如同时开两个产品验证互不干扰），
+ * 又不想让它们跑到 %APPDATA% 里建目录。设了它就以它为准，两个档位都用这一份。
+ */
+if (process.env.ARIA_USER_DATA && !automationFlag) {
+  app.setPath('userData', process.env.ARIA_USER_DATA)
+  console.log(`[main] 按 ARIA_USER_DATA 使用指定用户数据目录 ${process.env.ARIA_USER_DATA}`)
+}
+
+/*
+ * 两个产品各自的 userData（设置与缓存不共享）。
+ *
+ * **必须在 requestSingleInstanceLock() 之前**：Electron 的单实例锁是按 userData 目录算的，
+ * 放在后面就会出现"本体开着时 Player 起不来"（或反过来）—— 而需求恰恰是两者能同时开着。
+ *
+ * 两个刻意的设计：
+ *   · full 档位**一个字都不改**（继续用 Electron 的默认目录）：现有用户的设置、播放列表、
+ *     封面缓存全在原处，升级后不会有"我的资料库不见了"这种惊吓；
+ *   · 自动化模式（上面那段）设过的路径优先 —— 自检/截图要能指定自己的档案目录，
+ *     不能因为档位而跑到用户真实的目录里去。
+ */
+if (!automationFlag && !process.env.ARIA_USER_DATA && profile.id !== 'full') {
+  const profileData = profileUserDataDir(app.getPath('appData'), profile)
+  app.setPath('userData', profileData)
+  console.log(`[main] ${profile.productName} 档位：独立用户数据目录 ${profileData}`)
 }
 
 // 自定义协议必须在 app ready 之前声明
@@ -338,7 +367,7 @@ async function bootstrap () {
   if (process.argv.includes('--smoke')) {
     const { runSmoke } = require('./smoke')
     win.webContents.once('did-finish-load', () => {
-      runSmoke({ win, ctx })
+      runSmoke({ win, ctx, profile })
         .then((ok) => app.exit(ok ? 0 : 1))
         .catch((err) => {
           console.error('[smoke] 执行异常:', err)

@@ -198,7 +198,13 @@ export function createTitlebar ({ store, bus, actions }) {
   })
 
   bus.on(EVENTS.TRACK_CHANGED, ({ track }) => {
-    document.title = track ? `${track.title} — ${track.artist}` : 'Aria'
+    /*
+     * 没在播放时用**产品名**做窗口标题，而不是写死的 'Aria'：
+     * player 档位下窗口标题应该显示「Aria Player」（任务栏、Alt+Tab 里才认得出是哪个产品）。
+     * 产品名来自档位（window.aria.profile），拿不到才退回 'Aria' —— 本体行为完全不变。
+     */
+    const productName = (window.aria && window.aria.profile && window.aria.profile.productName) || 'Aria'
+    document.title = track ? `${track.title} — ${track.artist}` : productName
   })
 
   store.select((state) => state.ui.scanProgress, (progress) => {

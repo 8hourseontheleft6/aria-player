@@ -68,6 +68,7 @@ const PROFILE = (window.aria && window.aria.profile) || {
   id: 'full',
   productName: 'Aria',
   plugins: BUILTIN_PLUGINS.map((plugin) => plugin.id),
+  capabilities: { library: true, online: true, lyrics: true },
   sidebar: ['songs', 'albums', 'artists', 'wall']
 }
 
@@ -1110,6 +1111,23 @@ async function main () {
   /* 资料库                                                              */
   /* ------------------------------------------------------------------ */
   async function loadLibrary () {
+    /*
+     * 没有资料库能力的产品（player 档位）**根本不该问**主进程要资料库：
+     * library:state 会被兜成 null，而下面要 for...of 迭代它 —— 实测就是启动时弹
+     * 「启动失败：tracks is not iterable」。与其在几十处写空值防御，不如在这里按能力短路。
+     */
+    if (!PROFILE.capabilities || PROFILE.capabilities.library !== true) {
+      /*
+       * 短路也要把状态标成"已加载（空）"，并**返回与正常路径同样的东西**（tracks 数组）：
+       * 调用方是 `const tracks = await loadLibrary()`，返回形状不一致会让启动断在那里
+       * （第一版返回了个对象，渲染层再没 ready，自检卡在"等待渲染层启动"）。
+       */
+      store.set((prev) => ({
+        ...prev,
+        library: { loaded: true, tracks: [], byId: new Map(), folders: [], scannedAt: null, totalDuration: 0 }
+      }))
+      return []
+    }
     const [tracks, state] = await Promise.all([
       remote.library.tracks(),
       remote.library.state()
@@ -1621,7 +1639,13 @@ async function main () {
     store.set((state) => ({
       ...state,
       ready: true,
-      app: { info, platform: info.platform, isMac: info.isMac }
+      /*
+       * 保留 state.app 里已有的字段（尤其 profile）：
+       * 这里以前是整块替换 `app: { info, platform, isMac }`，把 initialState 放进去的
+       * 档位信息一起丢掉了 —— 于是 player 档位下 allowedViews() 读不到清单，
+       * 侧栏又退回全量四页（专辑/艺人/媒体墙凭空出现）。这是第 2 步的检查抓出来的。
+       */
+      app: { ...state.app, info, platform: info.platform, isMac: info.isMac }
     }))
 
     applySettings(settings)

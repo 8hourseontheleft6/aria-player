@@ -1,0 +1,70 @@
+# 两个产品共用的打包配置。
+#
+#   electron-builder.yml        → Aria（本体）
+#   electron-builder.player.yml → Aria Player（轻量音频播放器）
+#
+# 为什么抽出来：两个产品的区别只有 appId / productName / 入口 / 产物名 / 输出目录，
+# 其余（files、asar、win/mac 目标、图标）必须一致 —— 抄两份迟早会漂移，
+# 而"两个产品的打包规则悄悄不一样"这种问题极难发现。
+#
+# 图标保持仓库里原有的 Electron 图标，不做自定义（本轮明确要求）。
+
+asar: true
+
+files:
+  - src/**/*
+  - package.json
+  - '!**/*.md'
+  - '!docs/**'
+  - '!scripts/**'
+  - '!release/**'
+  - '!release-player/**'
+  - '!tests/**'
+  # 自检 / 截图 / 帧率 / 视觉审计只在开发时用，不进产物
+  - '!src/main/smoke.js'
+  - '!src/main/screenshot.js'
+  - '!src/main/perf.js'
+  - '!src/main/visual-audit.js'
+
+directories:
+  buildResources: build
+
+afterPack: scripts/mac-adhoc-sign.js
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+mac:
+  icon: build/icon.png
+  category: public.app-category.music
+  darkModeSupport: true
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+
+dmg:
+  iconSize: 128
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications

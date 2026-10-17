@@ -42,7 +42,7 @@ const invoke = (channel) => (payload) => ipcRenderer.invoke(channel, payload)
  */
 const PROFILE_ARG = '--aria-profile-json='
 const profileArg = (process.argv || []).find((arg) => String(arg).startsWith(PROFILE_ARG))
-const fallbackProfile = { id: 'full', productName: 'Aria', plugins: [], sidebar: ['songs', 'albums', 'artists', 'wall'] }
+const fallbackProfile = { id: 'full', productName: 'Aria', plugins: [], capabilities: { library: true, online: true, lyrics: true }, sidebar: ['songs', 'albums', 'artists', 'wall'] }
 let profile = fallbackProfile
 if (profileArg) {
   try {
@@ -52,6 +52,7 @@ if (profileArg) {
         id: parsed.id,
         productName: typeof parsed.productName === 'string' ? parsed.productName : 'Aria',
         plugins: Array.isArray(parsed.plugins) ? parsed.plugins : [],
+        capabilities: parsed.capabilities && typeof parsed.capabilities === 'object' ? parsed.capabilities : {},
         sidebar: Array.isArray(parsed.sidebar) && parsed.sidebar.length ? parsed.sidebar : fallbackProfile.sidebar
       }
     }

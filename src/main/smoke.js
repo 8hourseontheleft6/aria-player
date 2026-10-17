@@ -126,7 +126,138 @@ async function visibilitySnapshot (win) {
   }
 }
 
-async function runSmoke ({ win, ctx }) {
+/**
+ * player 档位（Aria Player）的自检。
+ *
+ * 与本体那 195 条**不是一回事**，所以没有共用：本体验的是"资料库、歌词、在线、媒体墙、
+ * 播放链路"这一整套；Player 在本轮（第 2 步）还是个能启动的空壳，要验的是
+ * **"该有的有、不该有的没有"** —— 服务清单纯净、在线能力不存在、设置页里没有那几颗开关、
+ * 侧栏只有一份列表、空状态有话说、userData 与本体分开。
+ *
+ * 第 3 步给它接上真正的功能（打开文件 / 拖放 / 最近打开 / 队列）之后，往这里继续加。
+ */
+async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
+  /* ① 主进程挂的服务：一个不多、一个不少 */
+  const expectedServices = ['openedFiles', 'settings']
+  const services = ctx.list().slice().sort()
+  record('主进程只挂了本档位的服务（表外的都没被 define）',
+    services.join('|') === expectedServices.join('|'),
+    `ctx.list() = [${services.join('、')}]（应为 [${expectedServices.join('、')}]）`)
+
+  /* ② 资料库 / 在线 / 歌词 / 监听这些能力**不存在**（不是"存在但关掉了"） */
+  const forbidden = ['library', 'lyrics', 'online', 'ai', 'musicSources', 'tray', 'watcher', 'background']
+  const present = forbidden.filter((name) => ctx.has(name))
+  record('资料库 / 在线 / 歌词 / 目录监听在 player 档位里根本不存在',
+    present.length === 0,
+    present.length
+      ? `不该存在的服务：${present.join('、')}`
+      : `逐个确认 ${forbidden.length} 个服务都不存在（问能力，不是用 if 关掉）`)
+
+  /* ③ userData 与本体分开（单实例锁按它算，两者才能同开） */
+  const { app } = require('electron')
+  const { profileUserDataDir } = require('./profile')
+  const ownData = profileUserDataDir(app.getPath('appData'), profile)
+  const actual = app.getPath('userData')
+  const automation = Boolean(process.env.ARIA_USER_DATA) || process.argv.includes('--smoke')
+  record('player 的 userData 与本体分开（自动化模式下仍用指定的档案目录）',
+    Boolean(ownData) && ownData.includes('Aria Player') &&
+    (automation ? actual !== ownData : actual === ownData),
+    `本档位目录 ${ownData}；实际使用 ${actual}（${automation ? '自动化模式：按 ARIA_USER_DATA/临时目录，避免动到真实档案' : '与设定一致'}）`)
+
+  await waitFor(win, 'window.__aria && window.__aria.store.get().ready === true', { label: '渲染层启动', timeout: 30000 })
+  record('渲染层启动', true)
+
+  /* ④ 渲染层拿到的身份、侧栏清单、以及"在线能力不存在" */
+  const shell = await evaluate(win, `
+    const { store, host, actions } = window.__aria
+    const state = store.get()
+    const visibleRows = [...document.querySelectorAll('.sidebar__row')].filter((node) => node.getClientRects().length > 0)
+    const rowTexts = visibleRows.map((node) => (node.textContent || '').trim())
+    /*
+     * 视图项要按 data-view-key 数：可见的侧栏行还包含「正在播放 / 播放队列 / 新建播放列表 / 设置」，
+     * 按文字数会把它们算进去。另外**不能**拿 state.settings.sidebarOrder 当判据 ——
+     * 那是用户持久化下来的顺序（老档案里就是四项），渲染时会被 allowedViews 过滤，
+     * 量它等于量错了对象（第一版就是这么红的）。
+     */
+    const viewKeys = visibleRows.map((node) => node.dataset.viewKey).filter(Boolean)
+    actions.setView('settings')
+    await new Promise((r) => setTimeout(r, 400))
+    const titles = [...document.querySelectorAll('.settings__row-title')].map((node) => (node.textContent || '').trim())
+    const onlineTitles = titles.filter((title) => /在线歌词|在线封面|在线补全|在线艺人/.test(title))
+    actions.setView('songs')
+    await new Promise((r) => setTimeout(r, 300))
+    return {
+      profileId: window.aria && window.aria.profile ? window.aria.profile.id : '(没有)',
+      productName: window.aria && window.aria.profile ? window.aria.profile.productName : '',
+      sidebarOrder: state.settings.sidebarOrder,
+      viewKeys,
+      profileSidebar: window.aria && window.aria.profile ? window.aria.profile.sidebar : [],
+      rowTexts,
+      forbiddenLabels: rowTexts.filter((text) => /专辑|艺人|媒体墙/.test(text)),
+      lyricsProviders: host.list('lyricsProvider').length,
+      artworkProviders: host.list('artworkProvider').length,
+      settingsRowCount: titles.length,
+      onlineTitles,
+      tracks: state.library.tracks.length,
+      domNodes: document.querySelectorAll('*').length,
+      hasEmptyState: [...document.querySelectorAll('.empty')].some((node) => node.getClientRects().length > 0)
+    }`)
+
+  record('渲染层拿到的档位是 player（不是靠 if 猜的）',
+    shell.profileId === 'player' && shell.productName === 'Aria Player',
+    `window.aria.profile.id=${shell.profileId}、productName=${shell.productName}`)
+
+  record('侧栏只渲染本档位的视图（专辑 / 艺人 / 媒体墙没有出现）',
+    Array.isArray(shell.profileSidebar) && shell.profileSidebar.join('|') === 'songs' &&
+    shell.viewKeys.join('|') === 'songs' && shell.forbiddenLabels.length === 0,
+    `档位清单=[${shell.profileSidebar}]、实际渲染的视图项=[${shell.viewKeys}]；可见侧栏行 ${shell.rowTexts.length} 个` +
+    `（${shell.rowTexts.slice(0, 6).join('、')}）；不该出现的标签 ${shell.forbiddenLabels.length} 个` +
+    `；持久化的 sidebarOrder=[${shell.sidebarOrder}]（老档案里有四项，渲染时会按档位过滤掉）`)
+
+  record('在线歌词 / 在线封面在渲染层没有提供者（插件没注册 = 能力不存在）',
+    shell.lyricsProviders === 0 && shell.artworkProviders === 0,
+    `lyricsProvider ${shell.lyricsProviders} 个、artworkProvider ${shell.artworkProviders} 个（都应为 0）`)
+
+  record('设置页里不出现在线歌词 / 封面那几颗开关',
+    shell.onlineTitles.length === 0 && shell.settingsRowCount > 5,
+    `设置项 ${shell.settingsRowCount} 行，其中在线相关 ${shell.onlineTitles.length} 行` +
+    (shell.onlineTitles.length ? `（不该有：${shell.onlineTitles.join('、')}）` : ''))
+
+  record('没有资料库内容（player 不扫描、不建索引）',
+    shell.tracks === 0,
+    `渲染层曲目 ${shell.tracks} 首（应为 0 —— 打开文件的功能在第 3 步接上）`)
+
+  record('空列表给出空状态（有话说，不是一块空白）',
+    shell.hasEmptyState === true && shell.domNodes > 200,
+    `可见空状态=${shell.hasEmptyState}、DOM 节点 ${shell.domNodes} 个`)
+
+  /*
+   * 按需留一张外观证据。
+   *
+   * player 的界面与本体**不一样**（侧栏只剩一份列表、设置页没有在线那几组），
+   * 而"改了 UI 就要看一眼"是这个项目的硬规矩。截图工具那 38 张是给本体准备的
+   * （大部分需要资料库），所以这里用一条环境变量控制的一行捕获：
+   *   ARIA_PLAYER_SHOT=<路径> npx electron . --smoke --profile=player
+   * 默认不写任何文件。
+   */
+  const shotPath = process.env.ARIA_PLAYER_SHOT
+  if (shotPath) {
+    try {
+      await evaluate(win, `
+        const { actions } = window.__aria
+        actions.setView('songs')
+        await new Promise((r) => setTimeout(r, 600))
+        return true`)
+      const image = await win.capturePage()
+      require('node:fs').writeFileSync(shotPath, image.toPNG())
+      console.log(`  · 已写出外观截图：${shotPath}`)
+    } catch (error) {
+      console.warn('  · 外观截图失败（不影响自检结论）：', error && error.message)
+    }
+  }
+}
+
+async function runSmoke ({ win, ctx, profile }) {
   const checks = []
   const record = (name, ok, detail = '') => {
     checks.push({ name, ok, detail })
@@ -206,6 +337,20 @@ async function runSmoke ({ win, ctx }) {
    * 实测：某次强杀后自检连续卡在启动、日志停在 220 字节；删目录后立刻恢复。
    */
   console.log('\n=== Aria 自检 ===\n')
+
+  /*
+   * 档位分流：player 是**另一个产品**，它的自检子集与本体不同。
+   *
+   * 这里只做分流，**不复制**本体那 195 条 —— player 的检查在 runPlayerShellSmoke 里，
+   * 等第 3 步给它接上真正的功能（打开文件、队列、最近打开）再往那份清单里添。
+   * 本轮（第 2 步）它是个能启动的空壳，所以检查集中在"该有的有、不该有的没有"。
+   */
+  if (profile && profile.id !== 'full') {
+    await runPlayerShellSmoke({ win, ctx, profile, record })
+    clearInterval(watchdog)
+    printSummary()
+    return checks.every((check) => check.ok)
+  }
 
   try {
     // 调用方已经在 did-finish-load 之后才启动自检，这里直接开始

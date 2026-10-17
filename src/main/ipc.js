@@ -47,11 +47,28 @@ function registerMediaKeys (ctx) {
 
 function registerIpc (ctx) {
   const settings = ctx.get('settings')
-  const library = ctx.get('library')
-  const lyrics = ctx.get('lyrics')
-  const online = ctx.get('online')
-  const ai = ctx.get('ai')
-  const sources = ctx.get('musicSources')
+  /*
+   * 档位差异：某些服务在这个档位里根本没挂（例如 player 没有 library / online）。
+   *
+   * 以前这里在**顶层**直接 `ctx.get('library')` —— 于是 player 档位一启动就
+   * `服务未注册: library` 抛在 registerIpc 里，整个应用起不来。
+   * 现在改成**懒解析**：注册频道时不碰服务，等到渲染层真的调那个频道才去取；
+   * 取不到就由下面的包装器返回一个明确的"本档位没有这个能力"。
+   * 这样"能力不存在"只在**用它的时候**显形，而不是把启动也一起挡掉 ——
+   * 也顺带说明该能力在这个产品里本就不该被调用（渲染层那边也不该展示入口）。
+   */
+  const lazy = (name) => new Proxy({}, {
+    get (_target, prop) {
+      const service = ctx.get(name)
+      const value = service[prop]
+      return typeof value === 'function' ? value.bind(service) : value
+    }
+  })
+  const library = lazy('library')
+  const lyrics = lazy('lyrics')
+  const online = lazy('online')
+  const ai = lazy('ai')
+  const sources = lazy('musicSources')
 
   /** @type {Map<string, Function>} */
   const handlers = {
@@ -200,7 +217,22 @@ function registerIpc (ctx) {
   }
 
   for (const [channel, handler] of Object.entries(handlers)) {
-    ipcMain.handle(channel, handler)
+    /*
+     * 包装一层：本档位没有的能力（懒解析时才抛"服务未注册"）返回 null 并留一行日志，
+     * 其它异常照旧抛出去 —— 不要用一个大 try/catch 把所有错误都吞成"没有这个能力"，
+     * 那会把真正的 bug 藏起来。
+     */
+    ipcMain.handle(channel, (event, payload) => {
+      try {
+        return handler(event, payload)
+      } catch (error) {
+        if (/服务未注册/.test(String(error && error.message))) {
+          console.warn(`[ipc] ${channel}：本档位没有这个能力（${error.message}）`)
+          return null
+        }
+        throw error
+      }
+    })
   }
 
   /* ---------- 主进程事件 -> 渲染层 ---------- */
