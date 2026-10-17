@@ -215,12 +215,40 @@ async function runScreenshots ({ win }) {
         return true`)
     }],
     ['03-now-playing-info.png', '歌曲信息面板（插件扩展点）', async () => {
+      /*
+       * 显式打开播放页再切标签 —— 不能假设上一张（02）把它留着。
+       * 每张出图前的"清场"会按一次 Esc，而 Esc 的处理器会**关掉全屏播放页**，
+       * 于是这里点标签落空（`target?.click()` 静默无效），拍到的是歌曲列表 ——
+       * 文件名写着"歌曲信息面板"，内容却是歌曲列表，而且完全无声。
+       * 与 14/15 那两张同一个病：prepare 依赖上一张留下的状态。
+       */
       await evaluate(win, `
+        const { actions, store } = window.__aria
+        if (!store.get().ui.nowPlayingOpen) actions.openNowPlaying({ lyrics: false })
+        await new Promise((r) => setTimeout(r, 1200))
         const tabs = [...document.querySelectorAll('.now-playing__tab')]
         const target = tabs.find((t) => t.textContent !== '歌词')
-        target?.click()
-        return true`)
-      await sleep(800)
+        if (target) target.click()
+        return { tabs: tabs.length, clicked: Boolean(target) }`)
+      /*
+       * 等信息面板**真的画出可见内容**再拍，而不是睡固定时长。
+       *
+       * 这一页由插件（track-info-panel）提供，渲染前要 await 一次
+       * `artwork.resolveUrl(track)`（读磁盘或联网）——睡固定时长会拍到一片空白。
+       * 判据必须限定**可见**：第一版写 `document.body.innerText.includes('采样率')`，
+       * 被隐藏子树里的同名文字骗过（等待"成功"了，画面还是空的）。
+       * 与艺人头像那处同一套办法：等条件；等不到只记一行、继续拍，
+       * 别让一次插件异常毁掉整轮出图。
+       */
+      try {
+        await waitFor(win, `
+          [...document.querySelectorAll('.now-playing__panel-host *')]
+            .some((node) => node.getClientRects().length > 0 && (node.textContent || '').includes('采样率'))`,
+        { timeout: 8000, label: '歌曲信息面板' })
+      } catch (error) {
+        console.log('  · 03-now-playing-info.png：等歌曲信息面板超时，按当前画面继续 —— 这只影响这一张')
+      }
+      await sleep(600)
     }],
     ['04-queue.png', '播放队列', async () => {
       await evaluate(win, `
@@ -1207,12 +1235,15 @@ async function runScreenshots ({ win }) {
      */
     const captured = await evaluate(win, `
       const state = window.__aria.store.get()
-      const heading = document.querySelector('.view-header__title, .browse-detail__title, .now-playing__title')
+      // 只取**可见的**标题：各视图都留在 DOM 里，不筛可见会抓到别的视图的标题
+      // （实测出现过 settings 视图却报"搜索结果"——那是隐藏的歌曲视图标题）
+      const headings = [...document.querySelectorAll('.view-header__title, .browse-detail__title, .now-playing__title')]
+        .filter((node) => node.getClientRects().length > 0)
       return {
         view: state.ui.view,
         detail: state.ui.detail ? state.ui.detail.type : '',
         panel: state.ui.nowPlayingOpen ? 'now-playing' : '',
-        heading: (heading ? heading.textContent : '').trim().slice(0, 12)
+        heading: (headings[0] ? headings[0].textContent : '').trim().slice(0, 12)
       }`)
     const where = [captured.view, captured.detail, captured.panel].filter(Boolean).join('/')
     console.log(`  ✓ ${file} — ${label}  ${deltaText}  [视图：${where}${captured.heading ? ' · ' + captured.heading : ''}]`)

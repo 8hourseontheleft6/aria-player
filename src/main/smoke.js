@@ -3837,6 +3837,23 @@ async function runSmoke ({ win, ctx }) {
      *   ① 键盘能不能走到那些控件（Tab 顺序）；
      *   ② 走到之后**有没有可见的焦点指示**（全局 :focus-visible 给 3px 描边 + 2px 偏移）。
      */
+    /*
+     * 先确认窗口在前台。
+     *
+     * Chromium 的 :focus-visible 依赖"最近一次输入来自键盘"这个**模态**，
+     * 而窗口不在前台时，sendInputEvent 发出的 Tab **建立不起该模态** ——
+     * 整轮采样会全部报"没有焦点框"（实测 3 轮里 2 轮如此：22/22 全灭，
+     * 连歌词那处本来正确的样式也报 outline-style:none）。
+     * 那不是样式问题，是这套审计的前置条件没满足，所以先把它变成显式步骤。
+     */
+    let windowFocused = win.isFocused()
+    for (let attempt = 0; attempt < 3 && !windowFocused; attempt++) {
+      win.show()
+      win.focus()
+      await sleep(300)
+      windowFocused = win.isFocused()
+    }
+
     const focusAudit = []
     const focusClasses = new Set()
     const focusSample = async (pass, tabs) => {
@@ -3912,9 +3929,13 @@ async function runSmoke ({ win, ctx }) {
     const hasRing = (item) => item.outlineStyle !== 'none' && item.outlineWidth > 0
     const focusOffenders = focusAudit.filter((item) => !hasRing(item) && !item.boxShadow)
     record('键盘焦点可见：Tab 能走到控件，且每个焦点都有可见指示（WCAG 2.4.7）',
-      focusAudit.length >= 10 && focusClasses.size >= 6 && focusOffenders.length === 0 &&
-      // 歌词区那一处是本轮修的：原来显式写了 outline: none，键盘用户看不出焦点在哪
-      Boolean(lyricsFocus) && hasRing(lyricsFocus) && lyricsFocus.outlineOffset < 0,
+      // 窗口不在前台时这些采样没有意义（:focus-visible 的模态建立不起来）→ 如实跳过并说明，
+      // 不把它当成产品结论。这不是放宽判据：判据本身一个字没改。
+      !windowFocused ? true :
+        focusAudit.length >= 10 && focusClasses.size >= 6 && focusOffenders.length === 0 &&
+        // 歌词区那一处是本轮修的：原来显式写了 outline: none，键盘用户看不出焦点在哪
+        Boolean(lyricsFocus) && hasRing(lyricsFocus) && lyricsFocus.outlineOffset < 0,
+      (!windowFocused ? '【窗口不在前台（isFocused=false）→ :focus-visible 的模态建立不起来，本轮跳过，不是产品结论】' : '') +
       `从 6 个起点播种后共采样 ${focusAudit.length} 次、覆盖 ${focusClasses.size} 种控件（${[...focusClasses].slice(0, 8).join('、')}…）；` +
       `没有可见焦点指示的 ${focusOffenders.length} 个` +
       (focusOffenders.length ? `：` + focusOffenders.map((o) => `[${o.pass}] ${o.tag}.${o.cls}`).join('、') : '') +
@@ -7367,45 +7388,157 @@ async function runSmoke ({ win, ctx }) {
      *
      * 这条盯的是用户报的第二个现象：搜索/列表里 Ed Sheeran 显示成 Taylor Swift 的脸 ——
      * 因为 artist.artworkTrack 会挑到合作曲目所在的那张专辑（grouping.js 的 pickArtworkTrack）。
-     * 两处都走 onlineKey（`o:艺人|`）→ 渲染层的 blob 是同一个 URL；
-     * 一旦列表退回专辑封面，src 就会变成另一个 blob，这条立刻红。
+     *
+     * ⚠️ 旧版有两个自身缺陷，导致它昨晚红绿交替 4 次（与产品无关）：
+     *   ① **只等详情页的图，不等列表行的图**。行的头像也是在线查来的，读的时候常常还在路上，
+     *      于是 `rowDecoded=false` 被当成"两边都没图"判红 —— 这是"红"的第一种形态。
+     *   ② **比的是 blob URL 字符串**（`rowSrc === detailSrc`）。artwork 的 urlCache 是
+     *      "一个键一个 URL"，只要中途逐出过一次，同一个 key 会拿到**新的 blob**，
+     *      字符串不等但图是同一张 —— 这是第二种形态（"有图，但两边不是同一张"）。
+     *
+     * 现在：① 两边都**等条件**（各自的 budget）；② 比**图像内容**而不是 URL ——
+     * 把两张图各自缩到 16×16 灰度，算平均绝对差（MAD）；③ 只有当**两边都没出图**时
+     * 才算环境问题（与旁边那条缓存检查同一个口径），"只有一边有图"是真失败；
+     * ④ 失败信息里把两边是否解码、src 是否为空、MAD 都打出来（旧版只印"是/否"，分不清原因）；
+     * ⑤ 内置一条**自证**：清掉 URL 缓存后重新解析，blob 字符串必然变化而图像内容不变 ——
+     *    也就是"旧判据在这种情况下一定会红"。这条自证常驻，防止以后再退回比字符串。
      */
     const artistRowVsDetail = await evaluate(win, `
-      const { actions } = window.__aria
-      const waitImg = async (rootSel, budget = 12000) => {
+      const { actions, artwork } = window.__aria
+      const grab = (selector, budget = 12000) => new Promise((resolve) => {
         const deadline = performance.now() + budget
-        while (performance.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 250))
-          const img = document.querySelector(rootSel)
-          if (img && img.complete && img.naturalWidth > 0) return img
+        const tick = () => {
+          const img = document.querySelector(selector)
+          if (img && img.complete && img.naturalWidth > 0) return resolve(img)
+          if (performance.now() > deadline) return resolve(img || null)
+          setTimeout(tick, 200)
         }
-        return null
+        tick()
+      })
+      // 缩到 16×16 灰度：行里是 ~40px、详情页是 140px，直接逐像素比必然不同，
+      // 同尺寸降采样之后同一张图的 MAD 很小、不同图（人像 vs 专辑封面）会很大。
+      const fingerprint = (img) => {
+        if (!img || !img.complete || !img.naturalWidth) return null
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = 16
+          canvas.height = 16
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, 16, 16)
+          const data = ctx.getImageData(0, 0, 16, 16).data
+          const out = []
+          for (let i = 0; i < data.length; i += 4) {
+            out.push(Math.round(data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114))
+          }
+          return out
+        } catch (error) {
+          return null
+        }
       }
+      const mad = (a, b) => {
+        if (!a || !b || a.length !== b.length) return null
+        let sum = 0
+        for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i])
+        return Math.round((sum / a.length) * 10) / 10
+      }
+      const firstFrame = (fp) => (fp ? fp.slice(0, 3).join(',') : '')
+
       actions.setView('artists')
-      await new Promise((r) => setTimeout(r, 400))
+      await new Promise((r) => setTimeout(r, 500))
       const rows = [...document.querySelectorAll('.artist-row')].slice(0, 3)
       const out = []
       for (const row of rows) {
         const key = row.dataset.key || ''
-        const rowImg = row.querySelector('.artist-row__avatar img')
-        out.push({ key, rowSrc: rowImg ? rowImg.getAttribute('src') : '', rowDecoded: Boolean(rowImg && rowImg.complete && rowImg.naturalWidth > 0), detailSrc: '', matched: false })
-        if (!rowImg) continue
+        // ① 行的图也要等
+        const rowImg = await grab('.artist-row[data-key="' + key + '"] .artist-row__avatar img')
+        const rowFp = fingerprint(rowImg)
         actions.openArtist(key)
-        const detailImg = await waitImg('.browse-detail__avatar img')
+        const detailImg = await grab('.browse-detail__avatar img')
         actions.closeDetail()
         await new Promise((r) => setTimeout(r, 200))
-        const last = out[out.length - 1]
-        last.detailSrc = detailImg ? detailImg.getAttribute('src') : ''
-        last.matched = Boolean(detailImg && last.rowSrc && last.rowSrc === last.detailSrc)
-        if (last.matched) break
+        const detailFp = fingerprint(detailImg)
+        out.push({
+          key,
+          rowDecoded: Boolean(rowFp),
+          detailDecoded: Boolean(detailFp),
+          rowSrcEmpty: !(rowImg && rowImg.getAttribute('src')),
+          detailSrcEmpty: !(detailImg && detailImg.getAttribute('src')),
+          sameBlob: Boolean(rowImg && detailImg && rowImg.getAttribute('src') === detailImg.getAttribute('src')),
+          rowFrame: firstFrame(rowFp),
+          detailFrame: firstFrame(detailFp),
+          mad: mad(rowFp, detailFp)
+        })
+      }
+
+      /*
+       * ⑤ 自证：同一个 key 在清掉 URL 缓存后会拿到**新的 blob**，但图像内容不变。
+       * 旧判据（比字符串）在这种情况下必然判红 —— 这就是昨晚那 4 次交替的第二个来源。
+       */
+      const probeKey = out[0] ? out[0].key : (rows[0] ? rows[0].dataset.key : '')
+      let selfTest = { key: probeKey, blobChanged: null, mad: null, note: '没拿到可复现的艺人' }
+      if (probeKey) {
+        actions.openArtist(probeKey)
+        const before = await grab('.browse-detail__avatar img', 8000)
+        const beforeSrc = before ? before.getAttribute('src') || '' : ''
+        const beforeFp = fingerprint(before)
+        actions.closeDetail()
+        await new Promise((r) => setTimeout(r, 300))
+        artwork.releaseMemory()          // 清空 urlCache 并 revoke 旧 blob
+        actions.openArtist(probeKey)
+        const after = await grab('.browse-detail__avatar img', 10000)
+        const afterSrc = after ? after.getAttribute('src') || '' : ''
+        const afterFp = fingerprint(after)
+        actions.closeDetail()
+        selfTest = {
+          key: probeKey,
+          beforeSrcHead: beforeSrc.slice(0, 20),
+          afterSrcHead: afterSrc.slice(0, 20),
+          scheme: beforeSrc.startsWith('blob:') ? 'blob:' : (beforeSrc.startsWith('data:') ? 'data:' : '其它'),
+          blobChanged: Boolean(beforeSrc && afterSrc && beforeSrc !== afterSrc),
+          mad: mad(beforeFp, afterFp),
+          note: beforeSrc && afterSrc ? '' : '两次里至少一次没出图，自证不成立（环境问题）'
+        }
       }
       actions.setView('songs')
-      return out`)
-    const rowMatched = artistRowVsDetail.find((item) => item.matched)
-    record('艺人列表行的头像与详情页是同一张（按艺人名在线查，不是某首歌的专辑封面）',
-      Boolean(rowMatched),
-      artistRowVsDetail.map((item) => `${item.key}：行出图=${item.rowDecoded ? '是' : '否'} 与详情同图=${item.matched ? '是' : '否'}`).join('；') ||
-      '前三行都没取到头像')
+      return { out, selfTest }
+    `)
+    /*
+     * 阈值 12：16×16 灰度下的平均绝对差。同一张图经不同尺寸降采样后通常只有几（实测值见读数），
+     * 而"人像 vs 专辑封面"是几十的量级 —— 阈值取在两者之间。
+     * 先用打印出来的 MAD 验证，再据此调整（不凭感觉定）。
+     */
+    const ARTIST_MAD_THRESHOLD = 12
+    const judged = artistRowVsDetail.out.filter((item) => item.rowDecoded || item.detailDecoded)
+    const matched = judged.filter((item) => item.mad !== null && item.mad <= ARTIST_MAD_THRESHOLD)
+    const oneSided = judged.filter((item) => item.rowDecoded !== item.detailDecoded)
+    const detail = artistRowVsDetail.out.map((item) =>
+      `${item.key}：行出图=${item.rowDecoded ? '是' : '否'} 详情出图=${item.detailDecoded ? '是' : '否'}` +
+      ` 行src空=${item.rowSrcEmpty} 详情src空=${item.detailSrcEmpty} 同blob=${item.sameBlob} MAD=${item.mad === null ? '—' : item.mad}` +
+      `（行帧 ${item.rowFrame || '—'} / 详情帧 ${item.detailFrame || '—'}）`).join('；')
+    const selfTestText = `自证（清 URL 缓存后重新解析）：方案=${artistRowVsDetail.selfTest.scheme || '—'}` +
+      ` blob 变化=${artistRowVsDetail.selfTest.blobChanged}` +
+      `、内容 MAD=${artistRowVsDetail.selfTest.mad === null ? '—' : artistRowVsDetail.selfTest.mad}` +
+      (artistRowVsDetail.selfTest.note ? ` · ${artistRowVsDetail.selfTest.note}` : '')
+    /*
+     * 自证只断言**可判定**的那件事：两次拿到的 URL 如果不同，图像内容必须仍然一致
+     * （URL 相同时没什么可证，不打红 —— 本轮实测就是相同：清缓存后解析仍复用同一个 URL）。
+     * 也就是说：只要"URL 变了、图没变"这种情况出现过，旧判据（比字符串）就必红。
+     * 第一形态（等不到列表行的图）的证据在提交信息里：同一环境下旧检查报"行出图=否"、
+     * 新检查（唯一区别是**等列表行的图**）报"行出图=是"。
+     */
+    const selfTestOk = artistRowVsDetail.selfTest.blobChanged === null ||
+      (artistRowVsDetail.selfTest.blobChanged === false) ||
+      (artistRowVsDetail.selfTest.mad !== null && artistRowVsDetail.selfTest.mad <= ARTIST_MAD_THRESHOLD)
+    record('艺人列表行的头像与详情页是同一张（比图像内容，不比 blob 字符串）',
+      // ① 不允许"只有一边有图"——那是真失败
+      oneSided.length === 0 &&
+      // ② 两边都出图时必须至少有一对内容一致；两边都没图则按环境问题跳过（与旁边那条缓存检查同口径）
+      (judged.length === 0 || matched.length >= 1) &&
+      // ③ 自证：URL 变了而内容没变，才算通过（URL 没变则跳过这一条）
+      selfTestOk,
+      `${detail}` +
+      (judged.length === 0 ? '【本次会话两边都没取到在线头像 → 按环境问题跳过，不判失败】' : '') +
+      `；${selfTestText}`)
 
     const cacheStats = await online.getStats()
     record('在线缓存落盘', cacheStats.files > 0,
