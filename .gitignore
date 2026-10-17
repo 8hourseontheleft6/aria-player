@@ -20,3 +20,6 @@ release/
 
 # Aria Player build output (second product, npm run dist:player)
 release-player/
+
+# Aria Unified build output (third product, npm run dist:unified)
+release-unified/

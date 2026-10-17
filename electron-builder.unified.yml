@@ -1,0 +1,70 @@
+# Aria Unified —— 第三个产品：**一个安装包，两种模式**。
+#
+#   点图标启动          → 没有音频文件 → full（完整版：资料库/艺人/专辑/歌词/在线）
+#   双击音频 / 文件关联 → argv 里有真实音频文件 → player（轻量播放器，直接播）
+#   显式 --profile=…    → 覆盖上面两条（调试用）
+#
+# 判定在 src/main/profile.js 的 resolveProfile 里，入口是 src/main/main-unified.js
+# （只声明 ARIA_PRODUCT=unified，不预设档位）。
+#
+# userData 按 **产品 × 档位** 分：`Aria Unified (full)` 与 `Aria Unified (player)`。
+# 于是"完整模式开着时再双击音频"会起一个**真正的 player 进程** —— 不同目录 = 不同单实例锁。
+#
+# 共用部分见 electron-builder.base.yml；前两个产品的身份字段（electron-builder.yml /
+# electron-builder.player.yml）一个字都没动。
+
+extends: ./electron-builder.base.yml
+
+appId: com.aria.player.unified
+productName: Aria Unified
+
+extraMetadata:
+  main: src/main/main-unified.js
+  productName: Aria Unified
+
+directories:
+  output: release-unified
+
+# 文件关联指向**自己**（Aria Unified），不是 Aria Player —— 双击音频时由谁接管
+# 取决于用户在系统里把哪个产品设为默认；两个产品各注册各的，互不覆盖。
+# 注意：关联只在安装版（nsis）里写注册表；portable 版不写，这是 electron-builder 的行为。
+fileAssociations:
+  - ext: mp3
+    name: MP3 音频（Aria Unified）
+    description: 用 Aria Unified 打开 MP3 音频
+    role: Viewer
+  - ext: m4a
+    name: M4A 音频（Aria Unified）
+    description: 用 Aria Unified 打开 M4A 音频
+    role: Viewer
+  - ext: flac
+    name: FLAC 音频（Aria Unified）
+    description: 用 Aria Unified 打开 FLAC 音频
+    role: Viewer
+  - ext: wav
+    name: WAV 音频（Aria Unified）
+    description: 用 Aria Unified 打开 WAV 音频
+    role: Viewer
+  - ext: ogg
+    name: OGG 音频（Aria Unified）
+    description: 用 Aria Unified 打开 OGG 音频
+    role: Viewer
+  - ext: opus
+    name: Opus 音频（Aria Unified）
+    description: 用 Aria Unified 打开 Opus 音频
+    role: Viewer
+
+win:
+  artifactName: Aria-Unified-Setup-${version}.${ext}
+
+portable:
+  artifactName: Aria-Unified-${version}-portable.${ext}
+
+nsis:
+  shortcutName: Aria Unified
+
+mac:
+  artifactName: Aria-Unified-${version}-${arch}.${ext}
+
+dmg:
+  title: Aria Unified ${version}

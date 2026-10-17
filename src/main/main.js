@@ -6,7 +6,10 @@ const { app, BrowserWindow, session } = require('electron')
 
 const { createContext } = require('./registry')
 const { registerSchemes, registerProtocols } = require('./protocols')
-const { PROFILES, resolveProfile, profileUserDataDir } = require('./profile')
+const {
+  PROFILES, PRODUCTS, resolveProduct, resolveProfile,
+  audioPathsFrom: audioPathsFromProfile, userDataDirFor
+} = require('./profile')
 const { createSettingsService } = require('./services/settings')
 const { createLibraryService } = require('./services/library')
 const { createLyricsService } = require('./services/lyrics')
@@ -22,19 +25,32 @@ const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = requir
 const { createOpenFilesBridge } = require('./open-files')
 
 /*
- * 产品档位（--profile=player，默认 full）。
+ * 产品 × 档位（两层身份，见 src/main/profile.js）。
  *
- * 这一行必须在最前面：它决定挂哪些服务、窗口给渲染层的档位，第 2 步起还决定 userData 目录。
- * 解析失败（认不出的档位名）不静默退回 —— 那会打出一个"名字叫 Player、其实是完整版"的包，
- * 而且永远没人发现。这里直接报错退出，让打包的人当场看见。
+ * 产品由入口文件声明（ARIA_PRODUCT）：aria / player / unified。
+ * 档位由启动方式决定：
+ *   · Aria Player 固定 player
+ *   · Aria Unified —— **带音频文件启动 = player，否则 full**（"一个安装包两种模式"）
+ *   · 显式 `--profile=…` 覆盖上面两条（调试用）
+ *
+ * 这两行必须在最前面：它们决定挂哪些服务、窗口给渲染层的档位、以及 userData 目录
+ * （Unified 的两种模式必须各有目录，否则"完整模式开着时双击音频"会撞单实例锁）。
+ * 解析失败（认不出的产品/档位名）不静默退回 —— 那会打出一个名不副实的包，而且永远没人发现。
  */
-const profileResult = resolveProfile(process.argv)
+const productResult = resolveProduct(process.env)
+if (productResult.error) {
+  console.error(`[main] ${productResult.error}\n       可选：ARIA_PRODUCT=${Object.keys(PRODUCTS).join(' / ')}`)
+  app.exit(2)
+}
+const product = productResult.product
+const profileResult = resolveProfile(process.argv, product)
 if (profileResult.error) {
   console.error(`[main] ${profileResult.error}\n       用法：--profile=full 或 --profile=player`)
   app.exit(2)
 }
 const profile = profileResult.profile
-console.log(`[main] 产品档位：${profile.id}（${profile.productName}），服务 ${profile.services.join(' / ')}，插件 ${profile.plugins.join(' / ') || '（无）'}`)
+console.log(`[main] 产品 ${product.id}（${product.productName}）× 档位 ${profile.id}（判定依据 ${profileResult.reason}），` +
+  `服务 ${profile.services.join(' / ')}，插件 ${profile.plugins.join(' / ') || '（无）'}`)
 
 /**
  * 服务名 → 工厂。表在 profile.js，工厂在这里 —— 分开是因为 profile.js 要能被
@@ -175,10 +191,20 @@ if (process.env.ARIA_USER_DATA && !automationFlag) {
  *   · 自动化模式（上面那段）设过的路径优先 —— 自检/截图要能指定自己的档案目录，
  *     不能因为档位而跑到用户真实的目录里去。
  */
-if (!automationFlag && !process.env.ARIA_USER_DATA && profile.id !== 'full') {
-  const profileData = profileUserDataDir(app.getPath('appData'), profile)
-  app.setPath('userData', profileData)
-  console.log(`[main] ${profile.productName} 档位：独立用户数据目录 ${profileData}`)
+if (!automationFlag && !process.env.ARIA_USER_DATA) {
+  /*
+   * 目录按 **产品 × 档位** 分（userDataDirFor）：
+   *   aria    → null（Electron 默认目录，行为一个字不改）
+   *   player  → Aria Player (player)
+   *   unified → Aria Unified (full) / Aria Unified (player)
+   * 所以"完整模式开着时再双击音频"能起一个**真正的 player 进程**（不同 userData = 不同单实例锁），
+   * 而不是把文件塞给完整版去导入。
+   */
+  const productData = userDataDirFor(app.getPath('appData'), product, profile.id)
+  if (productData) {
+    app.setPath('userData', productData)
+    console.log(`[main] ${product.productName} × ${profile.id}：独立用户数据目录 ${productData}`)
+  }
 }
 
 // 自定义协议必须在 app ready 之前声明
@@ -206,21 +232,10 @@ if (!app.requestSingleInstanceLock()) {
 
 /**
  * 从命令行里挑出音频文件路径。
- * Electron 的 argv 里混着可执行文件、`--profile=player`、`--smoke` 之类，只留真实存在的音频文件。
+ * 判据只有一份（profile.js 的 audioPathsFrom）—— 启动规则、文件关联、second-instance
+ * 三处必须完全一致，各写一份迟早会有一处漏掉某种扩展名。
  */
-function audioPathsFrom (argv = []) {
-  const list = []
-  for (const arg of argv) {
-    if (typeof arg !== 'string' || !arg || arg.startsWith('-')) continue
-    if (!/\.(mp3|m4a|flac|wav|ogg|oga|opus|aac|wma|aiff|aif)$/i.test(arg)) continue
-    try {
-      if (fs.statSync(arg).isFile()) list.push(arg)
-    } catch {
-      // 路径不存在就当没给过
-    }
-  }
-  return list
-}
+const audioPathsFrom = audioPathsFromProfile
 
 /**
  * 组装应用：注册服务 -> 注册协议 -> 注册 IPC -> 开窗 -> 增量扫描。
@@ -235,7 +250,11 @@ async function bootstrap () {
    * 之前是不加判断直接调的 —— 在 macOS 上这是「未实现的方法」，轻则抛错、重则应用起不来，
    * 而我们正要把它搬到别人的 Mac 上测，所以这里明确收进平台判断里。
    */
-  if (process.platform === 'win32') app.setAppUserModelId('com.aria.player')
+  /*
+   * 任务栏身份按**产品**给：三个产品各有 appId，否则 Windows 会把它们并成同一个任务栏按钮
+   * （同时开着时会互相覆盖图标与跳转列表）。前两个产品沿用原值，行为不变。
+   */
+  if (process.platform === 'win32') app.setAppUserModelId(product.appId || 'com.aria.player')
 
   const ctx = createContext()
   /*
@@ -434,7 +453,7 @@ async function bootstrap () {
   if (process.argv.includes('--smoke')) {
     const { runSmoke } = require('./smoke')
     win.webContents.once('did-finish-load', () => {
-      runSmoke({ win, ctx, profile })
+      runSmoke({ win, ctx, profile, product })
         .then((ok) => app.exit(ok ? 0 : 1))
         .catch((err) => {
           console.error('[smoke] 执行异常:', err)

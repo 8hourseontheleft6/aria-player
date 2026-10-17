@@ -168,6 +168,155 @@ for (const [id, def] of Object.entries(PROFILES)) {
   }
 }
 
+/* ---------- ⑩ 第三个产品：Aria Unified（一个安装包两种模式） ---------- */
+/*
+ * 这一段的判据分两类，都必须是"能机械判定"的：
+ *   a) 身份字段（appId / productName / 入口 / 输出目录 / 产物名）与启动规则；
+ *   b) **前两个产品的身份不许变** —— 用棘轮值盯着，改动必须是有意的。
+ */
+const { PRODUCTS, resolveProfile: resolveProfileForCheck } = require(path.join(root, 'src', 'main', 'profile.js'))
+
+const unifiedYmlPath = path.join(root, 'electron-builder.unified.yml')
+if (!fs.existsSync(unifiedYmlPath)) {
+  problems.push('没有 electron-builder.unified.yml —— 第三个产品出不了包')
+} else {
+  const unifiedYml = fs.readFileSync(unifiedYmlPath, 'utf8')
+  const expect = [
+    ['appId: com.aria.player.unified', 'appId 应当是 com.aria.player.unified'],
+    ['productName: Aria Unified', 'productName 应当是 Aria Unified'],
+    ['main: src/main/main-unified.js', '入口应当是 src/main/main-unified.js'],
+    ['output: release-unified', '输出目录应当是 release-unified'],
+    ['Aria-Unified-Setup-${version}', '安装包产物名应当是 Aria-Unified-Setup-*'],
+    ['Aria-Unified-${version}-portable', 'portable 产物名应当是 Aria-Unified-*-portable'],
+    ['extends: ./electron-builder.base.yml', '应当 extends 共用基座']
+  ]
+  for (const [needle, message] of expect) {
+    if (!unifiedYml.includes(needle)) problems.push(`electron-builder.unified.yml：${message}`)
+  }
+  /* fileAssociations 必须指向**自己**（第三产品），且覆盖需求点名的 5 种格式 */
+  for (const ext of ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'opus']) {
+    if (!new RegExp(`ext:\\s*${ext}\\b`).test(unifiedYml)) {
+      problems.push(`electron-builder.unified.yml 的 fileAssociations 里没有 ${ext}`)
+    }
+  }
+  if (!/name:\s*.*Aria Unified/.test(unifiedYml)) {
+    problems.push('electron-builder.unified.yml 的文件关联名字里没有 Aria Unified（关联要指向自己，不是 Aria Player）')
+  }
+}
+
+/* 前两个产品的身份：棘轮。改它必须是显式决定，不能顺手漂移。 */
+const identityRatchet = [
+  ['electron-builder.yml', [
+    ['appId: com.aria.player', 'appId'],
+    ['productName: Aria', 'productName'],
+    ['Aria-Setup-${version}', '安装包产物名']
+  ]],
+  ['electron-builder.player.yml', [
+    ['appId: com.aria.player.lite', 'appId'],
+    ['productName: Aria Player', 'productName'],
+    ['main: src/main/main-player.js', '入口'],
+    ['output: release-player', '输出目录'],
+    ['Aria-Player-Setup-${version}', '安装包产物名']
+  ]]
+]
+for (const [file, needles] of identityRatchet) {
+  const full = path.join(root, file)
+  if (!fs.existsSync(full)) { problems.push(`${file} 不见了 —— 前两个产品的身份配置不能丢`); continue }
+  const text = fs.readFileSync(full, 'utf8')
+  for (const [needle, what] of needles) {
+    if (!text.includes(needle)) problems.push(`${file} 的${what}不再是「${needle}」—— 前两个产品的身份不许改`)
+  }
+}
+
+/* 入口文件：只声明产品，**不预设档位**（否则 Unified 就永远是同一种模式了） */
+const unifiedEntryPath = path.join(root, 'src', 'main', 'main-unified.js')
+if (!fs.existsSync(unifiedEntryPath)) {
+  problems.push('没有 src/main/main-unified.js')
+} else {
+  const entry = fs.readFileSync(unifiedEntryPath, 'utf8')
+  if (!/ARIA_PRODUCT\s*=\s*'unified'/.test(entry)) problems.push("main-unified.js 必须设 ARIA_PRODUCT = 'unified'")
+  if (/ARIA_PROFILE\s*=/.test(entry.replace(/\/\*[\s\S]*?\*\//g, ''))) {
+    problems.push('main-unified.js 不许预设 ARIA_PROFILE —— 档位必须由启动方式决定（点图标=full，带文件=player）')
+  }
+  if (!/require\('\.\/main'\)/.test(entry)) problems.push("main-unified.js 应当 require('./main')（共用实现，不 fork）")
+}
+
+/* 产品表与启动规则：Unified 必须有"产品×档位"目录模式，且档位不预设 */
+const unifiedProduct = PRODUCTS.unified
+if (!unifiedProduct) {
+  problems.push('profile.js 的 PRODUCTS 里没有 unified')
+} else {
+  if (unifiedProduct.productName !== 'Aria Unified') problems.push('PRODUCTS.unified.productName 应当是 Aria Unified')
+  if (unifiedProduct.appId !== 'com.aria.player.unified') problems.push('PRODUCTS.unified.appId 应当是 com.aria.player.unified')
+  if (unifiedProduct.userDataMode !== 'product-profile') {
+    problems.push('PRODUCTS.unified.userDataMode 必须是 product-profile —— 两种模式各有自己的 userData')
+  }
+  if (unifiedProduct.presetProfile) problems.push('PRODUCTS.unified 不许有 presetProfile（档位要靠启动方式决定）')
+}
+if (PRODUCTS.aria && PRODUCTS.aria.userDataMode !== 'default') {
+  problems.push('PRODUCTS.aria.userDataMode 必须是 default —— 本体的资料库与缓存在原处，不许搬家')
+}
+if (PRODUCTS.player && PRODUCTS.player.presetProfile !== 'player') {
+  problems.push('PRODUCTS.player.presetProfile 必须是 player —— Aria Player 只有一种模式')
+}
+
+/* 启动规则本身：喂几组 argv，看推出什么档位 */
+{
+  const unified = PRODUCTS.unified
+  const rules = [
+    [['app.exe'], 'full'],
+    [['app.exe', '--profile=player'], 'player'],
+    [['app.exe', '--profile=full'], 'full']
+  ]
+  for (const [argv, want] of rules) {
+    const got = resolveProfileForCheck(argv, unified)
+    if (got.id !== want) problems.push(`启动规则：argv [${argv.join(' ')}] 推出 ${got.id}，应为 ${want}`)
+  }
+  /* 带真实文件 → player；这里用一个仓库内一定存在的文件（profile.js 自己）改名成 .mp3 不现实，
+   * 所以拿 package.json 之外的真实音频不保证存在 —— 交给自检在运行时用真文件验。
+   * 纯静态能验的是"判定依据"字段存在：带文件时 reason 应当变成 argv-audio。 */
+  const synthetic = resolveProfileForCheck(['app.exe', 'C:\\definitely-not-here\\x.mp3'], unified)
+  if (synthetic.id !== 'full') problems.push('启动规则：不存在的文件不该把档位推成 player')
+}
+
+/* ---------- ⑪ 三个产品的身份必须两两不同（安装目录 / 开始菜单 / 卸载项不许撞） ---------- */
+/*
+ * 三套安装包共存的前提：appId、productName、开始菜单名、产物名前缀两两不同。
+ * electron-builder 的 NSIS 用 productName 决定默认安装目录与开始菜单项、用 appId 决定卸载项，
+ * 撞了就会出现"装第二个覆盖第一个"或"卸载项只剩一个"。这条纯静态就能验。
+ */
+{
+  const identities = [
+    ['electron-builder.yml', 'Aria 本体'],
+    ['electron-builder.player.yml', 'Aria Player'],
+    ['electron-builder.unified.yml', 'Aria Unified']
+  ]
+  .map(([file, label]) => {
+    const full = path.join(root, file)
+    if (!fs.existsSync(full)) return null
+    const text = fs.readFileSync(full, 'utf8')
+    return {
+      label,
+      appId: (/^appId:\s*(\S+)\s*$/m.exec(text) || [])[1] || '',
+      productName: (/^productName:\s*(.+?)\s*$/m.exec(text) || [])[1] || '',
+      shortcut: (/^\s{2}shortcutName:\s*(.+?)\s*$/m.exec(text) || [])[1] || '',
+      output: (/^\s{2}output:\s*(\S+)\s*$/m.exec(text) || [])[1] || ''
+    }
+  })
+  .filter(Boolean)
+
+  if (identities.length !== 3) problems.push(`应当有 3 份产品打包配置，只找到 ${identities.length} 份`)
+  for (const field of ['appId', 'productName', 'shortcut', 'output']) {
+    const seen = new Map()
+    for (const item of identities) {
+      const value = item[field]
+      if (!value) { problems.push(`${item.label} 的 ${field} 没读到`); continue }
+      if (seen.has(value)) problems.push(`${item.label} 与 ${seen.get(value)} 的 ${field} 相同（「${value}」）—— 三个产品的安装身份不许撞`)
+      else seen.set(value, item.label)
+    }
+  }
+}
+
 /* ---------- 报告 ---------- */
 console.log(`档位检查：full 服务 ${full ? full.services.length : 0} 个 / 插件 ${full ? full.plugins.length : 0} 个；` +
   `player 服务 ${player ? player.services.length : 0} 个（${player ? player.services.join('、') : '—'}）/ 插件 ${player ? player.plugins.length : 0} 个；` +

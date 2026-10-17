@@ -1,7 +1,7 @@
 {
   "name": "aria-player",
   "productName": "Aria",
-  "version": "0.1.0-beta.48",
+  "version": "0.1.0-beta.49",
   "private": true,
   "description": "Aria —— iOS 设计风格的本地音乐播放器（Electron）",
   "main": "src/main/main.js",
@@ -31,7 +31,10 @@
     "check:profiles": "node scripts/checks/check-profiles.js",
     "dist:player": "electron-builder --config electron-builder.player.yml --win --x64",
     "dist:player:portable": "electron-builder --config electron-builder.player.yml --win portable --x64",
-    "dist:player:mac": "electron-builder --config electron-builder.player.yml --mac --publish never"
+    "dist:player:mac": "electron-builder --config electron-builder.player.yml --mac --publish never",
+    "dist:unified": "electron-builder --config electron-builder.unified.yml --win --x64",
+    "dist:unified:portable": "electron-builder --config electron-builder.unified.yml --win portable --x64",
+    "dist:unified:mac": "electron-builder --config electron-builder.unified.yml --mac --publish never"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"

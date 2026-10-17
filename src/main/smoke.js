@@ -422,7 +422,196 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record }) {
   }
 }
 
-async function runSmoke ({ win, ctx, profile }) {
+/**
+ * Aria Unified 的自检（第三道门）。
+ *
+ * 它不复制前两套：Unified 独有的只有两件 ——
+ *   ① **启动规则**（带音频文件 → player，不带 → full，`--profile` 覆盖）；
+ *   ② **产品 × 档位两级 userData**（`Aria Unified (full)` / `(player)`，与另两个产品互不共享）。
+ * 其余交给"当前档位那一套"去验（player 16 条 / 本体 195 条跑的是同一份实现）。
+ * 所以这里按**本次实际档位**分支：一次跑只验它自己那一侧，另一侧由另一条启动路径去跑。
+ */
+async function runUnifiedSmoke ({ win, ctx, profile, product, record }) {
+  const unifiedFs = require('node:fs')
+  const unifiedPath = require('node:path')
+  const { app: electronApp, dialog } = require('electron')
+  const {
+    resolveProfile, audioPathsFrom, userDataDirFor, PRODUCTS
+  } = require('./profile')
+
+  const launchedAudio = audioPathsFrom(process.argv)
+  const expected = resolveProfile(process.argv, product)
+
+  /* ① 本次确实按启动规则进了对应档位（"从关联启动后进的是 player"的机器判据） */
+  record('启动规则：本次档位与 argv 推断一致（带音频 → player，不带 → full）',
+    expected.id === profile.id,
+    `argv 里的音频文件 ${launchedAudio.length} 个、推断档位=${expected.id}（依据 ${expected.reason}）、` +
+    `实际档位=${profile.id}`,
+    { profiles: ['full', 'player'] })
+
+  /* ② 启动规则的边界（纯函数，直接喂 argv） */
+  const ruleCases = (() => {
+    const unified = PRODUCTS.unified
+    /* 两种模式都要能把"带文件→player"验一遍：full 模式下 argv 里没有文件，就现造一个真文件 */
+    const audio = launchedAudio[0] || (() => {
+      const dir = unifiedPath.join(__dirname, '..', '..', 'tests', 'unified-smoke')
+      unifiedFs.mkdirSync(dir, { recursive: true })
+      const file = unifiedPath.join(dir, 'rule-probe.wav')
+      if (!unifiedFs.existsSync(file)) {
+        const sampleRate = 8000
+        const buffer = Buffer.alloc(44 + sampleRate)
+        buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + sampleRate, 4); buffer.write('WAVE', 8)
+        buffer.write('fmt ', 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20)
+        buffer.writeUInt16LE(1, 22); buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(sampleRate, 28)
+        buffer.writeUInt16LE(1, 32); buffer.writeUInt16LE(8, 34); buffer.write('data', 36)
+        buffer.writeUInt32LE(sampleRate, 40)
+        for (let i = 0; i < sampleRate; i++) buffer[44 + i] = Math.round(128 + 100 * Math.sin((2 * Math.PI * 440 * i) / sampleRate))
+        unifiedFs.writeFileSync(file, buffer)
+      }
+      return file
+    })()
+    const cases = [
+      { name: '不带文件', argv: ['app.exe'], want: 'full' },
+      { name: '带真实音频文件', argv: audio ? ['app.exe', audio] : null, want: audio ? 'player' : null },
+      {
+        name: '带文件 + --profile=full',
+        argv: audio ? ['app.exe', audio, '--profile=full'] : null,
+        want: audio ? 'full' : null
+      },
+      {
+        name: '带不存在的音频路径',
+        argv: ['app.exe', unifiedPath.join(unifiedPath.sep, 'nope-not-here.mp3')],
+        want: 'full'
+      }
+    ]
+    return cases.filter((item) => item.argv).map((item) => ({
+      ...item,
+      got: resolveProfile(item.argv, unified).id
+    }))
+  })()
+  record('启动规则边界：无文件→full、有文件→player、--profile 覆盖、假路径不算',
+    ruleCases.length >= 3 && ruleCases.every((item) => item.got === item.want),
+    ruleCases.map((item) => `${item.name}: ${item.got}（应为 ${item.want}）`).join('；'),
+    { profiles: ['full', 'player'] })
+
+  /* ③ userData 按【产品 × 档位】分家，且与另两个产品互不共享 */
+  const appData = electronApp.getPath('appData')
+  const unifiedFull = userDataDirFor(appData, PRODUCTS.unified, 'full')
+  const unifiedPlayer = userDataDirFor(appData, PRODUCTS.unified, 'player')
+  const playerProductDir = userDataDirFor(appData, PRODUCTS.player, 'player')
+  const ariaProductDir = userDataDirFor(appData, PRODUCTS.aria, 'full') // aria 用默认目录 → null
+  const intended = userDataDirFor(appData, product, profile.id)
+  const actual = electronApp.getPath('userData')
+  const automation = Boolean(process.env.ARIA_USER_DATA) || process.argv.includes('--smoke')
+  const distinct = new Set([unifiedFull, unifiedPlayer, playerProductDir].filter(Boolean))
+  record('userData 按产品×档位分家：两种模式各一个目录，三个产品互不共享',
+    Boolean(unifiedFull) && Boolean(unifiedPlayer) && unifiedFull !== unifiedPlayer &&
+    distinct.size === 3 && ariaProductDir === null &&
+    Boolean(intended) && intended === (profile.id === 'full' ? unifiedFull : unifiedPlayer) &&
+    (automation ? true : actual === intended),
+    `full 目录=${unifiedFull}；player 目录=${unifiedPlayer}；Aria Player 目录=${playerProductDir}；` +
+    `Aria 本体=默认目录（不设 userData）；本次应有=${intended}；实际=${actual}` +
+    (automation ? '（自动化模式：按 ARIA_USER_DATA/临时目录，避免动到真实档案）' : ''),
+    { profiles: ['full', 'player'] })
+
+  /* ④ 按档位验它自己那一侧 */
+  await waitFor(win, 'window.__aria && window.__aria.store.get().ready === true',
+    { label: '渲染层启动', timeout: 60000 })
+
+  if (profile.id === 'player') {
+    let dialogCalls = 0
+    const originalShowMessageBox = dialog.showMessageBox
+    dialog.showMessageBox = async () => { dialogCalls++; return { response: 0 } }
+    let opened = null
+    try {
+      if (launchedAudio.length) {
+        opened = await evaluate(win, `
+          const result = await window.aria.library.handleDrop(${JSON.stringify(launchedAudio)})
+          window.__aria.actions.applyDropResult(result)
+          return { action: result.action, trackIds: result.trackIds.length, tracks: (result.tracks || []).length }`)
+        await sleep(1600)
+      }
+    } finally {
+      dialog.showMessageBox = originalShowMessageBox
+    }
+    const state = await evaluate(win, `
+      const s = window.__aria.store.get()
+      const host = window.__aria.host
+      return {
+        profileId: window.aria && window.aria.profile ? window.aria.profile.id : '',
+        status: s.playback.status,
+        tracks: s.library.tracks.length,
+        paths: s.library.tracks.map((track) => track.path),
+        lyricsProviders: host.list('lyricsProvider').length,
+        artworkProviders: host.list('artworkProvider').length,
+        hasLibraryCapability: Boolean(window.aria && window.aria.profile && window.aria.profile.capabilities && window.aria.profile.capabilities.library),
+        sidebar: s.settings.sidebarOrder,
+        /*
+         * 侧栏要量**渲染出来的**视图项：sidebarOrder 是持久化值（老档案里就是四项），
+         * 渲染时会按档位过滤 —— 量它等于量错对象（这条在 player 那套里已经踩过一次）。
+         */
+        viewKeys: [...document.querySelectorAll('.sidebar__row')]
+          .filter((node) => node.getClientRects().length > 0)
+          .map((node) => node.dataset.viewKey).filter(Boolean),
+        hasOpenedApi: Boolean(window.aria && window.aria.opened)
+      }`)
+    record('带文件启动 → 轻量播放器：文件进临时队列并直接播放（无资料库 / 无在线能力 / 0 确认框）',
+      state.profileId === 'player' &&
+      state.hasLibraryCapability === false &&
+      state.lyricsProviders === 0 && state.artworkProviders === 0 &&
+      state.hasOpenedApi === true &&
+      state.viewKeys.join('|') === 'songs' &&
+      launchedAudio.every((file) => state.paths.includes(file)) &&
+      state.status === 'playing' && dialogCalls === 0,
+      `档位=${state.profileId}、资料库能力=${state.hasLibraryCapability}、在线提供者 ${state.lyricsProviders}/${state.artworkProviders}、` +
+      `实际渲染的侧栏=[${state.viewKeys}]（持久化值 [${state.sidebar}]）、列表 ${state.tracks} 首、` +
+      `启动文件都在=${launchedAudio.every((file) => state.paths.includes(file))}、` +
+      `播放状态=${state.status}；解析=${opened ? `${opened.action}/${opened.tracks}首` : '（本次没带文件）'}、弹确认框 ${dialogCalls} 次（应为 0）`,
+      { profiles: ['full', 'player'] })
+
+    const userDataNames = unifiedFs.readdirSync(actual)
+    const forbidden = userDataNames.filter((name) => /^(library|index|artwork|cover)/i.test(name) || /artwork-cache|library\.json/i.test(name))
+    record('Unified 的轻量模式不生成资料库索引 / 封面缓存',
+      forbidden.length === 0,
+      `userData（${unifiedPath.basename(actual)}）里 ${userDataNames.length} 项` +
+      (forbidden.length ? `；不该有的：${forbidden.join('、')}` : '；没有 library/index/artwork 相关条目'),
+      { profiles: ['full', 'player'] })
+  } else {
+    const state = await evaluate(win, `
+      const { store, actions } = window.__aria
+      const s = store.get()
+      const sidebarRows = [...document.querySelectorAll('.sidebar__row')].filter((node) => node.getClientRects().length > 0)
+      const viewKeys = sidebarRows.map((node) => node.dataset.viewKey).filter(Boolean)
+      actions.setView('artists')
+      await new Promise((r) => setTimeout(r, 600))
+      const artistsVisible = [...document.querySelectorAll('.artist-row')].filter((node) => node.getClientRects().length > 0).length
+      actions.setView('albums')
+      await new Promise((r) => setTimeout(r, 600))
+      const albumsVisible = [...document.querySelectorAll('.cover-card')].filter((node) => node.getClientRects().length > 0).length
+      actions.setView('songs')
+      await new Promise((r) => setTimeout(r, 300))
+      return {
+        profileId: window.aria && window.aria.profile ? window.aria.profile.id : '',
+        hasLibraryCapability: Boolean(window.aria && window.aria.profile && window.aria.profile.capabilities && window.aria.profile.capabilities.library),
+        hasOpenedApi: Boolean(window.aria && window.aria.opened),
+        viewKeys,
+        artistsVisible,
+        albumsVisible,
+        tracks: s.library.tracks.length
+      }`)
+    record('不带文件启动 → 完整版：资料库 / 艺人 / 专辑都在，没有「打开的文件」入口',
+      state.profileId === 'full' &&
+      state.hasLibraryCapability === true &&
+      state.hasOpenedApi === false &&
+      state.viewKeys.join('|') === 'songs|albums|artists|wall' &&
+      state.artistsVisible > 0 && state.albumsVisible > 0,
+      `档位=${state.profileId}、资料库能力=${state.hasLibraryCapability}、打开文件入口=${state.hasOpenedApi}、` +
+      `侧栏=[${state.viewKeys}]、艺人行 ${state.artistsVisible}、专辑卡 ${state.albumsVisible}、曲目 ${state.tracks} 首`,
+      { profiles: ['full', 'player'] })
+  }
+}
+
+async function runSmoke ({ win, ctx, profile, product }) {
   const checks = []
   /*
    * 检查按档位打标（full / player / both）。
@@ -517,12 +706,19 @@ async function runSmoke ({ win, ctx, profile }) {
   console.log('\n=== Aria 自检 ===\n')
 
   /*
-   * 档位分流：player 是**另一个产品**，它的自检子集与本体不同。
-   *
-   * 这里只做分流，**不复制**本体那 195 条 —— player 的检查在 runPlayerShellSmoke 里，
-   * 等第 3 步给它接上真正的功能（打开文件、队列、最近打开）再往那份清单里添。
-   * 本轮（第 2 步）它是个能启动的空壳，所以检查集中在"该有的有、不该有的没有"。
+   * 产品 × 档位分流。**只分流，不复制检查**：
+   *   · Aria Unified → 第三道门（启动规则 + 两级 userData + 当前档位那一侧）
+   *   · Aria Player  → player 那套（16 条：打开文件 / 拖放 / 最近打开 / 不该有的没有）
+   *   · Aria 本体    → 下面那 195 条
+   * Unified 的两种模式各自跑自己的那一侧：点图标（full）与双击文件（player）是两条不同的
+   * 启动路径，任何一条单独跑都只证明一半 —— 所以验收时两边都要跑（见提交信息里的读数）。
    */
+  if (product && product.id === 'unified') {
+    await runUnifiedSmoke({ win, ctx, profile, product, record })
+    clearInterval(watchdog)
+    printSummary()
+    return checks.every((check) => check.ok)
+  }
   if (profile && profile.id !== 'full') {
     await runPlayerShellSmoke({ win, ctx, profile, record })
     clearInterval(watchdog)

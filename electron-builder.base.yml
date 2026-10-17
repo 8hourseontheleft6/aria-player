@@ -19,6 +19,7 @@ files:
   - '!scripts/**'
   - '!release/**'
   - '!release-player/**'
+  - '!release-unified/**'
   - '!tests/**'
   # 自检 / 截图 / 帧率 / 视觉审计只在开发时用，不进产物
   - '!src/main/smoke.js'
