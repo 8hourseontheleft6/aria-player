@@ -1923,11 +1923,21 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         }
       }
       const apply = async (source, track) => {
+        /*
+         * 量"来源色"的时候临时关掉 240ms 过渡：
+         * 不关的话读到的全是插值中间值（T2.3 加了 @property 过渡之后，两条断言一度因此变红）。
+         * 量完立刻恢复，不影响产品行为。
+         */
+        const root = document.documentElement
+        const savedTransition = root.style.transitionProperty
+        root.style.transitionProperty = 'none'
         window.__aria.store.set((state) => ({ ...state, settings: { ...state.settings, tintSource: source } }))
         const color = await artwork.resolveColor(track)
         if (!color) return null
         artwork.applyTint(color)
+        void root.offsetWidth
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+        root.style.transitionProperty = savedTransition
         return color
       }
 
@@ -2083,6 +2093,47 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `有内嵌封面时隐藏=${coverHintCheck.hiddenForCovered}；换成无封面曲目后出现=${coverHintCheck.shownForBare}` +
       `（文案「${coverHintCheck.text}」）；点击后 onlineFeatures=${coverHintCheck.afterClick && coverHintCheck.afterClick.onlineFeatures}、` +
       `onlineCovers=${coverHintCheck.afterClick && coverHintCheck.afterClick.onlineCovers}、提示隐藏=${coverHintCheck.afterClick && coverHintCheck.afterClick.hidden}`)
+
+    /*
+     * 主题色过渡（T2.3）：--tint 必须是**可插值**的注册属性，切歌时才不会硬切。
+     *
+     * 证明方式不是看样式表里有没有写 transition（那只证明声明存在），而是实测：
+     * 把 --tint 从红改成蓝，**同一帧**里读回来 —— 注册并带过渡时读到的是中间值（不是蓝），
+     * 没注册时读到的立刻就是蓝（未注册的自定义属性不参与插值）。
+     */
+    const tintTransition = await evaluate(win, `
+      const root = document.documentElement
+      const computed = getComputedStyle(root)
+      const declared = computed.transitionProperty || ''
+      const duration = computed.transitionDuration || ''
+
+      root.style.setProperty('--tint', 'rgb(255, 0, 0)')
+      /* 强制一次样式计算，让红色成为过渡起点 */
+      void root.offsetWidth
+      root.style.setProperty('--tint', 'rgb(0, 0, 255)')
+      const mid = getComputedStyle(root).getPropertyValue('--tint').trim()
+
+      /* 收尾：清掉内联值，让页面回到真实主题色 */
+      root.style.removeProperty('--tint')
+      const reduced = (() => {
+        const before = document.documentElement.dataset.reduceMotion
+        document.documentElement.dataset.reduceMotion = 'true'
+        const value = getComputedStyle(root).transitionProperty || ''
+        document.documentElement.dataset.reduceMotion = before
+        return value
+      })()
+
+      return { declared, duration, mid, reduced }
+    `)
+    record('主题色过渡：--tint 已注册成 <color> 并带 240ms 过渡（减少动画时置零）',
+      String(tintTransition.declared).includes('--tint') &&
+      String(tintTransition.duration).includes('0.24s') &&
+      tintTransition.mid !== 'rgb(0, 0, 255)' &&
+      tintTransition.mid !== 'rgb(255, 0, 0)' &&
+      String(tintTransition.reduced) === 'none',
+      `transition-property=${tintTransition.declared}、duration=${tintTransition.duration}；` +
+      `同一帧读到的中间值 ${tintTransition.mid}（应为红蓝之间的插值，不是纯蓝）；` +
+      `减少动画时 transition-property=${tintTransition.reduced}（应为 none）`)
 
     // media:// 协议：Range 支持与 CORS 头（seek 与 WebAudio 接入点都依赖它们）
     const protocolResult = await evaluate(win, `
@@ -5763,6 +5814,24 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
 
     /* ---------- 灵动岛风格的滚动条 + 声音均衡器 ---------- */
     await ensureVisible(win)
+    /*
+     * 先把**真实光标**挪到左上角安全区再量旋钮。
+     *
+     * 为什么必须挪：旋钮的"收起宽度"是靠 transform: scale(0.86) 得到的（46px 的盒子 → 约 39.6px）。
+     * 如果光标恰好停在旋钮上，收起态就已经是 scale(1)，读数会变成 46px → 46px（假红）——
+     * 本轮的拖动自检会把光标挪来挪去，正好踩中过。
+     */
+    await new Promise((resolve) => {
+      try {
+        const script = 'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(40, 40)'
+        const child = require('node:child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { stdio: 'ignore', windowsHide: true })
+        child.on('exit', resolve)
+        child.on('error', resolve)
+      } catch {
+        resolve()
+      }
+    })
+    await sleep(500)
     const scrollbarEq = await evaluate(win, `
       const { actions, store, player, engine } = window.__aria
       const settle = async (ms = 500) => { await new Promise((r) => setTimeout(r, ms)) }

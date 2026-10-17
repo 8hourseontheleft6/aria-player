@@ -78,10 +78,52 @@
   /* 键盘焦点环；内部引用主题色，所以放在 :root 也能跟着主题走 */
   --focus-ring: 0 0 0 3px var(--accent-soft);
 
-  /* ---- 动态色调（由封面取色写入） ---- */
+  /* ---- 动态色调（由封面取色写入，见 artwork.applyTint） ---- */
   --tint: #0a84ff;
   --tint-2: #5e5ce6;
   --tint-soft: rgba(10, 132, 255, 0.18);
+
+  /*
+   * 切歌时主题色**渐变**过去，而不是硬切。
+   *
+   * 自定义属性默认是不可动画的（浏览器只当它是字符串），所以先在上面用 @property
+   * 把它们注册成 <color>，再在 :root 上给一条 240ms 的过渡 —— 这样背景光晕、示波器、
+   * 选项框选中态会一起平滑地换色（它们读的都是同一个变量，过渡只写一处）。
+   *
+   * 「减少动画」打开时整条过渡置零（见下面 html[data-reduce-motion]）。
+   */
+  transition-property: --tint, --tint-2, --tint-soft;
+  transition-duration: 240ms;
+  transition-timing-function: var(--ease-ios);
+}
+
+/*
+ * 把三个动态色调注册成真正的颜色类型。
+ *
+ * 没有这一段，上面的 transition-property 对 --tint 完全无效（未注册的自定义属性
+ * 不参与插值）。inherits: true 是必须的 —— 子元素（示波器、设置页）都靠继承拿到值。
+ */
+@property --tint {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #0a84ff;
+}
+
+@property --tint-2 {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #5e5ce6;
+}
+
+@property --tint-soft {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: rgba(10, 132, 255, 0.18);
+}
+
+/* 减少动画：主题色不做过渡（和"关掉所有过渡"的承诺一致） */
+html[data-reduce-motion='true'] {
+  transition-property: none;
 }
 
 /* ============================ 深色（默认） ============================ */
