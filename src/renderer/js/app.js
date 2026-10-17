@@ -68,11 +68,29 @@ const PROFILE = (window.aria && window.aria.profile) || {
   id: 'full',
   productName: 'Aria',
   plugins: BUILTIN_PLUGINS.map((plugin) => plugin.id),
-  capabilities: { library: true, online: true, lyrics: true },
+  capabilities: { library: true, online: true, lyrics: true, sources: true },
   sidebar: ['songs', 'albums', 'artists', 'wall']
 }
 
 async function main () {
+  /*
+   * 「打开的文件」投递：**在任何 await 之前**就把监听挂上。
+   *
+   * 冷启动带文件时，主进程在 did-finish-load 之后立刻推 opened:incoming ——
+   * 那时渲染层的 main() 可能还在等 settings / 最近打开这些 await，订阅还没建立，
+   * 事件就丢了（现象：进程起来了、recent.json 有记录、列表和播放都是空的）。
+   * 兜底 PROFILE 也带 capabilities，所以这里先按能力判断；
+   * 收到的载荷先排队，等 actions 就绪（下面 openedSink 赋值处）再按顺序处理。
+   */
+  const pendingOpened = []
+  let openedSink = null
+  if (remote.opened) {
+    remote.opened.onIncoming((payload) => {
+      if (openedSink) openedSink(payload)
+      else pendingOpened.push(payload)
+    })
+  }
+
   /* ------------------------------------------------------------------ */
   /* 基础服务                                                            */
   /* ------------------------------------------------------------------ */
@@ -1198,15 +1216,20 @@ async function main () {
      */
     if (!PROFILE.capabilities || PROFILE.capabilities.library !== true) {
       /*
-       * 短路也要把状态标成"已加载（空）"，并**返回与正常路径同样的东西**（tracks 数组）：
+       * 短路也要把状态标成"已加载"，并**返回与正常路径同样的东西**（tracks 数组）：
        * 调用方是 `const tracks = await loadLibrary()`，返回形状不一致会让启动断在那里
        * （第一版返回了个对象，渲染层再没 ready，自检卡在"等待渲染层启动"）。
+       *
+       * ⚠️ 但**绝不能清空已有曲目**：player 档位的列表是"打开的文件"，由
+       * ingestOpenedTracks 填进来（最近打开 / 拖放 / 双击 / 冷启动带文件）。
+       * 这里原来写死 tracks: []，一旦 ingest 发生在 loadLibrary 之前就会被整表抹掉 ——
+       * 现象是"文件明明解析了、recent.json 也有，列表却是空的"。所以只标 loaded，不碰曲目。
        */
       store.set((prev) => ({
         ...prev,
-        library: { loaded: true, tracks: [], byId: new Map(), folders: [], scannedAt: null, totalDuration: 0 }
+        library: { ...prev.library, loaded: true }
       }))
-      return []
+      return store.get().library.tracks
     }
     const [tracks, state] = await Promise.all([
       remote.library.tracks(),
@@ -1751,14 +1774,9 @@ async function main () {
         console.warn('[app] 载入最近打开失败：', err && err.message)
       }
       /*
-       * 双击文件 / 拖到 Dock / 第二个实例带来的路径：主进程解析好后推过来，
-       * 这里收进列表并**直接播放**（需求：双击任意位置的音频能直接播）。
+       * 这里只读「最近打开」（列表要用它）；**订阅与排空放在下面"恢复上次曲目"之后** ——
+       * 顺序不对的话，恢复那一步的 player.prepare 会把刚播起来的冷启动文件停掉。
        */
-      remote.opened.onIncoming((payload) => {
-        if (!payload || !Array.isArray(payload.tracks) || !payload.tracks.length) return
-        actions.ingestOpenedTracks(payload.tracks)
-        if (payload.trackIds && payload.trackIds.length) actions.playDroppedTracks(payload.trackIds)
-      })
     }
 
     const tracks = await loadLibrary()
@@ -1774,6 +1792,24 @@ async function main () {
           playlist.sync(list, { keepId: track.id })
         }
       }
+    }
+
+    /*
+     * 现在才把「打开的文件」的处理函数装上，并把启动期间攒下的载荷按顺序补处理。
+     *
+     * ⚠️ 顺序很关键：必须**排在"恢复上次曲目"之后**。
+     * 那段会 player.prepare(lastTrackPath) —— 它是同步的、会停掉当前播放；
+     * 如果冷启动的文件先播了、恢复再执行，结果就是"文件在列表里、但没在播、状态 paused"。
+     * 这正是冷启动检查第二次跑出来的：入列成功、播放被覆盖。
+     * 放在后面之后，冷启动文件是最终状态；之后到达的新载荷由 openedSink 直接处理。
+     */
+    if (remote.opened) {
+      openedSink = (payload) => {
+        if (!payload || !Array.isArray(payload.tracks) || !payload.tracks.length) return
+        actions.ingestOpenedTracks(payload.tracks)
+        if (payload.trackIds && payload.trackIds.length) actions.playDroppedTracks(payload.trackIds)
+      }
+      for (const payload of pendingOpened.splice(0)) openedSink(payload)
     }
 
     // 空资料库时直接把设置页推到用户面前（player 档位停在列表页 —— 那里有空状态与打开入口）

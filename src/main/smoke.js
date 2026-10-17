@@ -127,6 +127,93 @@ async function visibilitySnapshot (win) {
 }
 
 /**
+ * 回归：**冷启动带文件**（现有检查只测了 second-instance）。
+ *
+ * 冷启动的真实时序：页面第一次加载 → 主进程在 `did-finish-load` 之后立刻推
+ * `opened:incoming` → 渲染层这时可能还在等 settings / 最近打开那些 await。
+ * 如果订阅不是"在任何 await 之前"建立的，这一推就丢了 —— 现象是
+ * "进程起来了、recent.json 有记录，但列表空、也没在播"。
+ *
+ * 这里用**重载页面**复现同一时序：reload 之后渲染层是全新的（store 从空开始），
+ * 然后像主进程那样在 did-finish-load 时推一条 —— 与真正的冷启动是同一条路。
+ * 顺带验 loadLibrary 的短路：player 档位下它不许把已经收进来的曲目清掉。
+ */
+async function runColdStartCheck ({ win, ctx, record, mediaDir }) {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const { dialog } = require('electron')
+
+  const makeWav = (name, frequency) => {
+    fs.mkdirSync(mediaDir, { recursive: true })
+    const sampleRate = 8000
+    const buffer = Buffer.alloc(44 + sampleRate)
+    buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + sampleRate, 4); buffer.write('WAVE', 8)
+    buffer.write('fmt ', 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20)
+    buffer.writeUInt16LE(1, 22); buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(sampleRate, 28)
+    buffer.writeUInt16LE(1, 32); buffer.writeUInt16LE(8, 34); buffer.write('data', 36)
+    buffer.writeUInt32LE(sampleRate, 40)
+    for (let i = 0; i < sampleRate; i++) {
+      buffer[44 + i] = Math.round(128 + 100 * Math.sin((2 * Math.PI * frequency * i) / sampleRate))
+    }
+    const file = path.join(mediaDir, name)
+    fs.writeFileSync(file, buffer)
+    return file
+  }
+
+  const coldFile = makeWav(`cold-start-${Date.now()}.wav`, 880)
+  /* 载荷用**主进程的解析器**造，与真实冷启动投递的数据完全一致（曲目对象由 openedFiles 产出） */
+  let payload = null
+  try {
+    const opened = ctx.has('openedFiles') ? ctx.get('openedFiles') : null
+    payload = opened ? await opened.resolve([coldFile]) : null
+  } catch (err) {
+    console.warn('[cold-start] 解析失败：', err && err.message)
+  }
+
+  let dialogCalls = 0
+  const originalShowMessageBox = dialog.showMessageBox
+  dialog.showMessageBox = async () => { dialogCalls++; return { response: 0 } }
+  try {
+    /*
+     * 重载页面 → 渲染层从空 store 重新启动（冷启动的渲染层视角），
+     * 然后在 did-finish-load 时推一条 —— 与主进程的冷启动投递同一时序。
+     */
+    win.webContents.once('did-finish-load', () => {
+      if (payload) win.webContents.send('opened:incoming', payload)
+    })
+    win.webContents.reload()
+    await waitFor(win, 'window.__aria && window.__aria.store.get().ready === true',
+      { label: '重载后的渲染层', timeout: 60000 })
+
+    const deadline = Date.now() + 25000
+    let state = null
+    while (Date.now() < deadline) {
+      await sleep(500)
+      state = await evaluate(win, `
+        const s = window.__aria.store.get()
+        const current = s.library.byId.get(s.playback.trackId)
+        return {
+          status: s.playback.status,
+          tracks: s.library.tracks.length,
+          paths: s.library.tracks.map((track) => track.path),
+          currentPath: current ? current.path : ''
+        }`)
+      if (state && state.currentPath === coldFile && state.status === 'playing') break
+    }
+    record('冷启动带文件：新起的渲染层也能接住投递并直接播（订阅早于任何 await、短路不清曲目）',
+      Boolean(payload) && payload.tracks.length === 1 &&
+      Boolean(state) && state.currentPath === coldFile && state.status === 'playing' &&
+      state.paths.includes(coldFile) && dialogCalls === 0,
+      `投递时机=did-finish-load；当前曲目=${state ? path.basename(state.currentPath || '（无）') : '—'}（应为新文件）、` +
+      `状态=${state ? state.status : '—'}、列表 ${state ? state.tracks : '—'} 首、在列表里=${state ? state.paths.includes(coldFile) : '—'}、` +
+      `弹确认框 ${dialogCalls} 次（应为 0）`,
+      { profiles: ['full', 'player'] })
+  } finally {
+    dialog.showMessageBox = originalShowMessageBox
+  }
+}
+
+/**
  * 回归：**已经在跑的时候又"双击"了另一个音频文件**。
  *
  * 现有 smoke 只覆盖"冷启动带文件"；真实的第二次双击走的是 second-instance ——
@@ -228,16 +315,36 @@ async function runSharedChecks ({ win, record }) {
     const heading = document.querySelector('.view-header__title')
     actions.setView('songs')
     await new Promise((r) => setTimeout(r, 300))
+    const s = store.get()
     return {
       productName,
       title: document.title,
+      playing: s.playback.status === 'playing',
+      /* 标题跟的是"有没有当前曲目"（TRACK_CHANGED 时设），与播放/暂停无关 */
+      hasTrack: Boolean(s.playback.trackId && s.library.byId.get(s.playback.trackId)),
+      playingTitle: s.playback.trackId && s.library.byId.get(s.playback.trackId)
+        // 注意：这里是**注入到渲染层的模板字符串内部**，不能再写反引号（会提前结束外层模板）
+        ? (s.library.byId.get(s.playback.trackId).title + ' — ' + s.library.byId.get(s.playback.trackId).artist)
+        : '',
       settingsRows: rows,
       settingsHeading: heading ? (heading.textContent || '').trim() : '',
-      viewAfter: store.get().ui.view
+      viewAfter: s.ui.view
     }`)
-  record('窗口标题用产品名兜底（没播歌时；播了歌才是「曲名 — 艺人」）',
-    Boolean(shared.productName) && shared.title === shared.productName,
-    `productName=${shared.productName}、document.title=${shared.title}`,
+  /*
+   * 标题的规则：**没在播时**是产品名，**在播时**是「曲名 — 艺人」。
+   * 以前只写了前半句 —— 那条在"启动时列表是空的"前提下才成立；
+   * 一旦 player 的「最近打开」里有内容并自动续上，标题就合法地变成曲名，
+   * 旧断言会误判（它是"因为别处的 bug 才通过"的典型例子）。
+   */
+  record('窗口标题：没有当前曲目时是产品名，有当前曲目时是「曲名 — 艺人」',
+    Boolean(shared.productName) && (
+      shared.hasTrack
+        ? shared.title === shared.playingTitle
+        : shared.title === shared.productName
+    ),
+    `productName=${shared.productName}、document.title=${shared.title}、` +
+    `有当前曲目=${shared.hasTrack}${shared.hasTrack ? `（期望「${shared.playingTitle}」）` : '（期望产品名）'}` +
+    `、在播=${shared.playing}`,
     { profiles: ['full', 'player'] })
   record('设置页能打开并真的渲染出内容',
     shared.settingsRows > 10 && shared.viewAfter === 'songs',
@@ -317,6 +424,9 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       settingsRowCount: titles.length,
       onlineTitles,
       tracks: state.library.tracks.length,
+      paths: state.library.tracks.map((track) => track.path),
+      /* 资料库文件夹数（player 应当恒为 0） */
+      folders: Array.isArray(state.library.folders) ? state.library.folders.length : 0,
       domNodes: document.querySelectorAll('*').length,
       hasEmptyState: [...document.querySelectorAll('.empty')].some((node) => node.getClientRects().length > 0)
     }`)
@@ -341,18 +451,51 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
     `设置项 ${shell.settingsRowCount} 行，其中在线相关 ${shell.onlineTitles.length} 行` +
     (shell.onlineTitles.length ? `（不该有：${shell.onlineTitles.join('、')}）` : ''))
 
-  record('没有资料库内容（player 不扫描、不建索引）',
-    shell.tracks === 0,
-    `渲染层曲目 ${shell.tracks} 首（应为 0 —— 打开文件的功能在第 3 步接上）`)
+  /*
+   * 「不在「打开的文件」里」的曲目数：扫过资料库才会有。
+   * 判定放在主进程做 —— 这里能读 userData/recent.json（渲染层拿不到那个文件）。
+   */
+  const shellRecent = (() => {
+    try {
+      const parsed = JSON.parse(require('node:fs').readFileSync(
+        require('node:path').join(app.getPath('userData'), 'recent.json'), 'utf8'))
+      return new Set((Array.isArray(parsed) ? parsed : []).map((item) => item && item.path).filter(Boolean))
+    } catch {
+      return new Set()
+    }
+  })()
+  shell.tracksFromLibrary = shell.paths.filter((file) => !shellRecent.has(file)).length
 
-  record('空列表给出空状态（有话说，不是一块空白）',
-    shell.hasEmptyState === true && shell.domNodes > 200,
-    `可见空状态=${shell.hasEmptyState}、DOM 节点 ${shell.domNodes} 个`)
+  /*
+   * 「player 不扫描、不建索引」—— 这条以前被写成"渲染层曲目 0 首"，
+   * 而那只是**因为 loadLibrary 的短路把最近打开的曲目清空了**才成立的（假通过）。
+   * 真正的不变量是：① 没有资料库文件夹；② 列表里的曲目**全部来自「打开的文件」**
+   * （即都在 recent.json 里，而不是扫出来的）；③ userData 里没有索引/封面缓存。
+   */
+  record('没有资料库：无文件夹、列表里的曲目全部来自「打开的文件」',
+    shell.folders === 0 && shell.tracksFromLibrary === 0,
+    `资料库文件夹 ${shell.folders} 个（应为 0）、渲染层曲目 ${shell.tracks} 首，` +
+    `其中不是「打开的文件」的 ${shell.tracksFromLibrary} 首（应为 0 —— 扫过库就会有）`)
+
+  /* 空状态：列表为空就该出现、非空就该消失 —— 两种都验，才不是"看运气通过" */
+  record('空状态与列表状态一致（空则出现、非空则消失）',
+    (shell.tracks === 0 ? shell.hasEmptyState === true : shell.hasEmptyState === false) &&
+    shell.domNodes > 200,
+    `曲目 ${shell.tracks} 首、可见空状态=${shell.hasEmptyState}（期望 ${shell.tracks === 0 ? '出现' : '消失'}）、` +
+    `DOM 节点 ${shell.domNodes} 个`)
 
   /* ⑦ 两个产品共用的检查（标 full/player，同一份实现两边都跑） */
   await runSharedChecks({ win, record })
 
-  /* ⑧ 回归：已经在跑的时候再"双击"一个文件（走 second-instance，而不是冷启动） */
+  /* ⑧ 回归：冷启动带文件（全新渲染层 + did-finish-load 时投递） */
+  await runColdStartCheck({
+    win,
+    ctx,
+    record,
+    mediaDir: require('node:path').join(__dirname, '..', '..', 'tests', 'player-smoke')
+  })
+
+  /* ⑨ 回归：已经在跑的时候再"双击"一个文件（走 second-instance，而不是冷启动） */
   await runSecondInstanceCheck({
     win,
     profile,
@@ -664,7 +807,15 @@ async function runUnifiedSmoke ({ win, ctx, profile, product, record, raiseInfo 
       `播放状态=${state.status}；解析=${opened ? `${opened.action}/${opened.tracks}首` : '（本次没带文件）'}、弹确认框 ${dialogCalls} 次（应为 0）`,
       { profiles: ['full', 'player'] })
 
-    /* ⑧ 回归：已经在跑的时候再"双击"一个文件（second-instance） */
+    /* ⑧ 回归：冷启动带文件 */
+    await runColdStartCheck({
+      win,
+      ctx,
+      record,
+      mediaDir: unifiedPath.join(__dirname, '..', '..', 'tests', 'unified-smoke')
+    })
+
+    /* ⑨ 回归：已经在跑的时候再"双击"一个文件（second-instance） */
     await runSecondInstanceCheck({
       win,
       profile,
