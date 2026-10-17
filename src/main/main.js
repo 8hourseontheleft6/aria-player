@@ -5,6 +5,7 @@ const { app, BrowserWindow, session } = require('electron')
 
 const { createContext } = require('./registry')
 const { registerSchemes, registerProtocols } = require('./protocols')
+const { PROFILES, resolveProfile } = require('./profile')
 const { createSettingsService } = require('./services/settings')
 const { createLibraryService } = require('./services/library')
 const { createLyricsService } = require('./services/lyrics')
@@ -14,9 +15,43 @@ const { createMusicSourcesService } = require('./services/music-sources')
 const { createTrayService } = require('./services/tray')
 const { createWatcherService } = require('./services/watcher')
 const { createBackgroundService } = require('./services/background')
+const { createOpenedFilesService } = require('./services/opened-files')
 const { registerIpc } = require('./ipc')
 const { createMainWindow, applyTheme, applyTaskbarState, markQuitting } = require('./window')
 const { createOpenFilesBridge } = require('./open-files')
+
+/*
+ * 产品档位（--profile=player，默认 full）。
+ *
+ * 这一行必须在最前面：它决定挂哪些服务、窗口给渲染层的档位，第 2 步起还决定 userData 目录。
+ * 解析失败（认不出的档位名）不静默退回 —— 那会打出一个"名字叫 Player、其实是完整版"的包，
+ * 而且永远没人发现。这里直接报错退出，让打包的人当场看见。
+ */
+const profileResult = resolveProfile(process.argv)
+if (profileResult.error) {
+  console.error(`[main] ${profileResult.error}\n       用法：--profile=full 或 --profile=player`)
+  app.exit(2)
+}
+const profile = profileResult.profile
+console.log(`[main] 产品档位：${profile.id}（${profile.productName}），服务 ${profile.services.join(' / ')}，插件 ${profile.plugins.join(' / ') || '（无）'}`)
+
+/**
+ * 服务名 → 工厂。表在 profile.js，工厂在这里 —— 分开是因为 profile.js 要能被
+ * 静态检查（scripts/checks/check-profiles.js）直接 require，不能牵扯 Electron。
+ */
+const SERVICE_FACTORIES = {
+  settings: createSettingsService,
+  library: createLibraryService,
+  lyrics: createLyricsService,
+  online: createOnlineService,
+  ai: createAiService,
+  musicSources: createMusicSourcesService,
+  tray: createTrayService,
+  watcher: createWatcherService,
+  background: createBackgroundService,
+  openedFiles: createOpenedFilesService
+}
+
 
 /*
  * macOS：把文件拖到 Dock 图标 / 在 Finder 里双击音频 → 走「拖进窗口」那条完全相同的导入链路。
@@ -138,37 +173,46 @@ async function bootstrap () {
   if (process.platform === 'win32') app.setAppUserModelId('com.aria.player')
 
   const ctx = createContext()
-  ctx.define('settings', createSettingsService)
-  ctx.define('library', createLibraryService)
-  ctx.define('lyrics', createLyricsService)
-  ctx.define('online', createOnlineService)
-  ctx.define('ai', createAiService)
-  ctx.define('musicSources', createMusicSourcesService)
-  ctx.define('tray', createTrayService)
-  ctx.define('watcher', createWatcherService)
-  ctx.define('background', createBackgroundService)
+  /*
+   * 按档位挂载：表里没有的服务这里根本不会 define，于是 `ctx.get('library')`
+   * 在 player 里会直接抛「服务未注册」—— 想要的能力不存在，而不是存在但关着。
+   */
+  for (const name of profile.services) {
+    const factory = SERVICE_FACTORIES[name]
+    if (!factory) throw new Error(`档位 ${profile.id} 要求挂载未知服务：${name}`)
+    ctx.define(name, factory)
+  }
+  /** 取一个"这个档位可能有、也可能没有"的服务（问能力，不问档位） */
+  const optional = (name) => (ctx.has(name) ? ctx.get(name) : null)
 
   const settings = ctx.get('settings')
   await settings.init()
   applyTheme(ctx, settings.get().theme)
 
   // 音源脚本在启动时装一次（目录不存在就建好，方便用户直接往里丢脚本）
-  try {
-    await ctx.get('musicSources').init()
-  } catch (err) {
-    console.warn('[sources] 初始化失败', err)
+  const musicSources = optional('musicSources')
+  if (musicSources) {
+    try {
+      await musicSources.init()
+    } catch (err) {
+      console.warn('[sources] 初始化失败', err)
+    }
   }
+
+  const openedFiles = optional('openedFiles')
+  if (openedFiles) await openedFiles.init()
 
 
   registerProtocols(ctx)
   registerIpc(ctx)
 
-  const win = createMainWindow(ctx)
-  const tray = ctx.get('tray')
-  tray.sync()
+  const win = createMainWindow(ctx, profile)
+  const tray = optional('tray')
+  if (tray) tray.sync()
 
   // 最小化 / 收进托盘后释放后台占用，回来时恢复（媒体墙、封面缓存、目录监听）
-  ctx.get('background').attach(win)
+  const background = optional('background')
+  if (background) background.attach(win)
 
   /* ---------------- 系统集成：托盘 / 任务栏 / 主进程指令 ---------------- */
 
@@ -192,7 +236,7 @@ async function bootstrap () {
 
   // 渲染层上报的播放状态 -> 托盘提示/菜单 + 任务栏进度与缩略图按钮
   ctx.on('player:state', (state) => {
-    tray.update(state)
+    if (tray) tray.update(state)
     applyTaskbarState(win, state, { progressEnabled: settings.get().taskbarProgress !== false })
   })
 
@@ -209,33 +253,41 @@ async function bootstrap () {
    */
   require('./menu').applyMacMenu(ctx)
 
-  const library = ctx.get('library')
-  const watcher = ctx.get('watcher')
-  await library.init()
+  const library = optional('library')
+  const watcher = optional('watcher')
+  if (library) await library.init()
 
   /*
-   * macOS 的 open-file：窗口与资料库都就绪了，把双击 / 拖到 Dock 的路径交给
-   * `resolveDrop` —— 与「拖进窗口」完全同一条链路（文件夹会弹确认、库内的歌直接播、
-   * 库外的问要不要把所在文件夹加进来）。先设处理函数再 ready()，冷启动攒下的路径
-   * 会在 ready() 那一刻一次性送进来。
+   * macOS 的 open-file：双击 / 拖到 Dock 的路径交给**本档位的"打开文件"链路**。
+   *   · full：library.resolveDrop（与「拖进窗口」完全同一条链路 —— 文件夹会弹确认、
+   *           库内的歌直接播、库外的问要不要把所在文件夹加进来）
+   *   · player：openedFiles.add（只记进"最近打开"，不建索引、不扫目录、不查在线）
+   * 先设处理函数再 ready()，冷启动攒下的路径会在 ready() 那一刻一次性送进来。
    */
   if (process.platform === 'darwin') {
     deliverOpenedPaths = (paths) => {
-      library.resolveDrop(paths).catch((err) => console.warn('[open-file] 导入失败:', err && err.message))
+      const handled = library
+        ? library.resolveDrop(paths)
+        : openedFiles.add(paths)
+      Promise.resolve(handled).catch((err) => console.warn('[open-file] 导入失败:', err && err.message))
     }
     openFiles.ready()
   }
 
-  /** 监听目录 / 开关的指纹，只有它变了才需要重建 watcher */
-  let watchSignature = `${settings.get().watchFolders !== false}|${library.getFolders().join('\u0000')}`
-  const watchResult = watcher.start()
+  /** 监听目录 / 开关的指纹，只有它变了才需要重建 watcher（player 档位没有 watcher） */
+  const watchSignatureOf = () =>
+    `${settings.get().watchFolders !== false}|${library ? library.getFolders().join('\u0000') : ''}`
+  let watchSignature = watchSignatureOf()
+  const watchResult = watcher ? watcher.start() : { folders: 0, skipped: true }
 
   ctx.on('settings:changed', () => {
-    tray.sync()
-    const signature = `${settings.get().watchFolders !== false}|${library.getFolders().join('\u0000')}`
-    if (signature !== watchSignature) {
-      watchSignature = signature
-      watcher.start()
+    if (tray) tray.sync()
+    if (watcher) {
+      const signature = watchSignatureOf()
+      if (signature !== watchSignature) {
+        watchSignature = signature
+        watcher.start()
+      }
     }
     void applyProxySettings()
   })
@@ -272,7 +324,8 @@ async function bootstrap () {
   await applyProxySettings()
 
   win.webContents.once('did-finish-load', () => {
-    // 启动后台增量刷新：文件没变的话只做 stat，很快
+    // 启动后台增量刷新：文件没变的话只做 stat，很快（player 档位没有资料库，整段跳过）
+    if (!library) return
     const stats = library.getStats()
     if (stats.folders > 0) {
       library.scan({ reason: stats.count ? 'startup-refresh' : 'startup' }).catch((err) => {
@@ -367,7 +420,7 @@ async function bootstrap () {
     await ctx.disposeAll()
   })
 
-  console.log(`[main] Aria 已启动 (Electron ${process.versions.electron}, 用户数据目录: ${app.getPath('userData')})`)
+  console.log(`[main] ${profile.productName} 已启动 (Electron ${process.versions.electron}, 档位: ${profile.id}, 用户数据目录: ${app.getPath('userData')})`)
   if (watchResult.watching) {
     console.log(`[main] 目录监听已开启（${watchResult.watching} 个根目录）`)
   }

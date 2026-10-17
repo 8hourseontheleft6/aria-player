@@ -11,7 +11,7 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "smoke": "electron . --smoke",
-    "check": "node scripts/checks/check-imports.js && node scripts/checks/check-injected.js && node scripts/checks/check-styles.js && node scripts/checks/check-contrast.js && node scripts/checks/check-frosted.js && node scripts/checks/check-shots.js && node scripts/checks/check-architecture.js && node scripts/checks/check-mac-source-zip.js && node scripts/checks/check-docs.js && node scripts/checks/check-menu-roles.js && node scripts/checks/check-mac-config.js && node --check src/main/main.js",
+    "check": "node scripts/checks/check-imports.js && node scripts/checks/check-injected.js && node scripts/checks/check-profiles.js && node scripts/checks/check-styles.js && node scripts/checks/check-contrast.js && node scripts/checks/check-frosted.js && node scripts/checks/check-shots.js && node scripts/checks/check-architecture.js && node scripts/checks/check-mac-source-zip.js && node scripts/checks/check-docs.js && node scripts/checks/check-menu-roles.js && node scripts/checks/check-mac-config.js && node --check src/main/main.js",
     "check:styles": "node scripts/checks/check-styles.js",
     "check:contrast": "node scripts/checks/check-contrast.js",
     "check:shots": "node scripts/checks/check-shots.js",
@@ -27,7 +27,8 @@
     "check:arch": "node scripts/checks/check-architecture.js",
     "make:mac-zip": "node scripts/make-mac-source-zip.js",
     "check:mac-config": "node scripts/checks/check-mac-config.js",
-    "check:frosted": "node scripts/checks/check-frosted.js"
+    "check:frosted": "node scripts/checks/check-frosted.js",
+    "check:profiles": "node scripts/checks/check-profiles.js"
   },
   "dependencies": {
     "music-metadata": "^11.9.0"

@@ -80,11 +80,18 @@ export function createStore (initialState = {}) {
   }
 }
 
-/** 创建应用的初始状态树 */
-export function initialState () {
+/** 没有档位信息时的兜底（本体）：能力齐全总比缺胳膊少腿安全 */
+const FALLBACK_PROFILE = { id: 'full', productName: 'Aria', plugins: [], sidebar: ['songs', 'albums', 'artists', 'wall'] }
+
+/**
+ * 创建应用的初始状态树。
+ * @param {object} [profile] 产品档位（来自 preload 的 window.aria.profile）
+ */
+export function initialState (profile = FALLBACK_PROFILE) {
+  const active = profile && typeof profile === 'object' ? profile : FALLBACK_PROFILE
   return {
     ready: false,
-    app: { info: null, platform: 'win32', isMac: false },
+    app: { info: null, platform: 'win32', isMac: false, profile: active },
     settings: {
       theme: 'system',
       volume: 0.85,
@@ -118,7 +125,9 @@ export function initialState () {
       visualizerStyle: 'bars',
       ai: { enabled: false, useForStyle: true, baseUrl: '', key: '', model: '', timeout: 30000 },
       // 侧边栏 / 灵动岛里视图项的顺序（可拖动自定义）
-      sidebarOrder: ['songs', 'albums', 'artists', 'wall'],
+      sidebarOrder: Array.isArray(active.sidebar) && active.sidebar.length
+      ? active.sidebar.slice()
+      : FALLBACK_PROFILE.sidebar.slice(),
       // 侧栏开着时是否也显示灵动岛（默认 false = 两者不同时出现）
       islandWithSidebar: false,
       // 用户自建播放列表：[{ id, name, trackIds, createdAt }]

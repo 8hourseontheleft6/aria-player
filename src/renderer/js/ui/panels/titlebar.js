@@ -6,7 +6,7 @@ import { remote } from '../../core/remote.js'
 import { flipReorder } from '../../core/reorder.js'
 import { EVENTS } from '../../core/bus.js'
 import { keyHint } from '../../core/format.js'
-import { VIEW_ITEMS, normalizeOrder } from './sidebar.js'
+import { VIEW_ITEMS, normalizeOrder, allowedViews } from './sidebar.js'
 
 /**
  * 顶部悬浮的视图切换器（「灵动岛」）。
@@ -123,7 +123,7 @@ export function createTitlebar ({ store, bus, actions }) {
   store.select((state) => state.settings.islandWithSidebar === true, () => paintThumb())
 
   let orderKey = ''
-  store.select((state) => normalizeOrder(state.settings.sidebarOrder), (order) => {
+  store.select((state) => normalizeOrder(state.settings.sidebarOrder, allowedViews(state)), (order) => {
     const key = order.join()
     if (key === orderKey) return
     orderKey = key

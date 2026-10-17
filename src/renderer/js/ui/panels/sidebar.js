@@ -51,16 +51,29 @@ export const VIEW_ITEMS = {
 
 export const VIEW_KEYS = Object.keys(VIEW_ITEMS)
 
-/** 把设置里的顺序规整成一份完整、无重复的键列表 */
-export function normalizeOrder (order) {
+/**
+ * 把设置里的顺序规整成一份完整、无重复的键列表。
+ *
+ * `allowed` 是**本档位允许出现的视图**（player 档位只有一份列表）：
+ * 不传就按全量处理 —— 本体下结果与改动前逐字相同。
+ * 以前这里无条件把 VIEW_KEYS 补全，于是 player 档位会凭空冒出专辑/艺人/媒体墙三页。
+ */
+export function normalizeOrder (order, allowed = VIEW_KEYS) {
+  const permitted = (Array.isArray(allowed) ? allowed : VIEW_KEYS).filter((key) => VIEW_ITEMS[key])
   const out = []
   for (const key of Array.isArray(order) ? order : []) {
-    if (VIEW_ITEMS[key] && !out.includes(key)) out.push(key)
+    if (VIEW_ITEMS[key] && permitted.includes(key) && !out.includes(key)) out.push(key)
   }
-  for (const key of VIEW_KEYS) {
+  for (const key of permitted) {
     if (!out.includes(key)) out.push(key)
   }
   return out
+}
+
+/** 从状态里取"本档位允许的视图"（灵动岛与侧栏共用同一份顺序，也共用这个清单） */
+export function allowedViews (state) {
+  const list = state && state.app && state.app.profile ? state.app.profile.sidebar : null
+  return Array.isArray(list) && list.length ? list : VIEW_KEYS
 }
 
 /** 拖动超过这么多像素才算「在排序」，否则仍然是一次点击 */
@@ -187,7 +200,7 @@ export function createSidebar ({ store, bus, actions }) {
     setTimeout(() => { suppressClick = false }, 0)
 
     const order = currentOrder()
-    const saved = normalizeOrder(store.get().settings.sidebarOrder)
+    const saved = normalizeOrder(store.get().settings.sidebarOrder, allowedViews(store.get()))
     if (order.join() !== saved.join()) {
       actions.setSetting({ sidebarOrder: order })
       bus.emit(EVENTS.TOAST, { message: '侧栏顺序已保存', type: 'success', duration: 1600 })
@@ -332,7 +345,7 @@ export function createSidebar ({ store, bus, actions }) {
     )
 
     // 可拖动排序的四个视图项，顺序来自设置
-    const order = normalizeOrder(state.settings.sidebarOrder)
+    const order = normalizeOrder(state.settings.sidebarOrder, allowedViews(state))
     const counts = { state, albumCount, artistCount }
     for (const key of order) {
       const item = VIEW_ITEMS[key]

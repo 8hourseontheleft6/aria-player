@@ -74,11 +74,15 @@ function applyTaskbarState (win, state, options = {}) {
  *  - macOS 保留原生红绿灯（hiddenInset），窗口其余部分自绘
  *  - Windows / Linux 无边框 + 自绘窗口按钮（由渲染层通过 IPC 控制）
  */
-function createMainWindow (ctx) {
+function createMainWindow (ctx, profile) {
   const settings = ctx.get('settings')
   const state = settings.get()
   const saved = state.window || {}
   const dark = state.theme === 'dark' || (state.theme === 'system' && nativeTheme.shouldUseDarkColors)
+  /*
+   * 档位由 main.js 显式传进来（不放进服务表：服务表是"能力清单"，
+   * 档位是"我是谁"，混在一起会让 check-profiles 的规则变浑）。
+   */
 
   const options = {
     width: saved.width || 1180,
@@ -87,7 +91,7 @@ function createMainWindow (ctx) {
     minHeight: 620,
     show: false,
     backgroundColor: dark ? THEME_BACKGROUND.dark : THEME_BACKGROUND.light,
-    title: 'Aria',
+    title: profile.productName,
     autoHideMenuBar: true,
     // 自绘顶栏，避免系统标题栏破坏 iOS 观感
     frame: IS_MAC,
@@ -102,7 +106,19 @@ function createMainWindow (ctx) {
       webSecurity: true,
       spellcheck: false,
       // 后台播放时不要被节流，否则进度条与歌词会卡
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      /*
+       * 档位随命令行交给渲染层：preload（沙箱内仍能读 process.argv）解析这一项，
+       * 渲染层在**建 store、注册插件之前**就能同步拿到，避免异步时序问题。
+       * 传整份 JSON（含 plugins / sidebar 清单）是为了让 profile.js 保持**唯一事实来源** ——
+       * 渲染层不抄一份清单，否则两边迟早不一致。
+       */
+      additionalArguments: [`--aria-profile-json=${JSON.stringify({
+        id: profile.id,
+        productName: profile.productName,
+        plugins: profile.plugins,
+        sidebar: profile.sidebar
+      })}`]
     }
   }
 

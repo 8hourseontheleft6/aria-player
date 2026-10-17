@@ -54,18 +54,29 @@ import { createLazyArtwork } from './ui/widgets/artwork-node.js'
 import { toast, closeAllLayers } from './ui/widgets/overlay.js'
 import { createFpsOverlay } from './ui/widgets/fps-overlay.js'
 
-import { BUILTIN_PLUGINS } from './plugins/index.js'
+import { BUILTIN_PLUGINS, pluginsForProfile } from './plugins/index.js'
 
 const SORT_KEYS = ['default', 'title', 'artist', 'album', 'duration', 'year', 'added']
 /** 搜索历史最多留这么多条（新的在前） */
 const SEARCH_HISTORY_LIMIT = 10
+
+/*
+ * 产品档位（由 preload 从命令行同步带过来，见 src/main/profile.js）。
+ * 拿不到就按本体：缺信息时把功能弄丢，比多留几个更糟。
+ */
+const PROFILE = (window.aria && window.aria.profile) || {
+  id: 'full',
+  productName: 'Aria',
+  plugins: BUILTIN_PLUGINS.map((plugin) => plugin.id),
+  sidebar: ['songs', 'albums', 'artists', 'wall']
+}
 
 async function main () {
   /* ------------------------------------------------------------------ */
   /* 基础服务                                                            */
   /* ------------------------------------------------------------------ */
   const bus = createBus()
-  const store = createStore(initialState())
+  const store = createStore(initialState(PROFILE))
   const engine = createAudioEngine({ bus })
   const playlist = createPlaylist()
   const host = createPluginHost({
@@ -76,7 +87,12 @@ async function main () {
   const artwork = createArtworkService({ bus, host })
 
   registerBuiltinModes(host)
-  host.loadAll(BUILTIN_PLUGINS)
+  /*
+   * 按档位注册插件 —— 这是"能力开关"的唯一落点：
+   * online-media 不注册，在线歌词 / 在线封面在渲染层就没人提供（扩展点空着），
+   * 而不是"实现了但用 if 关掉"。player 档位的 plugins 是空数组，于是什么都不注册。
+   */
+  host.loadAll(pluginsForProfile(PROFILE.plugins))
 
   const player = createPlayerController({ store, bus, engine, playlist, host, artwork })
 

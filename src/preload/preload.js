@@ -33,9 +33,38 @@ function on (channel, handler) {
 
 const invoke = (channel) => (payload) => ipcRenderer.invoke(channel, payload)
 
+/*
+ * 产品档位：主进程通过 additionalArguments 把整份档位 JSON 塞进命令行。
+ * 沙箱里的 preload 仍能读 process.argv，所以渲染层在建 store / 注册插件之前就能**同步**拿到 ——
+ * 不经过 IPC，就没有"先按 full 建好、再删掉"的时序问题。
+ * 解析失败一律退回 full：渲染层拿不到档位时，宁可按本体渲染（能力齐全），
+ * 也不该渲染出一个缺胳膊少腿的界面。
+ */
+const PROFILE_ARG = '--aria-profile-json='
+const profileArg = (process.argv || []).find((arg) => String(arg).startsWith(PROFILE_ARG))
+const fallbackProfile = { id: 'full', productName: 'Aria', plugins: [], sidebar: ['songs', 'albums', 'artists', 'wall'] }
+let profile = fallbackProfile
+if (profileArg) {
+  try {
+    const parsed = JSON.parse(String(profileArg).slice(PROFILE_ARG.length))
+    if (parsed && typeof parsed.id === 'string') {
+      profile = {
+        id: parsed.id,
+        productName: typeof parsed.productName === 'string' ? parsed.productName : 'Aria',
+        plugins: Array.isArray(parsed.plugins) ? parsed.plugins : [],
+        sidebar: Array.isArray(parsed.sidebar) && parsed.sidebar.length ? parsed.sidebar : fallbackProfile.sidebar
+      }
+    }
+  } catch (err) {
+    console.warn('[preload] 档位 JSON 解析失败，按 full 处理：', err && err.message)
+  }
+}
+
 contextBridge.exposeInMainWorld('aria', {
   platform: process.platform,
   isMac: process.platform === 'darwin',
+  // 档位只读：渲染层据此决定注册哪些插件、侧栏放哪几项
+  profile,
 
   app: {
     info: () => ipcRenderer.invoke('app:info'),

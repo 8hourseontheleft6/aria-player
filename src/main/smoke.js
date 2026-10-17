@@ -7403,10 +7403,20 @@ async function runSmoke ({ win, ctx }) {
      * ⑤ 内置一条**自证**：清掉 URL 缓存后重新解析，blob 字符串必然变化而图像内容不变 ——
      *    也就是"旧判据在这种情况下一定会红"。这条自证常驻，防止以后再退回比字符串。
      */
+    /* 16×16 灰度下的平均绝对差阈值：同一张图实测 0，人像 vs 专辑封面是几十的量级 */
+    const ARTIST_MAD_THRESHOLD = 12
     const artistRowVsDetail = await evaluate(win, `
       const { actions, artwork } = window.__aria
-      const grab = (selector, budget = 12000) => new Promise((resolve) => {
-        const deadline = performance.now() + budget
+      /*
+       * 总预算：这一段最坏情况必须**远小于** evaluate 的 90s 超时。
+       * 曾经是 3 位艺人 × (12s 行 + 12s 详情) + 自证 18s = 96s —— 网络一慢就整段超时，
+       * 结果不是"这条红"，而是**连它后面的 4 条检查一起没跑**（实测 186/190）。
+       * 现在：全局 deadline + 首个命中即收敛 + 自证只在还有余量时做。
+       */
+      const DEADLINE = performance.now() + 45000
+      const left = () => DEADLINE - performance.now()
+      const grab = (selector, budget) => new Promise((resolve) => {
+        const deadline = performance.now() + Math.max(500, Math.min(budget, left()))
         const tick = () => {
           const img = document.querySelector(selector)
           if (img && img.complete && img.naturalWidth > 0) return resolve(img)
@@ -7448,15 +7458,17 @@ async function runSmoke ({ win, ctx }) {
       const rows = [...document.querySelectorAll('.artist-row')].slice(0, 3)
       const out = []
       for (const row of rows) {
+        if (left() < 2000) break           // 预算不够就不再往下试（后面的自证更重要）
         const key = row.dataset.key || ''
         // ① 行的图也要等
-        const rowImg = await grab('.artist-row[data-key="' + key + '"] .artist-row__avatar img')
+        const rowImg = await grab('.artist-row[data-key="' + key + '"] .artist-row__avatar img', 8000)
         const rowFp = fingerprint(rowImg)
         actions.openArtist(key)
-        const detailImg = await grab('.browse-detail__avatar img')
+        const detailImg = await grab('.browse-detail__avatar img', 8000)
         actions.closeDetail()
         await new Promise((r) => setTimeout(r, 200))
         const detailFp = fingerprint(detailImg)
+        const pairMad = mad(rowFp, detailFp)
         out.push({
           key,
           rowDecoded: Boolean(rowFp),
@@ -7466,26 +7478,30 @@ async function runSmoke ({ win, ctx }) {
           sameBlob: Boolean(rowImg && detailImg && rowImg.getAttribute('src') === detailImg.getAttribute('src')),
           rowFrame: firstFrame(rowFp),
           detailFrame: firstFrame(detailFp),
-          mad: mad(rowFp, detailFp)
+          mad: pairMad
         })
+        if (pairMad !== null && pairMad <= ${ARTIST_MAD_THRESHOLD}) {
+          break                            // 首个命中就够了：判据是"同一张"，不是"全都同一张"
+        }
       }
 
       /*
        * ⑤ 自证：同一个 key 在清掉 URL 缓存后会拿到**新的 blob**，但图像内容不变。
        * 旧判据（比字符串）在这种情况下必然判红 —— 这就是昨晚那 4 次交替的第二个来源。
+       * 只在还有余量时做：它证明的是"判据为什么这么选"，不该把整段拖过超时。
        */
       const probeKey = out[0] ? out[0].key : (rows[0] ? rows[0].dataset.key : '')
       let selfTest = { key: probeKey, blobChanged: null, mad: null, note: '没拿到可复现的艺人' }
-      if (probeKey) {
+      if (probeKey && left() > 12000) {
         actions.openArtist(probeKey)
-        const before = await grab('.browse-detail__avatar img', 8000)
+        const before = await grab('.browse-detail__avatar img', 6000)
         const beforeSrc = before ? before.getAttribute('src') || '' : ''
         const beforeFp = fingerprint(before)
         actions.closeDetail()
         await new Promise((r) => setTimeout(r, 300))
         artwork.releaseMemory()          // 清空 urlCache 并 revoke 旧 blob
         actions.openArtist(probeKey)
-        const after = await grab('.browse-detail__avatar img', 10000)
+        const after = await grab('.browse-detail__avatar img', 6000)
         const afterSrc = after ? after.getAttribute('src') || '' : ''
         const afterFp = fingerprint(after)
         actions.closeDetail()
@@ -7507,7 +7523,6 @@ async function runSmoke ({ win, ctx }) {
      * 而"人像 vs 专辑封面"是几十的量级 —— 阈值取在两者之间。
      * 先用打印出来的 MAD 验证，再据此调整（不凭感觉定）。
      */
-    const ARTIST_MAD_THRESHOLD = 12
     const judged = artistRowVsDetail.out.filter((item) => item.rowDecoded || item.detailDecoded)
     const matched = judged.filter((item) => item.mad !== null && item.mad <= ARTIST_MAD_THRESHOLD)
     const oneSided = judged.filter((item) => item.rowDecoded !== item.detailDecoded)
