@@ -440,6 +440,144 @@ async function runSecondInstanceCheck ({ win, profile, record, raiseInfo, mediaD
 }
 
 /**
+ * 最小判定：**移动这个动作本身会不会改尺寸**。
+ * 会 → 问题在"移动"这个动作本身；不会 → 问题在别处（别的代码或系统在改尺寸）。
+ */
+async function runSetPositionProbe ({ win, record }) {
+  win.unmaximize()
+  win.setBounds({ x: 420, y: 200, width: 1100, height: 740 })
+  await sleep(600)
+  const rows = []
+  for (let step = 1; step <= 3; step++) {
+    win.setBounds({ x: 420 - 60 * step, y: 200, width: 1100, height: 740 })
+    await sleep(400)
+    const b = win.getBounds()
+    const content = win.getContentBounds()
+    rows.push(`${b.x},${b.y} ${b.width}x${b.height}（client ${content.width}x${content.height}）`)
+  }
+  const b = win.getBounds()
+  const widths = rows.map((row) => Number(row.match(/(\d+)x\d+/)[1]))
+  const heights = rows.map((row) => Number(row.match(/x(\d+)/)[1]))
+  record('移动窗口不该改尺寸（setBounds 钉住宽高）',
+    Math.max(...widths) - Math.min(...widths) <= 1 &&
+    Math.max(...heights) - Math.min(...heights) <= 1,
+    `setBounds(420,200,1100x740) 后连续 setPosition 左移 3×60：${rows.join(' → ')}`,
+    { profiles: ['full', 'player'] })
+  win.setBounds({ x: 240, y: 200, width: 1100, height: 740 })
+  await sleep(300)
+}
+
+/**
+ * 回归：**向左拖动**时窗口宽度/高度必须守恒。
+ *
+ * 用户报的 bug：向左拖窗口，当右边界移到屏幕中间时，右边界会自己"变长"。
+ * 症状指向的不是"能不能动"，而是**每一步的尺寸是否被改** ——
+ * 所以这里把光标分 6 步向左挪 60px，每步都读一次 bounds，把轨迹写进读数里。
+ */
+async function runLeftDragProbe ({ win, record }) {
+  const { screen } = require('electron')
+  const { spawn } = require('node:child_process')
+  const windowApi = require('./window')
+
+  const moveCursor = (x, y) => {
+    const script = 'Add-Type -AssemblyName System.Windows.Forms; ' +
+      `[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(${Math.round(x)}, ${Math.round(y)})`
+    try {
+      spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        stdio: 'ignore',
+        windowsHide: true
+      })
+    } catch (err) {
+      console.warn('  · 移动光标失败：', err && err.message)
+    }
+    setTimeout(() => {
+      try {
+        if (!win.isDestroyed()) win.focus()
+      } catch { /* 忽略 */ }
+    }, 550)
+  }
+
+  windowApi.endWindowDrag()
+  windowApi.endWindowResize()
+  win.unmaximize()
+  win.setBounds({ x: 420, y: 200, width: 1100, height: 740 })
+  await sleep(700)
+  const start = win.getBounds()
+
+  /* 按标题栏左侧的应用名区域（安全区，不在缩放把手上） */
+  const anchorRect = await evaluate(win, `
+    const node = document.querySelector('.titlebar__app')
+    const r = node.getBoundingClientRect()
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }`)
+  const anchorScreenX = start.x + anchorRect.x
+  const anchorScreenY = start.y + anchorRect.y
+
+  moveCursor(anchorScreenX, anchorScreenY)
+  {
+    const deadline = Date.now() + 2500
+    while (Date.now() < deadline) {
+      const point = screen.getCursorScreenPoint()
+      if (Math.abs(point.x - anchorScreenX) <= 2 && Math.abs(point.y - anchorScreenY) <= 2) break
+      await sleep(80)
+    }
+  }
+  await sleep(250)
+  await evaluate(win, `
+    const node = document.querySelector('.titlebar__app')
+    const r = node.getBoundingClientRect()
+    node.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0,
+      bubbles: true,
+      clientX: r.left + r.width / 2,
+      clientY: r.top + r.height / 2
+    }))
+    return true`)
+  await sleep(400)
+
+  const samples = []
+  for (let step = 1; step <= 6; step++) {
+    moveCursor(anchorScreenX - 60 * step, anchorScreenY)
+    {
+      const target = anchorScreenX - 60 * step
+      const deadline = Date.now() + 2500
+      while (Date.now() < deadline) {
+        const point = screen.getCursorScreenPoint()
+        if (Math.abs(point.x - target) <= 2) break
+        await sleep(80)
+      }
+    }
+    await sleep(350)
+    const b = win.getBounds()
+    samples.push({ step, x: b.x, y: b.y, w: b.width, h: b.height })
+  }
+  windowApi.endWindowDrag()
+  await evaluate(win, `window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })); return true`)
+  await sleep(300)
+
+  const widths = new Set(samples.map((s) => s.w))
+  const heights = new Set(samples.map((s) => s.h))
+  const movedLeft = samples[samples.length - 1].x < start.x - 200
+  const trajectory = samples.map((s) => `${s.x},${s.y} ${s.w}x${s.h}`).join(' → ')
+  const widthList = [...widths]
+  const heightList = [...heights]
+  record('向左拖 6×60px：宽度与高度保持不变（右边界不会自己"变长"）',
+    movedLeft &&
+    Math.max(...widthList) - Math.min(...widthList) <= 1 &&
+    Math.max(...heightList) - Math.min(...heightList) <= 1,
+    `起点 ${start.x},${start.y} ${start.width}x${start.height}；轨迹 ${trajectory}；` +
+    `宽度取值 ${[...widths].join('/')}（应只有一个）、高度取值 ${[...heights].join('/')}（应只有一个）`,
+    { profiles: ['full', 'player'] })
+
+  moveCursor(anchorScreenX, anchorScreenY)
+  if (win.isMaximized()) win.unmaximize()
+  win.setBounds({ x: 240, y: 200, width: 1100, height: 740 })
+  win.show()
+  win.focus()
+  await sleep(500)
+}
+
+
+/**
  * 真实拖动自检（不止 movable=true）。
  *
  * 做法：用 PowerShell 的 `[Cursor]::Position` 把**系统光标**真的挪到标题栏上，
@@ -476,6 +614,17 @@ async function runRealDragChecks ({ win, record }) {
         if (winForFocus && !winForFocus.isDestroyed()) winForFocus.focus()
       } catch { /* 忽略 */ }
     }, 550)
+  }
+
+  /** 等系统光标真的到 (x,y)：PowerShell 拉起要几百毫秒，不等就会按在旧位置上 */
+  const waitForCursor = async (x, y, timeout = 2500) => {
+    const deadline = Date.now() + timeout
+    while (Date.now() < deadline) {
+      const point = screen.getCursorScreenPoint()
+      if (Math.abs(point.x - x) <= 2 && Math.abs(point.y - y) <= 2) return true
+      await sleep(80)
+    }
+    return false
   }
 
   const originalCursor = screen.getCursorScreenPoint()
@@ -517,18 +666,23 @@ async function runRealDragChecks ({ win, record }) {
    * 一次完整的拖动：挪光标到位 → 按下 → 光标再挪 (dx,dy) → 断言窗口变化 → 松手。
    */
   const drag = async ({ selector, dx, dy, label }) => {
+    /* 上一个用例可能还留着拖动/缩放循环：先停干净，否则它会继续把窗口拽走 */
+    windowApi.endWindowDrag()
+    windowApi.endWindowResize()
     win.unmaximize()
     win.setBounds({ x: 240, y: 200, width: 1100, height: 740 })
-    await sleep(500)
+    await sleep(700)
     const point = await screenPointOf(selector)
     if (!point) return { ok: false, reason: `没找到 ${selector}` }
     moveCursor(point.screenX, point.screenY, win)
-    await sleep(900)
+    await waitForCursor(point.screenX, point.screenY)
+    await sleep(250)
     const before = win.getBounds()
     const pressed = await press(selector)
     await sleep(350)
     moveCursor(point.screenX + dx, point.screenY + dy, win)
-    await sleep(900)
+    await waitForCursor(point.screenX + dx, point.screenY + dy)
+    await sleep(250)
     const after = win.getBounds()
     windowApi.endWindowDrag()
     await evaluate(win, `window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })); return true`)
@@ -555,6 +709,8 @@ async function runRealDragChecks ({ win, record }) {
     { profiles: ['full', 'player'] })
 
   /* ②b 标题栏正中（灵动岛的空隙）：以前这块是"拖不动"的死区 */
+  windowApi.endWindowDrag()
+  windowApi.endWindowResize()
   win.unmaximize()
   win.setBounds({ x: 240, y: 200, width: 1100, height: 740 })
   await sleep(500)
@@ -572,7 +728,8 @@ async function runRealDragChecks ({ win, record }) {
   let islandDrag = { ok: false }
   if (islandPoint) {
     moveCursor(islandPoint.screenX, islandPoint.screenY, win)
-    await sleep(900)
+    await waitForCursor(islandPoint.screenX, islandPoint.screenY)
+    await sleep(250)
     const beforeIsland = win.getBounds()
     const pressedIsland = await evaluate(win, `
       const node = document.elementFromPoint(${islandPoint.domX}, ${islandPoint.domY})
@@ -586,7 +743,8 @@ async function runRealDragChecks ({ win, record }) {
       return true`)
     await sleep(350)
     moveCursor(islandPoint.screenX, islandPoint.screenY + 70, win)
-    await sleep(900)
+    await waitForCursor(islandPoint.screenX, islandPoint.screenY + 70)
+    await sleep(250)
     const afterIsland = win.getBounds()
     windowApi.endWindowDrag()
     await evaluate(win, `window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })); return true`)
@@ -606,6 +764,8 @@ async function runRealDragChecks ({ win, record }) {
     { profiles: ['full', 'player'] })
 
   /* ③ 窗口最上 4px：拖动是改高度（缩放），不是移动 */
+  windowApi.endWindowDrag()
+  windowApi.endWindowResize()
   win.unmaximize()
   win.setBounds({ x: 260, y: 220, width: 1100, height: 740 })
   await sleep(500)
@@ -616,7 +776,8 @@ async function runRealDragChecks ({ win, record }) {
     screenY: win.getBounds().y + 2
   }
   moveCursor(topPoint.screenX, topPoint.screenY, win)
-  await sleep(900)
+  await waitForCursor(topPoint.screenX, topPoint.screenY)
+  await sleep(250)
   const beforeTop = win.getBounds()
   const pressedTop = await evaluate(win, `
     const node = document.elementFromPoint(550, 2)
@@ -631,7 +792,8 @@ async function runRealDragChecks ({ win, record }) {
     return { ok: true, cls: String(cls) }`)
   await sleep(350)
   moveCursor(topPoint.screenX, topPoint.screenY + 70, win)
-  await sleep(900)
+  await waitForCursor(topPoint.screenX, topPoint.screenY + 70)
+  await sleep(250)
   const afterTop = win.getBounds()
   windowApi.endWindowResize()
   require('./window').endWindowDrag()
@@ -644,6 +806,9 @@ async function runRealDragChecks ({ win, record }) {
     `按下命中的是「${String(pressedTop.cls)}」；高度 ${beforeTop.height} → ${afterTop.height}` +
     `（减少 ${beforeTop.height - afterTop.height}，期望 ≥40）、宽度 ${beforeTop.width} → ${afterTop.width}（不应变）`,
     { profiles: ['full', 'player'] })
+
+  await runSetPositionProbe({ win, record })
+  await runLeftDragProbe({ win, record })
 
   /* 收尾：还原光标与窗口几何，并把焦点抢回窗口 */
   moveCursor(originalCursor.x, originalCursor.y, win)

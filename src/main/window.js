@@ -413,15 +413,30 @@ function beginWindowDrag (win, offset = {}) {
   const grabY = wasMaximized
     ? Math.round(bounds.height * clamp01(offset.ratioY, 0.03))
     : Math.round(Number.isFinite(offset.offsetY) ? Math.max(0, Math.min(bounds.height, offset.offsetY)) : 22)
+  /*
+   * 尺寸在按下时**钉死**，移动只改位置。
+   *
+   * 为什么不能只用 setPosition：实测这台机器上每调一次 `win.setPosition()`，
+   * 窗口就**宽高各长 1px**（setBounds(1100x740) 后连续移动：
+   * 1100 → 1101 → 1102 → 1103）。拖动循环是 16ms 一次，几百毫秒就长出几十像素 ——
+   * 用户看到的就是"向左拖，右边的边框自己变长"。
+   * 改成 setBounds 并显式带上按下时的 width/height，尺寸就不会再漂。
+   */
+  const size = { width: bounds.width, height: bounds.height }
   const started = Date.now()
   const timer = setInterval(() => {
     if (!dragLoop || win.isDestroyed()) { endWindowDrag(); return }
     /* 安全阀：松手事件丢了也不能永远跟着光标跑 */
     if (Date.now() - started > 20000) { endWindowDrag(); return }
     const point = screen.getCursorScreenPoint()
-    win.setPosition(Math.round(point.x - grabX), Math.round(point.y - grabY))
+    win.setBounds({
+      x: Math.round(point.x - grabX),
+      y: Math.round(point.y - grabY),
+      width: size.width,
+      height: size.height
+    })
   }, 16)
-  dragLoop = { timer, win, wasMaximized }
+  dragLoop = { timer, win, wasMaximized, size }
   return { ok: true, wasMaximized }
 }
 
