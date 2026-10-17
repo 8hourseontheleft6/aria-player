@@ -20,7 +20,7 @@ const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 const { app } = require('electron')
-const { readMetadata } = require('./metadata')
+const { readMetadata, readEmbeddedArtwork } = require('./metadata')
 
 /** 最近打开的条目数上限（不是音乐库索引，只是一份"最近"清单） */
 const RECENT_LIMIT = 50
@@ -87,7 +87,13 @@ function createOpenedFilesService (ctx) {
    * 只拿标题/艺人/专辑/时长这些播放与显示必需的信息（解析也快得多）。
    */
   const trackOf = async (filePath, stat) => {
-    const track = await readMetadata(filePath, { stat, covers: false, sidecarCover: false })
+    /*
+       * 读**内嵌**封面（covers: true）：用户要求"能读出封面就显示，读不出来就不显示"。
+       * 仍然不做 sidecarCover（不在同目录里找同名图片）：那是资料库的行为，
+       * 播放器只关心文件本身。读不出来时 readMetadata 给的是 artworkEmbedded=false，
+       * 渲染层据此**不显示**占位图（见 track-list.js 的 player 分支）。
+       */
+      const track = await readMetadata(filePath, { stat, covers: true, sidecarCover: false })
     return track
   }
 
@@ -209,6 +215,23 @@ function createOpenedFilesService (ctx) {
       if (!list.length) return { added: 0, recent: recent.length }
       remember(list)
       return { added: list.length, recent: recent.length }
+    },
+
+    /**
+     * 读某个已打开文件的内嵌封面（给 player 用：它没有 library 服务，走不了 library.artwork）。
+     *
+     * 安全边界与 media:// 一致：只允许**这次打开过 / 最近打开过**的文件，
+     * 否则渲染层可以借这条通道读任意路径的图片。
+     */
+    async readArtwork (filePath) {
+      if (!filePath || !this.isAllowed(filePath)) return null
+      try {
+        const artwork = await readEmbeddedArtwork(filePath)
+        if (!artwork || !artwork.data) return null
+        return { data: artwork.data, mime: artwork.mime }
+      } catch {
+        return null
+      }
     },
 
     async clear () {

@@ -50,6 +50,7 @@ import { createNowPlayingPanel } from './ui/panels/now-playing-panel.js'
 import { createQueuePanel } from './ui/panels/queue-panel.js'
 import { createTrackMenu } from './ui/menus/track-menu.js'
 import { createDropZone } from './ui/widgets/drop-zone.js'
+import { createResizeHandles } from './ui/widgets/resize-handles.js'
 import { createLazyArtwork } from './ui/widgets/artwork-node.js'
 import { toast, closeAllLayers } from './ui/widgets/overlay.js'
 import { createFpsOverlay } from './ui/widgets/fps-overlay.js'
@@ -765,6 +766,42 @@ async function main () {
       }
     },
 
+    /**
+     * 一键清除「最近打开」历史（player 档位）。
+     *
+     * 三件事一起做，缺一件就会留下怪状态：
+     *   ① 主进程清掉 recent.json（**不动任何音频文件**，只是这份清单）；
+     *   ② 列表清空（列表就是这个历史本身）；
+     *   ③ 播放停下并回到空状态 —— 否则会出现"列表空了但还在放上一首"。
+     */
+    async clearOpenedHistory () {
+      if (!remote.opened) return { cleared: 0 }
+      const result = await remote.opened.clear()
+      const cleared = result && Number.isFinite(result.cleared) ? result.cleared : 0
+      try {
+        player.pause()
+      } catch {
+        /* 没有正在播放的曲目时 pause 可能直接返回，忽略 */
+      }
+      playlist.sync([])
+      store.set((state) => ({
+        ...state,
+        library: { ...state.library, loaded: true, tracks: [], byId: new Map(), totalDuration: 0 },
+        playback: {
+          ...state.playback,
+          trackId: null,
+          status: 'idle',
+          position: 0,
+          duration: 0,
+          queue: [],
+          queueIndex: -1
+        }
+      }))
+      bus.emit(EVENTS.LIBRARY_UPDATED, { count: 0 })
+      toast(`已清除 ${cleared} 条历史记录（音频文件没有被删除）`)
+      return { cleared }
+    },
+
     /** 打开文件 / 打开文件夹（player 档位）—— 解析完成后收进列表并播放第一首 */
     async openFromDisk (mode) {
       if (!remote.opened) return { action: 'unsupported' }
@@ -931,6 +968,13 @@ async function main () {
   dom.content.append(libraryView.element, browseView.element, mediaWall.element, settingsView.element, queuePanel.element)
   dom.playerBar.replaceWith(playerBar.element)
   dom.nowPlaying.replaceWith(nowPlayingPanel.element)
+  /*
+   * 窗口边缘的缩放把手：挂在 body 上（position: fixed，不参与布局），
+   * 不放进 .app 里 —— .app 自己有层叠上下文，放进去会被全屏播放页盖住。
+   */
+  const resizeHandles = createResizeHandles()
+  document.body.appendChild(resizeHandles.element)
+
   document.getElementById('layer-root').appendChild(dropZone.element)
   document.getElementById('layer-root').appendChild(fpsOverlay.element)
 

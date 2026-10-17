@@ -24,13 +24,20 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
    * 沉浸式示波器：横贯页面底部的一条（纯装饰，不接收鼠标 —— 见 visualizer.js 里的说明）。
    * 样式存在设置里，点顶栏那颗小按钮循环切换。
    */
-  const visualizer = createVisualizer({
+  /*
+   * 示波器按**能力**决定要不要建：player 档位没有这个能力（capabilities.visualizer=false）。
+   * 用户要求"player 处不要添加示波器，或者简化也可以" —— 这里选"不建"：
+   * 不创建元素、不接 WebAudio、顶栏那颗切换按钮也不出现（见下面的 visualizerButton）。
+   */
+  const hasVisualizer = !window.aria || !window.aria.profile || !window.aria.profile.capabilities ||
+    window.aria.profile.capabilities.visualizer !== false
+  const visualizer = hasVisualizer ? createVisualizer({
     engine,
     store,
     bus,
     getStyle: () => store.get().settings.visualizerStyle || 'bars',
     onPickStyle: (style) => actions.setSetting({ visualizerStyle: style })
-  })
+  }) : null
 
   /* ---------------- 顶栏 ---------------- */
   const closeButton = h('button', {
@@ -124,7 +131,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
     h('div', { class: 'now-playing__spacer' }),
     revealButton,
     // 可视化样式切换（底部那条只是装饰，不接收鼠标，所以切换入口放在这里）
-    visualizer.button,
+    visualizer ? visualizer.button : null,
     eqButton,
     lyricsToggle,
     queueToggle
@@ -396,7 +403,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
    */
   const body = h('div', { class: 'now-playing__body' }, left, right)
   const element = h('section', { class: 'now-playing', id: 'now-playing', hidden: true },
-    artBackground, veil, glow, topbar, body, visualizer.element)
+    artBackground, veil, glow, topbar, body, visualizer ? visualizer.element : null)
 
   /* ---------------- 时间显示 ---------------- */
   function updateTimes (time, duration) {
@@ -461,9 +468,9 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
       updateTimes(player.getTime(), player.getDuration())
       requestAnimationFrame(() => lyricsView.alignToActive({ animated: false }))
       // 只在面板打开时绘帧；关掉就停，别在后台空转（暂停时它自己还会降到 ~6 帧）
-      visualizer.start()
+      if (visualizer) visualizer.start()
     } else if (!element.hidden) {
-      visualizer.stop()
+      if (visualizer) visualizer.stop()
       element.classList.add('is-closing')
       setTimeout(() => {
         if (!store.get().ui.nowPlayingOpen) element.hidden = true

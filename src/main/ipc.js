@@ -202,6 +202,19 @@ function registerIpc (ctx) {
       if (!win) return { ok: false }
       return require('./window').beginWindowDrag(win, offset || {})
     },
+    /*
+     * 拖窗口边缘缩放。无边框窗口在 Windows 上的系统缩放边框不可靠（用户那边完全拖不动），
+     * 所以渲染层画了八块透明把手，按下时走这里：主进程按光标位置算新的 bounds。
+     */
+    'window:begin-resize': (event, payload) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return { ok: false }
+      return require('./window').beginWindowResize(win, payload || {})
+    },
+    'window:end-resize': () => {
+      require('./window').endWindowResize()
+      return true
+    },
     'window:end-drag': () => {
       require('./window').endWindowDrag()
       return true
@@ -266,7 +279,19 @@ function registerIpc (ctx) {
             return ctx.get('openedFiles').resolve(result.filePaths)
           },
           /* 供自检使用：直接给一批路径，走与拖放/双击完全相同的解析链路 */
-          'opened:resolve': (_event, paths) => ctx.get('openedFiles').resolve(paths)
+          'opened:resolve': (_event, paths) => ctx.get('openedFiles').resolve(paths),
+    /*
+     * 一键清除历史：清 recent.json 并返回清掉多少条。
+     * 只删"最近打开"这份清单，**不动任何音频文件**（渲染层会同步清空列表与播放）。
+     */
+    /* 读已打开文件的内嵌封面（player 没有 library 服务，用这条） */
+    'opened:artwork': (_event, filePath) => ctx.get('openedFiles').readArtwork(filePath),
+    'opened:clear': async () => {
+      const service = ctx.get('openedFiles')
+      const before = service.getRecent().length
+      await service.clear()
+      return { cleared: before }
+    }
         }
       : {}),
     'shell:open-external': (_event, url) => {

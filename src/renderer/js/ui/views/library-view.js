@@ -278,10 +278,26 @@ const compactTitle = h('div', { class: 'view-toolbar__title', text: defaultListT
    * 「定位到正在播放」「重新扫描音乐目录」是低频操作，收进 ⋯ 里 ——
    * 五个图标按钮排在一起既挤又难扫（用户反馈过界面不协调）。
    */
+  /*
+   * 「清除历史」：只有 player 档位有「最近打开」，所以只在那个档位出现
+   * （window.aria.opened 就是那个能力入口）。一键清空清单 + 列表 + 停止播放。
+   * 用文字按钮而不是图标：这是个有副作用的操作，不该藏在图标里让人猜。
+   */
+  const clearHistoryButton = h('button', {
+    class: 'btn btn--sm clear-history',
+    type: 'button',
+    title: '清除最近打开的历史记录（不会删除音频文件）',
+    onClick: () => {
+      closeAllLayers()
+      actions.clearOpenedHistory()
+    }
+  }, '清除历史')
+
   const toolbar = h('div', { class: 'view-toolbar' },
     compactTitle,
     h('div', { class: 'view-toolbar__spacer' }),
     metaLabel,
+    clearHistoryButton,
     searchSlot,
     sortButton,
     // 批量选择 + 低频操作的入口
@@ -543,6 +559,15 @@ const compactTitle = h('div', { class: 'view-toolbar__title', text: defaultListT
     }
 
     const total = tracks.reduce((sum, track) => sum + (track.duration || 0), 0)
+    /*
+     * 「清除历史」的显隐：player 档位、并且列表里有东西时才有意义。
+     * 本体（有资料库）根本没有"最近打开"，这个按钮永远不出现。
+     */
+    if (clearHistoryButton) {
+      const openedMode = typeof window !== 'undefined' && window.aria && window.aria.opened
+      clearHistoryButton.classList.toggle('hidden', !(openedMode && state.library.tracks.length > 0))
+    }
+
     const title = selectTitle(state, defaultListTitle())
 
     headerTitle.textContent = title

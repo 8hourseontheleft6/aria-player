@@ -86,6 +86,10 @@ contextBridge.exposeInMainWorld('aria', {
         recent: () => ipcRenderer.invoke('opened:recent'),
         pick: (mode) => ipcRenderer.invoke('opened:pick', mode),
         resolve: (paths) => ipcRenderer.invoke('opened:resolve', paths),
+    /* 读已打开文件的内嵌封面（player 没有 library 服务） */
+    artwork: (filePath) => ipcRenderer.invoke('opened:artwork', filePath),
+    /* 一键清除「最近打开」历史（只删清单，不删文件） */
+    clear: () => ipcRenderer.invoke('opened:clear'),
         /* 双击文件 / 拖到 Dock / 第二个实例带来的路径：主进程解析好后推过来 */
         onIncoming: (handler) => on('opened:incoming', handler)
       }
@@ -167,7 +171,10 @@ contextBridge.exposeInMainWorld('aria', {
     onMaximizedChange: (handler) => on('window:maximized', handler),
     /* 最大化状态下拖标题栏：先还原、再跟着光标移动（见 main/window.js 的 beginWindowDrag） */
     beginDrag: (offset) => ipcRenderer.invoke('window:begin-drag', offset),
-    endDrag: () => ipcRenderer.invoke('window:end-drag')
+    endDrag: () => ipcRenderer.invoke('window:end-drag'),
+    /* 拖窗口边缘缩放（无边框窗口自己实现，见 main/window.js 的 beginWindowResize） */
+    beginResize: (payload) => ipcRenderer.invoke('window:begin-resize', payload),
+    endResize: () => ipcRenderer.invoke('window:end-resize')
   },
 
   media: {

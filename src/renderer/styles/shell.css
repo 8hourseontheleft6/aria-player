@@ -716,3 +716,82 @@ body.is-maximized .titlebar__app {
   flex: 1;
   min-height: 0;
 }
+
+
+/* ------------------------------------------------------------------ *
+ * 窗口边缘的缩放把手
+ *
+ * 无边框窗口的系统缩放边框不可靠（用户反馈"拖不动边缘"），所以这里画八块透明把手。
+ * 关键点：
+ *   · 用 fixed 贴住窗口四边与四角，**不参与布局**；
+ *   · 必须 no-drag —— 否则边缘落在标题栏的 drag 区里，鼠标事件到不了渲染层；
+ *   · 每条边给对应的光标形状，用户能看出"这里可以拖"；
+ *   · 标记 --resize-hit 的宽度要够（4px 太细抓不住，8px 手感正常）。
+ * ------------------------------------------------------------------ */
+.resize-handles {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.resize-handle {
+  position: absolute;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.resize-handles.is-hidden {
+  display: none;
+}
+
+.resize-handle--n,
+.resize-handle--s {
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.resize-handle--n { top: 0; }
+.resize-handle--s { bottom: 0; }
+
+.resize-handle--e,
+.resize-handle--w {
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.resize-handle--e { right: 0; }
+.resize-handle--w { left: 0; }
+
+.resize-handle--ne,
+.resize-handle--nw,
+.resize-handle--se,
+.resize-handle--sw {
+  width: 12px;
+  height: 12px;
+}
+
+.resize-handle--ne { top: 0; right: 0; cursor: nesw-resize; }
+.resize-handle--nw { top: 0; left: 0; cursor: nwse-resize; }
+.resize-handle--se { bottom: 0; right: 0; cursor: nwse-resize; }
+.resize-handle--sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+
+/* 「清除历史」按钮：文字按钮，低调但看得出是按钮 */
+.clear-history {
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+.clear-history.hidden {
+  display: none;
+}
+
+/* 读不出封面的行（player 档位）：整格收掉，不是显示一颗空音符 */
+.track-row__art.is-empty {
+  display: none;
+}

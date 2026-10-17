@@ -626,7 +626,16 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
 
     scroll.appendChild(group('音乐文件夹', folderRows))
 
-    /* ---------- 外观 ---------- */
+    /*
+   * 示波器（音频可视化）是纯展示能力：player 档位没有它（capabilities.visualizer=false），
+   * 那里既不建示波器、也不显示这条设置。
+   */
+  const hasVisualizer = (() => {
+    const caps = window.aria && window.aria.profile ? window.aria.profile.capabilities : null
+    return !caps || caps.visualizer !== false
+  })()
+
+  /* ---------- 外观 ---------- */
     scroll.appendChild(group('外观', [
       row({
         title: '主题',
@@ -657,12 +666,17 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
        * 是"我想要它长什么样"的选择。选项与顶栏那颗循环切换按钮共用同一份标签
        * （见 ui/widgets/visualizer.js 的 visualizerChoices）。
        */
-      row({
-        title: '音频可视化',
-        sub: '正在播放页底部那条示波器。也可以直接在正在播放页点顶栏那颗波形图标循环切换。选「关闭」时不创建 WebAudio 接入点，播放路径保持原生；上面开着「减少动画」时它也会停住不动（那条开关的承诺是关掉所有动画）。',
-        control: segmented(visualizerChoices(), settings.visualizerStyle || 'bars',
-          (style) => actions.setSetting({ visualizerStyle: style }))
-      })
+      /*
+       * 示波器设置：只在**有可视化能力**的档位出现（player 没有这个能力，也不建示波器）。
+       */
+      ...(hasVisualizer
+        ? [row({
+            title: '音频可视化',
+            sub: '正在播放页底部那条示波器。也可以直接在正在播放页点顶栏那颗波形图标循环切换。选「关闭」时不创建 WebAudio 接入点，播放路径保持原生；上面开着「减少动画」时它也会停住不动（那条开关的承诺是关掉所有动画）。',
+            control: segmented(visualizerChoices(), settings.visualizerStyle || 'bars',
+              (style) => actions.setSetting({ visualizerStyle: style }))
+          })]
+        : [])
     ]))
 
     /* ---------- 播放 ---------- */

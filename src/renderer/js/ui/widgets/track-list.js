@@ -20,6 +20,17 @@ const SORT_COLUMNS = [
   { key: 'duration', label: '时长' }
 ]
 
+/*
+ * 「封面读不出来就不显示」——只有 player 档位这样做。
+ * 资料库档位保持原来的音符占位（列表对齐，且那是它一直以来的样子）。
+ */
+const playerHidesMissingArt = (() => {
+  const caps = typeof window !== 'undefined' && window.aria && window.aria.profile
+    ? window.aria.profile.capabilities
+    : null
+  return Boolean(caps && caps.library !== true)
+})()
+
 export function createTrackList ({ store, bus, player, artwork, actions, matchFor = null, playlistId = null }) {  const canvas = h('div', { class: 'tracklist__canvas' })
   const viewport = h('div', { class: 'tracklist__viewport scroll', tabindex: '0' }, canvas)
 
@@ -183,7 +194,13 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
 
     const indexCell = h('div', { class: 'track-row__index' })
     row.__index = indexCell
-    const artCell = h('div', { class: 'track-row__art' }, icon('music'))
+    /*
+     * 封面格子：有封面时由 loadArtwork 填一张图；没有封面时怎么办是**分档位**的。
+     *   · 资料库档位：保留一颗音符占位（列表要视觉对齐，用户也习惯了）；
+     *   · player 档位：**什么都不显示** —— 用户的要求是"读得出来就显示，读不出来就不显示"，
+     *     一排空音符反而像加载失败。
+     */
+    const artCell = h('div', { class: 'track-row__art' }, playerHidesMissingArt ? null : icon('music'))
     const titleNode = h('div', { class: 'track-row__title' })
     const artistNode = h('div', { class: 'track-row__artist truncate', text: track.artist })
 
@@ -368,7 +385,12 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     artworkRequests.set(node, track.id)
     const url = await artwork.resolveUrl(track)
     if (artworkRequests.get(node) !== track.id) return
-    if (!url || node.querySelector('img')) return
+    if (!url) {
+      /* 读不出封面：player 档位整格隐藏（"读不出来就不显示"），资料库档位保留音符占位 */
+      if (playerHidesMissingArt) node.classList.add('is-empty')
+      return
+    }
+    if (node.querySelector('img')) return
     const image = h('img', { src: url, alt: '', decoding: 'async' })
     clear(node)
     node.appendChild(image)

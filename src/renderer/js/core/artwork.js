@@ -149,7 +149,18 @@ export function createArtworkService ({ bus, host = null }) {
 
     const task = (async () => {
       try {
-        const result = await remote.library.artwork(track.id)
+        /*
+         * 内嵌封面有两条来源：
+         *   · 资料库档位：library.artwork（走索引，能读任何库内文件）；
+         *   · player 档位：**没有 library 服务**（IPC 会被兜成 null），改用 opened.artwork ——
+         *     只认"这次 / 最近打开过"的文件（主进程那份白名单）。
+         * 之前 player 里也走第一条，于是永远拿不到封面：列表里一行图片都没有。
+         */
+        const caps = window.aria && window.aria.profile ? window.aria.profile.capabilities : null
+        const useOpened = Boolean(caps && caps.library !== true && remote.opened && remote.opened.artwork)
+        const result = useOpened
+          ? await remote.opened.artwork(track.path)
+          : await remote.library.artwork(track.id)
         if (!result || !result.data) return resolveFromProviders(track)
         const url = bytesToBlobUrl(result.data, result.mime)
         rememberBlob(key, url)

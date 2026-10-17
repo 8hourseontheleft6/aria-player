@@ -96,6 +96,15 @@ function createMainWindow (ctx, profile, product) {
     autoHideMenuBar: true,
     // 自绘顶栏，避免系统标题栏破坏 iOS 观感
     frame: IS_MAC,
+    /*
+     * 无边框窗口也必须能缩放、能移动。
+     * thickFrame 是 Windows 上的"厚边框"开关（默认 true）：关掉就彻底没有系统缩放边框了 ——
+     * 用户反馈"拖不动窗口边缘"，所以这里显式打开它，同时渲染层还画了自绘把手
+     * （resize-handles.js）：系统边框 + 自绘把手两条路都留着，哪条能走通都行。
+     */
+    resizable: true,
+    movable: true,
+    ...(IS_MAC ? {} : { thickFrame: true }),
     ...(IS_MAC
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 20 } }
       : {}),
@@ -413,11 +422,64 @@ function beginWindowDrag (win, offset = {}) {
   return { ok: true, wasMaximized }
 }
 
+
+/**
+ * 拖窗口边缘缩放。
+ *
+ * 无边框窗口在 Windows 上的"系统缩放边框"不可靠 —— 用户那边**完全拖不动边缘**。
+ * 所以渲染层画了八块透明把手（resize-handles.js），按下时把"哪条边 + 光标比例"交给这里：
+ * 按 screen.getCursorScreenPoint() 每 16ms 算一次新的 bounds 并 setBounds。
+ *
+ * 四条边分方向处理：拖左/上边时 **x/y 一起变**，拖右/下边只变宽高，角上两边都变。
+ */
+const MIN_SIZE = { width: 940, height: 620 }
+let resizeLoop = null
+
+function endWindowResize () {
+  if (resizeLoop && resizeLoop.timer) clearInterval(resizeLoop.timer)
+  resizeLoop = null
+}
+
+function beginWindowResize (win, { edge = 'se', ratioX = 1, ratioY = 1 } = {}) {
+  if (!win || win.isDestroyed()) return { ok: false }
+  endWindowResize()
+  if (win.isMaximized()) win.unmaximize()
+  const start = win.getBounds()
+  const hasN = edge.includes('n')
+  const hasS = edge.includes('s')
+  const hasW = edge.includes('w')
+  const hasE = edge.includes('e')
+  const startedAt = Date.now()
+  const timer = setInterval(() => {
+    if (!resizeLoop || win.isDestroyed()) { endWindowResize(); return }
+    if (Date.now() - startedAt > 20000) { endWindowResize(); return }
+    const point = screen.getCursorScreenPoint()
+    let { x, y, width, height } = start
+    if (hasE) width = Math.max(MIN_SIZE.width, point.x - start.x)
+    if (hasS) height = Math.max(MIN_SIZE.height, point.y - start.y)
+    if (hasW) {
+      const right = start.x + start.width
+      x = Math.min(point.x, right - MIN_SIZE.width)
+      width = right - x
+    }
+    if (hasN) {
+      const bottom = start.y + start.height
+      y = Math.min(point.y, bottom - MIN_SIZE.height)
+      height = bottom - y
+    }
+    win.setBounds({ x, y, width, height })
+  }, 16)
+  resizeLoop = { timer, win, edge, ratioX, ratioY }
+  return { ok: true, edge }
+}
+
 module.exports = {
   createMainWindow,
   applyTheme,
   applyTaskbarState,
   markQuitting,
+  beginWindowResize,
+  endWindowResize,
   raiseWindow,
   beginWindowDrag,
   endWindowDrag,

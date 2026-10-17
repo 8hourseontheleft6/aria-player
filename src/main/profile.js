@@ -50,7 +50,7 @@ const PROFILES = {
      * 与其在几十处写空值防御，不如让渲染层问一句"这个产品有没有资料库能力"。
      * 这三个标记**必须与 services / plugins 一致**，check-profiles 会逐条交叉验证。
      */
-    capabilities: { library: true, online: true, lyrics: true, sources: true },
+    capabilities: { library: true, online: true, lyrics: true, sources: true, visualizer: true },
     // 侧栏是数据驱动的（store.js 的 sidebarOrder），短清单即可
     sidebar: ['songs', 'albums', 'artists', 'wall']
   },
@@ -66,7 +66,7 @@ const PROFILES = {
     // 一个插件都不注册：没有在线歌词/封面，也没有曲目信息面板
     plugins: [],
     // 三个能力都没有 —— 与上面的 services / plugins 严格对应
-    capabilities: { library: false, online: false, lyrics: false, sources: false },
+    capabilities: { library: false, online: false, lyrics: false, sources: false, visualizer: false },
     /*
      * 只有一份列表（打开的文件）。视图 id 仍叫 songs —— 渲染层的歌曲列表是"一列曲目"
      * 这个通用件，player 里它渲染的就是当前打开的文件（第 3 步接线）。

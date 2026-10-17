@@ -159,6 +159,11 @@ for (const [id, def] of Object.entries(PROFILES)) {
     lyrics: (def.services || []).includes('lyrics'),
     // 在线音源是主进程的 musicSources 服务
     sources: (def.services || []).includes('musicSources'),
+    /*
+     * visualizer 是**纯展示**能力：它不挂在任何服务/插件上（元素、WebAudio、设置项都在渲染层）。
+     * 单独列出来，是为了让"player 不做示波器"这条决定有个明确的落点，而不是散在渲染层的 if 里。
+     */
+    visualizer: (def.capabilities && def.capabilities.visualizer === true),
     // 在线能力由插件提供（online-media 注册了才有歌词/封面提供者）
     online: (def.plugins || []).includes('onlineMedia')
   }

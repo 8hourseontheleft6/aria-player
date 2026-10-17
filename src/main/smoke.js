@@ -127,6 +127,146 @@ async function visibilitySnapshot (win) {
 }
 
 /**
+ * player 档位新增功能的回归：① 没有示波器 ② 封面读得出来才显示 ③ 一键清除历史。
+ *
+ * 顺序要求：**必须放在整套的最后** —— ③ 会把列表与播放一起清空。
+ */
+async function runPlayerUiChecks ({ win, record, mediaDir, ctx }) {
+  const path = require('node:path')
+  const fs = require('node:fs')
+
+  /* ---------- ① player 里没有示波器（不建元素、没有那条设置） ---------- */
+  const viz = await evaluate(win, `
+    return {
+      strip: Boolean(document.querySelector('.visualizer')),
+      canvas: Boolean(document.querySelector('.visualizer__canvas'))
+    }`)
+  const vizSettings = await evaluate(win, `
+    const { actions } = window.__aria
+    actions.setView('settings')
+    await new Promise((r) => setTimeout(r, 500))
+    const titles = [...document.querySelectorAll('.settings__row-title')].map((node) => (node.textContent || '').trim())
+    actions.setView('songs')
+    await new Promise((r) => setTimeout(r, 300))
+    return { hasRow: titles.some((text) => text.includes('音频可视化')) }`)
+  record('player 里没有示波器（不建元素、设置里也没有那条）',
+    viz.strip === false && viz.canvas === false && vizSettings.hasRow === false,
+    `.visualizer=${viz.strip}、canvas=${viz.canvas}、设置里有「音频可视化」=${vizSettings.hasRow}`,
+    { profiles: ['player'] })
+
+  /* ---------- ② 封面：读得出来就显示，读不出来不显示 ---------- */
+  /*
+   * 两个文件对照：
+   *   · 真实 mp3（从音乐库复制一首，带内嵌封面）→ 期望那一行出现 <img>；
+   *   · 合成 wav（没有内嵌封面）→ 期望那一格是 is-empty（整格隐藏，不是空音符）。
+   */
+  let withCover = null
+  try {
+    const libraryDir = path.join(process.env.USERPROFILE || '', 'Music')
+    const found = fs.existsSync(libraryDir)
+      ? fs.readdirSync(libraryDir).find((name) => /\.mp3$/i.test(name))
+      : null
+    if (found) {
+      fs.mkdirSync(mediaDir, { recursive: true })
+      withCover = path.join(mediaDir, `cover-probe-${Date.now()}.mp3`)
+      fs.copyFileSync(path.join(libraryDir, found), withCover)
+    }
+  } catch (err) {
+    console.warn('  · 复制带封面的 mp3 失败：', err && err.message)
+  }
+
+  const makeWav = (name) => {
+    const sampleRate = 8000
+    const buffer = Buffer.alloc(44 + sampleRate)
+    buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + sampleRate, 4); buffer.write('WAVE', 8)
+    buffer.write('fmt ', 12); buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20)
+    buffer.writeUInt16LE(1, 22); buffer.writeUInt32LE(sampleRate, 24); buffer.writeUInt32LE(sampleRate, 28)
+    buffer.writeUInt16LE(1, 32); buffer.writeUInt16LE(8, 34); buffer.write('data', 36)
+    buffer.writeUInt32LE(sampleRate, 40)
+    for (let i = 0; i < sampleRate; i++) buffer[44 + i] = 128
+    fs.mkdirSync(mediaDir, { recursive: true })
+    const file = path.join(mediaDir, name)
+    fs.writeFileSync(file, buffer)
+    return file
+  }
+  const noCover = makeWav(`no-cover-${Date.now()}.wav`)
+
+  if (withCover) {
+    const opened = ctx && ctx.has('openedFiles') ? ctx.get('openedFiles') : null
+    const payload = opened ? await opened.resolve([withCover, noCover]) : null
+    if (payload && payload.tracks.length === 2) {
+      await evaluate(win, `window.__aria.actions.ingestOpenedTracks(${JSON.stringify(payload.tracks)}); return true`)
+      await sleep(2000)
+    }
+  }
+
+  const coverState = await evaluate(win, `
+    const { store } = window.__aria
+    const rows = [...document.querySelectorAll('.track-row')].filter((node) => node.getClientRects().length > 0)
+    return {
+      rows: rows.length,
+      withImg: rows.filter((row) => row.querySelector('.track-row__art img')).length,
+      hiddenArt: rows.filter((row) => row.querySelector('.track-row__art.is-empty')).length,
+      icons: rows.filter((row) => row.querySelector('.track-row__art .icon')).length,
+      embedded: store.get().library.tracks.filter((track) => track.artworkEmbedded === true).length
+    }`)
+  record('封面：读得出来就显示图片，读不出来不显示（不是一颗空音符）',
+    withCover ? (coverState.withImg >= 1 && coverState.hiddenArt >= 1 && coverState.icons === 0) : coverState.icons === 0,
+    (withCover
+      ? `带内嵌封面的 mp3 + 无封面 wav 各 1；行 ${coverState.rows} 个、有图片 ${coverState.withImg} 行、` +
+        `整格隐藏 ${coverState.hiddenArt} 行、还留着音符占位 ${coverState.icons} 行（应为 0）、`
+      : `没能复制到带封面的 mp3（只验无封面一侧）；`) +
+    `artworkEmbedded=true 的曲目 ${coverState.embedded} 首`,
+    { profiles: ['player'] })
+
+  /* ---------- ③ 一键清除历史 ---------- */
+  const beforeClear = await evaluate(win, `
+    const { store } = window.__aria
+    const button = document.querySelector('.clear-history')
+    return {
+      tracks: store.get().library.tracks.length,
+      visible: Boolean(button) && button.getClientRects().length > 0,
+      status: store.get().playback.status
+    }`)
+  const clicked = await evaluate(win, `
+    const button = document.querySelector('.clear-history')
+    if (!button) return false
+    button.click()
+    return true`)
+  await sleep(1500)
+  const afterClear = await evaluate(win, `
+    const { store } = window.__aria
+    const button = document.querySelector('.clear-history')
+    const state = store.get()
+    return {
+      tracks: state.library.tracks.length,
+      status: state.playback.status,
+      trackId: state.playback.trackId,
+      visible: Boolean(button) && button.getClientRects().length > 0,
+      emptyState: [...document.querySelectorAll('.empty')].some((node) => node.getClientRects().length > 0)
+    }`)
+  const recentAfter = (() => {
+    try {
+      const file = path.join(require('electron').app.getPath('userData'), 'recent.json')
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+      return Array.isArray(parsed) ? parsed.length : -1
+    } catch {
+      return 0
+    }
+  })()
+  record('一键清除历史：列表、播放、recent.json 一起清干净，按钮随之隐藏',
+    clicked === true && beforeClear.visible === true && beforeClear.tracks > 0 &&
+    afterClear.tracks === 0 && afterClear.trackId === null && afterClear.status !== 'playing' &&
+    afterClear.visible === false && recentAfter === 0,
+    `清除前 ${beforeClear.tracks} 首（按钮可见=${beforeClear.visible}、状态=${beforeClear.status}）→ ` +
+    `清除后 ${afterClear.tracks} 首、状态=${afterClear.status}、` +
+    `trackId=${afterClear.trackId === null ? 'null' : afterClear.trackId}、按钮可见=${afterClear.visible}、` +
+    `空状态出现=${afterClear.emptyState}、recent.json ${recentAfter} 条`,
+    { profiles: ['player'] })
+}
+
+
+/**
  * 回归：**冷启动带文件**（现有检查只测了 second-instance）。
  *
  * 冷启动的真实时序：页面第一次加载 → 主进程在 `did-finish-load` 之后立刻推
@@ -383,6 +523,34 @@ async function runWindowChecks ({ win, record }) {
   record('双击标题栏空白处能切换最大化 / 还原（两个方向都验）',
     firstDispatch === true && afterFirst !== stillMax && afterSecond !== afterFirst,
     `双击一次：最大化 ${stillMax} → ${afterFirst}；再双击：→ ${afterSecond}`,
+    { profiles: ['full', 'player'] })
+
+  /*
+   * 拖**窗口边缘**缩放：无边框窗口的系统缩放边框不可靠（用户反馈"完全拖不动边缘"），
+   * 渲染层画了八块透明把手。这里按住右下角那块，断言窗口尺寸真的变了。
+   */
+  win.setBounds({ x: 120, y: 120, width: 1000, height: 700 })
+  await sleep(400)
+  const beforeResize = win.getBounds()
+  const handleHit = await evaluate(win, `
+    const handle = document.querySelector('.resize-handle--se')
+    if (!handle) return false
+    const rect = handle.getBoundingClientRect()
+    handle.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0,
+      bubbles: true,
+      clientX: rect.left + 4,
+      clientY: rect.top + 4
+    }))
+    return true`)
+  await sleep(700)
+  const afterResize = win.getBounds()
+  windowApi.endWindowResize()
+  record('拖窗口边缘能缩放（自绘把手，不依赖系统的缩放边框）',
+    handleHit === true &&
+    (afterResize.width !== beforeResize.width || afterResize.height !== beforeResize.height),
+    `右下角把手命中=${handleHit}；尺寸 ${beforeResize.width}x${beforeResize.height} → ` +
+    `${afterResize.width}x${afterResize.height}（位置 ${afterResize.x},${afterResize.y}）`,
     { profiles: ['full', 'player'] })
 
   /* 普通窗口可拖可缩放（无边框窗口靠这两项开关，被关掉就"拖不动/改不了大小"） */
@@ -759,6 +927,14 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       console.warn('  · 外观截图失败（不影响自检结论）：', error && error.message)
     }
   }
+
+  /* 新增功能回归必须放在最后：其中「一键清除历史」会清空列表与播放 */
+  await runPlayerUiChecks({
+    win,
+    record,
+    ctx,
+    mediaDir: require('node:path').join(__dirname, '..', '..', 'tests', 'player-smoke')
+  })
 }
 
 /**
@@ -932,6 +1108,14 @@ async function runUnifiedSmoke ({ win, ctx, profile, product, record, raiseInfo 
       `userData（${unifiedPath.basename(actual)}）里 ${userDataNames.length} 项` +
       (forbidden.length ? `；不该有的：${forbidden.join('、')}` : '；没有 library/index/artwork 相关条目'),
       { profiles: ['full', 'player'] })
+
+    /* 与 player 套件同一套新增功能回归（放在分支最后：清除历史会清空列表） */
+    await runPlayerUiChecks({
+      win,
+      record,
+      ctx,
+      mediaDir: unifiedPath.join(__dirname, '..', '..', 'tests', 'unified-smoke')
+    })
   } else {
     const state = await evaluate(win, `
       const { store, actions } = window.__aria
