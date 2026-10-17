@@ -330,3 +330,31 @@ npm run smoke          # 交互是否仍然可用
 
 写令牌找不到合适的值时，**先想是不是层级判断错了**，实在没有才加新令牌，
 并且**亮暗两套一起加**。
+
+## 六、颜色来源（`--tint`）
+
+**一条规则**：凡是"跟着封面变"的颜色，只能读 `--tint` / `--tint-2` / `--tint-soft`，
+不许自己再算一份。写入点只有 `core/artwork.js` 的 `applyTint()`。
+
+| 读它的地方 | 文件 |
+| --- | --- |
+| 页面底部两团光晕 | `styles/base.css` |
+| 正在播放页光晕 + 示波器条 | `styles/nowplaying.css` |
+| 设置页选中态 / 搜索命中 | `styles/settings.css` |
+| 示波器波形颜色 | `js/ui/widgets/visualizer.js` 的 `accent()` |
+
+取色（`resolveColor(track)`）按设置 `tintSource` 分两档：
+
+- `cover`（默认）：从封面取样。逐像素按饱和度加权算色相，同时累加每个像素自己的
+  **S / L** —— 不要"先把 RGB 平均再转 HSL"，彩色图平均下来必然是灰的（这条踩过，见 CONVENTIONS）。
+  取样前跳过近黑/近白像素；取样后若平均饱和 < 0.12 或平均亮度 > 0.85 / < 0.08 就回退。
+- `palette`：由「艺人 | 专辑」哈希出的稳定配色（不联网、不看封面）。
+
+**稳定性**：颜色按 `artworkKey(track)`（`e:艺人|专辑` / `f:路径`）缓存，不按 blob URL ——
+blob URL 每次加载都不同，按它缓存等于没缓存。
+
+**背景不许有两套颜色**：`.now-playing__art-bg` 是封面模糊图，它的 `::after` 叠了一层 30% 的
+`--tint` 色调，把背景拉回与光晕/示波器同一个色系。
+
+**过渡**：`--tint` 用 `@property` 注册成 `<color>`，`:root` 上有 240ms 过渡；
+「减少动画」打开时过渡置零。
