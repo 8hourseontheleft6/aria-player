@@ -1,0 +1,67 @@
+# 发版流程 / Releasing
+
+## 版本号怎么定
+
+- 公开前是 `0.1.0-beta.NN`（开发中，接口可能变）。**第一次公开发布建议 `0.1.0`**（去掉 `-beta`）：
+  这是"第一个能用的公开版"，不是 1.0 —— 语义化版本里 `0.x` 本来就不承诺稳定性。
+- 之后：`0.1.x` 修 bug，`0.2.0` 加功能，`1.0.0` 留给"接口与数据结构冻结"。
+- 三个产品（Aria / Aria Player / Aria Unified）**共用一个版本号**，一次发三套包。
+
+```bash
+# 1. 改版本（三套包会跟着走）
+node -e "const fs=require('fs');const p=require('./package.json');p.version='0.1.0';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+node scripts/make-mac-source-zip.js   # 源码包也要重打（check 会核对指纹）
+npm run check                          # 必须全绿
+```
+
+## 打标签 → CI 出包
+
+`.github/workflows/build-mac.yml` 监听 `v*` 与 `stable-*` 标签：推标签即出 macOS 的 dmg + zip（arm64 + x64），
+产物在 Actions 页面下载。Windows 包目前**在本地打**（见下），因为要保证用本机的 `winCodeSign` 缓存。
+
+```bash
+git tag -a v0.1.0 -m "Aria 0.1.0"
+git push origin v0.1.0
+```
+
+## 本地出三套包（Windows）
+
+```bash
+npm run dist            # Aria            → release/Aria-Setup-<ver>.exe + Aria-<ver>-portable.exe
+npm run dist:player     # Aria Player     → release-player/
+npm run dist:unified    # Aria Unified    → release-unified/
+```
+
+产物**不进仓库**（`.gitignore` 挡着 `release*/`）。
+
+## 上传到 GitHub Releases
+
+每个 release 上传 **六个**文件 + 一份校验和：
+
+| 产品 | 文件 |
+| --- | --- |
+| Aria | `Aria-Setup-<ver>.exe`、`Aria-<ver>-portable.exe` |
+| Aria Player | `Aria-Player-Setup-<ver>.exe`、`Aria-Player-<ver>-portable.exe` |
+| Aria Unified | `Aria-Unified-Setup-<ver>.exe`、`Aria-Unified-<ver>-portable.exe` |
+
+```bash
+# 在 release 目录下算 SHA256，贴进 Release 说明
+Get-FileHash -Algorithm SHA256 release\*.exe, release-player\*.exe, release-unified\*.exe |
+  ForEach-Object { '{0}  {1}' -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } |
+  Set-Content SHA256SUMS.txt
+```
+
+Release 说明里请写明：
+
+- 三个产品**分别是什么**、该下哪个（一句话）；
+- **未签名**：Windows SmartScreen / macOS Gatekeeper 会拦，首次如何放行（见 README「未签名构建」）；
+- 三个包各自的 **SHA256**；
+- 不提供任何内容、仅供个人学习；在线补全默认关闭（如开启，说明会向哪发请求）。
+
+## 发完自检
+
+- [ ] `npm ci && npm run check` 在干净 clone 里全绿
+- [ ] 三个 Setup 与三个 portable 都能装上/跑起来，`FileVersion` 等于新版本号
+- [ ] `git ls-files` 里没有 `release*/`、`*.log`、`tests/`
+- [ ] Release 页面上的 SHA256 与本地一致
+- [ ] README 里"版本见 package.json"这句话不需要改（它引用的是文件，不是写死的号）

@@ -1,0 +1,45 @@
+name: 功能建议 / Feature request
+description: 想要什么能力（请先说明它解决什么问题）
+title: '[feat] '
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前先看一眼 [docs/EXTENDING.md](../blob/main/docs/EXTENDING.md)：
+        渲染层有 7 个扩展点，**能做成插件的事，优先做成插件**（不往核心里塞 if）。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 它解决什么问题
+      description: 先说场景与痛，再说方案。好的建议通常从"我现在必须…"开头
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你希望的形态
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 影响范围
+      options:
+        - 只影响界面（渲染层）
+        - 需要主进程能力（新服务 / 新 IPC）
+        - 涉及三个产品之一（Aria / Aria Player / Aria Unified）的档位
+        - 不确定
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: 自检清单
+      options:
+        - label: 我知道它有可能会加进检查（`npm run check`），不能靠放宽既有断言来实现
+        - label: 我确认这不是"要内置在线音源 / 内置音频内容"的请求（本项目不提供任何内容）

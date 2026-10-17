@@ -1,0 +1,67 @@
+name: Bug 报告 / Bug report
+description: 报告一个能复现的问题（请先搜一遍现有 issue）
+title: '[bug] '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢报告。**安全问题请走 [SECURITY.md](../blob/main/SECURITY.md) 私报，不要开公开 issue。**
+        填之前请先确认：用的是最新发布版、并且已经把已开的 Aria 全部关掉再试一次（单实例锁）。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 设置页底部 / 安装包文件名里的版本号
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: product
+    attributes:
+      label: 哪个产品
+      options:
+        - Aria（完整版）
+        - Aria Player（轻量播放器）
+        - Aria Unified（一个包，两种模式）
+        - 源码运行（npx electron .）
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 系统
+      placeholder: Windows 11 24H2 / macOS 15.1 (Apple Silicon)
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 越具体越好，能一步一步照着做出来
+      placeholder: |
+        1. 打开 …
+        2. 双击桌面上的 mp3 …
+        3. 看到 …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望 vs 实际
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图 / 录屏 / 控制台输出
+      description: 界面问题请务必带图；主进程日志在「视图 → 开发者工具 → Console」，以 `[main]`/`[ipc]` 开头的那些
+      placeholder: 把图片或日志拖进来
+    validations:
+      required: false

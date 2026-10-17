@@ -7,7 +7,7 @@
  *   node scripts/make-mac-source-zip.js
  *
  * 为什么是 Node 而不是 PowerShell：
- *   包里有中文文件名（docs/MAC-给朋友.md → 解压后最外层的「先读我.md」），
+ *   源码包解压后最外层会多一份「先读我.md」（内容是 docs/BUILDING-macOS.md 的副本），
  *   而 PowerShell 5.1 会把不带 BOM 的 .ps1 当 ANSI 读，脚本里一出现中文就解析失败
  *   （这个坑已经踩过三次）。Node 一律按 UTF-8 读源码，没这个问题。
  *   zip 本身交给系统自带的 bsdtar（Windows 10+ 的 tar.exe 支持 `-a` 按扩展名选格式）。
@@ -40,7 +40,7 @@ const ITEMS = [
   'package.json',
   'README.md',
   'docs/MACOS.md',
-  'docs/MAC-给朋友.md',
+  'docs/BUILDING-macOS.md',
   '.github/workflows/build-mac.yml',
   '.gitattributes'
 ]
@@ -61,7 +61,7 @@ for (const item of ITEMS) {
 }
 
 /* 说明放到压缩包最外层：解压第一眼就能看到 */
-fs.copyFileSync(path.join(stage, 'docs/MAC-给朋友.md'), path.join(stage, '先读我.md'))
+fs.copyFileSync(path.join(stage, 'docs/BUILDING-macOS.md'), path.join(stage, '先读我.md'))
 fs.writeFileSync(path.join(stage, 'VERSION.txt'), [
   `Aria ${version} - macOS source package`,
   '',

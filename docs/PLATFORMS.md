@@ -39,7 +39,7 @@
    `hardenedRuntime`、以及 `afterPack` 走的 `scripts/mac-adhoc-sign.js`（临时签名，免签名问题）。
    三条构建路径都在：本机 `npm run dist:mac`、CI `.github/workflows/build-mac.yml`、
    以及**源码包**（`npm run make:mac-zip` 生成的 `release/aria-<版本>-mac-source.zip`，
-   朋友解压后 `npm install && npm run dist:mac` 就能出 dmg —— 见 [MAC-给朋友.md](MAC-给朋友.md)）。
+   朋友解压后 `npm install && npm run dist:mac` 就能出 dmg —— 见 [BUILDING-macOS.md](BUILDING-macOS.md)）。
    不签名时首次打开要右键 → 打开，这一点写在给朋友的文档里。
 2. **系统「正在播放」**：已实现 —— `core/player-controller.js` 的 `updateMediaSession()` 与
    `syncMediaSessionPosition()` 会写 `navigator.mediaSession.metadata` / `setPositionState`，

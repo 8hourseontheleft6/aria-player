@@ -1,10 +1,25 @@
 # Aria
 
+**中文** | [English](README.en.md)
+
 iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（原生 ES Module）。
 
 ![tech](https://img.shields.io/badge/Electron-43-0a84ff) ![tech](https://img.shields.io/badge/渲染层-原生%20ESM-5e5ce6)
 
 > 版本见 `package.json`：开发中，尚未发布正式版本，接口与数据结构仍可能变动。
+
+## 三个产品
+
+同一份代码，三个身份、三个安装包 —— **区别只在启动时挂哪些能力**（服务 / 插件 / 侧栏）：
+
+| 产品 | 是什么 | 怎么进 |
+| --- | --- | --- |
+| **Aria** | 完整版：资料库、专辑/艺人、媒体墙、在线补全、托盘 | 点图标 |
+| **Aria Player** | 轻量播放器：没有资料库，只播「打开的文件」 | 双击音频文件 / 点图标 |
+| **Aria Unified** | 一个安装包两种模式：**点图标 = 完整版，双击音频 = 轻量播放器** | 看命令行里有没有真实存在的音频文件 |
+
+三者的 `userData` 完全分开（`Aria` / `Aria Player (player)` / `Aria Unified (full)` / `Aria Unified (player)`），
+互不共享单实例锁，可以同时开着。只有 Aria Player 与 Aria Unified 注册文件关联；Aria 本体不抢「双击 .mp3」。
 
 ## 界面
 
@@ -122,23 +137,67 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
   两位艺人名下，而「Tungevaag & Raaban」「W&W」「Tones And I」这类乐队名一个都不拆
 - **省内存**：最小化或收进托盘后释放媒体墙 DOM、封面缓存与目录监听，回前台自动重建（见「性能」）
 
-## 运行
+## 安装 / 构建 / 自检
 
 ```bash
-npm install
-npm start        # 启动
-npm run dev      # 启动并打开开发者工具
+# 依赖：仓库里有 package-lock.json，用 ci（可复现；npm install 也能装，但可能在别人机器上装出别的版本）
+npm ci
+
+# 起应用
+npm start              # = electron .
+npm run dev            # 起应用并打开开发者工具
+
+# 夹具：自检与手工试听用的 wav（tests/ 不进仓库，按需生成）
+npm run fixtures
+
+# 静态检查：13 步
+npm run check
+
+# 界面自检（需要 GUI；见下面的注意事项）
+npm run smoke                                              # 本体
+npx electron . --smoke --profile=player                    # Aria Player 那套
+npx electron . --smoke <某个音频文件>                        # 模拟"双击文件"进播放器
+ARIA_PRODUCT=unified npx electron . --smoke                # Aria Unified 的完整版那一侧
+ARIA_PRODUCT=unified npx electron . --smoke <某个音频文件>   # Unified 的播放器那一侧
+
+# 出包（产物在 release* /，不进仓库）
+npm run dist           # Aria         → release/Aria-Setup-<版本>.exe + Aria-<版本>-portable.exe
+npm run dist:player    # Aria Player  → release-player/
+npm run dist:unified   # Aria Unified → release-unified/
 ```
+
+**`npm run smoke` 的注意事项（重要：它不能在 CI 里跑）：**
+
+- 要**真窗口**：会起 GUI、抢单实例锁、模拟拖放与真实拖动（连系统光标都挪）；
+- 跑之前把已开的 Aria（三个产品都算）**全部关掉**，否则新实例会被单实例锁挡掉、检查读不到窗口；
+- 本体那 200 多条需要**一个真实的音乐文件夹**（默认 `%USERPROFILE%\Music`）；播放器与 Unified 的套件是自包含的；
+- CI（`.github/workflows/check.yml`）只跑 `npm ci + npm run check`。
 
 > 如果 shell 里带着 `ELECTRON_RUN_AS_NODE=1`（有些工具链会设置），`electron .` 会退化成
 > 普通 Node 启动并报 `Cannot read properties of undefined (reading 'commandLine')`。
 > 先 `set ELECTRON_RUN_AS_NODE=`（或 PowerShell 里 `$env:ELECTRON_RUN_AS_NODE=''`）再启动。
+> 这条对**打包后的 exe** 同样成立：exe 会以 Node 身份跑完就退出，看上去"双击没反应"。
 
-> 如果 `npm install` 阶段 Electron 二进制下载失败（网络受限），可以手动把已缓存的
+> 如果 `npm ci` 阶段 Electron 二进制下载失败（网络受限），可以手动把已缓存的
 > `%LOCALAPPDATA%\electron\Cache\electron-v<版本>-win32-x64.zip` 解压到
 > `node_modules/electron/dist`，并在 `node_modules/electron/path.txt` 写入 `electron.exe`。
 
 首次启动会自动把系统音乐目录加入资料库并扫描；之后启动只做增量刷新（文件未变则只 stat，秒开）。
+
+## 未签名构建
+
+发布包**没有代码签名**（个人项目，没买证书），所以系统会拦一下 —— 这是预期行为，不是装坏了：
+
+- **Windows**：首次运行会出现蓝色的「Windows 已保护你的电脑」（SmartScreen）。
+  点「更多信息」→「仍要运行」。之后同一份文件不再提示。
+  若被当成病毒隔离：文件属性里勾「解除锁定」（`Unblock-File`）再运行。
+- **macOS**：第一次打开会提示「无法打开，因为 Apple 无法检查是否包含恶意软件」。
+  三种放行方式：右键点图标 →「打开」→ 再点「打开」；或「系统设置 → 隐私与安全性」底部点「仍要打开」；
+  或终端里 `xattr -dr com.apple.quarantine /Applications/Aria.app`。
+  Apple Silicon 上没签名的应用会报「已损坏」—— 打包脚本里有一条 ad-hoc 签名（`scripts/mac-adhoc-sign.js`），
+  用仓库里的命令自己打就不会遇到这条。
+
+不放心的话：自己 `npm ci && npm run dist` 打一份，或者只跑源码（`npm start`）。
 
 ## 开发工具
 
@@ -438,4 +497,23 @@ export const myPlugin = {
 - 在线封面宁可空着也不放错：只有专辑名或艺人名能对上时才采用（低于阈值的匹配会被丢弃）。Deezer 在部分网络下不可达，此时会自动只用 iTunes。
 
 （「平移后新露出的格子不加载封面」这个回退已经修掉了：原因与修法见上面的「性能 → 平移之后，封面要跟着补上」。）
+
+## 内容与法律边界
+
+- **本项目不提供任何内容**：仓库里没有音频、没有封面、没有歌词文本，也不内置任何在线音源。
+  音源是你自己导入的脚本（设置页「在线音源」），访问什么服务、是否合规由你判断。
+- **仅供个人学习与自用**：请只播放你自己拥有或有权使用的文件。因使用产生的任何版权问题与本项目无关。
+- **在线功能的真实默认值**（写清楚，免得误解）：总开关 `在线功能` **默认开**，
+  其中 `在线歌词` **默认开**（本地没有 `.lrc` 时会去 LRCLIB 查）、`在线封面` **默认关**。
+  不想联网的话，设置里把「在线功能」关掉即可，应用完全离线也能用（资料库、播放、均衡器都不依赖网络）。
+  请求由**你的机器**直接发出，本项目不代理、不上报、不收集遥测。
+- **商标**：Aria 与 Apple Inc. 无任何关系，未获其背书或赞助。
+  "iOS"、"macOS"、"Windows" 等名称只用于说明兼容性与设计参考；其它产品名与商标归各自所有者所有。
+
+## License
+
+[MIT](LICENSE) © 2026 Aria contributors
+
+第三方依赖与素材（Electron、music-metadata、图标/字体/截图等）的来源与许可见
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 

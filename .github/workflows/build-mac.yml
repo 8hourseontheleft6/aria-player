@@ -20,10 +20,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
 
-      # 仓库里没有 package-lock.json（Windows 上装的依赖没提交），所以用 install 而不是 ci
+      # 仓库里有 package-lock.json，用 ci：可复现，且能发现 lock 与 package.json 脱节
       - name: 安装依赖
-        run: npm install
+        run: npm ci
 
       - name: 静态检查（出包前先过一遍，红就不出包）
         run: npm run check

@@ -5,13 +5,14 @@
   "private": true,
   "description": "Aria —— iOS 设计风格的本地音乐播放器（Electron）",
   "main": "src/main/main.js",
-  "author": "Aria",
+  "author": "Aria contributors (TODO: 填真实姓名或 GitHub 名，见 ISSUE/PR 或 README 维护者)",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "smoke": "electron . --smoke",
     "check": "node scripts/checks/check-imports.js && node scripts/checks/check-injected.js && node scripts/checks/check-profiles.js && node scripts/checks/check-styles.js && node scripts/checks/check-contrast.js && node scripts/checks/check-frosted.js && node scripts/checks/check-shots.js && node scripts/checks/check-architecture.js && node scripts/checks/check-mac-source-zip.js && node scripts/checks/check-docs.js && node scripts/checks/check-menu-roles.js && node scripts/checks/check-mac-config.js && node --check src/main/main.js",
+    "fixtures": "node scripts/make-fixtures.mjs",
     "check:styles": "node scripts/checks/check-styles.js",
     "check:contrast": "node scripts/checks/check-contrast.js",
     "check:shots": "node scripts/checks/check-shots.js",
@@ -42,5 +43,19 @@
   "devDependencies": {
     "electron": "43.7.9",
     "electron-builder": "^26.15.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OWNER/aria-player.git"
+  },
+  "homepage": "https://github.com/OWNER/aria-player#readme",
+  "bugs": {
+    "url": "https://github.com/OWNER/aria-player/issues"
+  },
+  "keywords": [
+    "electron",
+    "music-player",
+    "ios-design",
+    "local-music"
+  ]
 }

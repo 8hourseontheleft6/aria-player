@@ -1,0 +1,35 @@
+name: check
+
+# 只跑**静态**检查（不跑 GUI 自检）。
+#
+# 为什么不跑 smoke：那套自检要在真窗口里跑（Electron 起 GUI、抢单实例锁、挪系统光标），
+# 既需要 GUI 会话，也会因为跑两次互相把对方挡掉 —— CI 里只会得到一堆假红。
+# 真正的界面自检请在有桌面的机器上跑：npm run check && npm run smoke
+#
+# 这个工作流要保证的事：任何人 clone 下来，npm ci + npm run check 必须全绿。
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # 仓库里有 package-lock.json，所以用 ci（可复现、且能发现 lock 与 package.json 脱节）
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 静态检查（13 步）
+        run: npm run check
+
+      - name: 夹具脚本能跑（不提交产物，只验证它能生成）
+        run: npm run fixtures
