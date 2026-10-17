@@ -1,0 +1,2027 @@
+[
+  {
+    "name": "歌曲列表",
+    "dom": {
+      "theme": "light",
+      "platform": "win32",
+      "tokens": {
+        "accent": "#007aff",
+        "tint": "hsl(283 75% 58%)",
+        "label": "rgba(0, 0, 0, 0.92)",
+        "separator": "rgba(60, 60, 67, 0.13)",
+        "radiusLg": "14px"
+      },
+      "body": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 781
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "sidebar": {
+        "rect": {
+          "x": 0,
+          "y": 40,
+          "w": 248,
+          "h": 741
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(242, 242, 247, 0.76)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "titlebar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 40
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "toolbar": {
+        "rect": {
+          "x": 248,
+          "y": 40,
+          "w": 931,
+          "h": 52
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "largeTitle": {
+        "rect": {
+          "x": 272,
+          "y": 96,
+          "w": 144,
+          "h": 39
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "34px",
+        "fontWeight": "700",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playerBar": {
+        "rect": {
+          "x": 248,
+          "y": 703,
+          "w": 931,
+          "h": 78
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(250, 250, 252, 0.78)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "artInBar": {
+        "rect": {
+          "x": 266,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgba(60, 60, 67, 0.24)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playButton": {
+        "rect": {
+          "x": 707,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(0, 122, 255)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlayingTransport": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(0, 122, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": false
+      },
+      "settingsSwitch": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(120, 120, 128, 0.16)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegment": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegmentThumb": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(255, 255, 255, 0.97)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegmentItems": 5,
+      "progressThumb": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "volumeSlider": {
+        "rect": {
+          "x": 1031,
+          "y": 731,
+          "w": 92,
+          "h": 22
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "ratePill": {
+        "rect": {
+          "x": 941,
+          "y": 729,
+          "w": 46,
+          "h": 26
+        },
+        "color": "rgba(60, 60, 67, 0.62)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "badge": {
+        "rect": {
+          "x": 448,
+          "y": 217,
+          "w": 32,
+          "h": 15
+        },
+        "color": "rgba(60, 60, 67, 0.4)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "4px",
+        "font": "-apple-system",
+        "fontSize": "10px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlaying": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "nowPlayingArt": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(60, 60, 67, 0.24)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "18px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "lyricsRegion": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "counts": {
+        "rows": 17,
+        "columns": 15,
+        "lyricsLines": 61,
+        "activeLyrics": 1,
+        "lyricsBadges": 11,
+        "tabs": 2,
+        "settingsCards": 13,
+        "visibleRowsWithLyrics": 11
+      },
+      "artwork": {
+        "loaded": true,
+        "natural": [
+          300,
+          300
+        ],
+        "src": "blob:app://bundle/472ef9"
+      },
+      "lyricTypography": {
+        "activeSize": "21px",
+        "idleSize": "21px",
+        "activeColor": "rgba(0, 0, 0, 0.92)",
+        "idleColor": "rgba(60, 60, 67, 0.4)",
+        "innerTransform": "none"
+      },
+      "overflow": {
+        "horizontal": 0,
+        "vertical": 0
+      },
+      "viewport": {
+        "w": 1179,
+        "h": 781,
+        "dpr": 1.75
+      }
+    },
+    "image": {
+      "size": [
+        2064,
+        1367
+      ],
+      "bytesPerPixel": 4,
+      "whole": {
+        "rgb": [
+          243,
+          243,
+          247
+        ],
+        "luma": 243,
+        "contrast": 255
+      },
+      "sidebar": {
+        "rgb": [
+          241,
+          239,
+          248
+        ],
+        "luma": 240,
+        "contrast": 142
+      },
+      "content": {
+        "rgb": [
+          243,
+          243,
+          246
+        ],
+        "luma": 244,
+        "contrast": 255
+      },
+      "playerBar": {
+        "rgb": [
+          237,
+          241,
+          249
+        ],
+        "luma": 241,
+        "contrast": 190
+      },
+      "playerArtwork": {
+        "rgb": [
+          242,
+          242,
+          246
+        ],
+        "luma": 243,
+        "contrast": 45
+      }
+    }
+  },
+  {
+    "name": "正在播放",
+    "dom": {
+      "theme": "light",
+      "platform": "win32",
+      "tokens": {
+        "accent": "#007aff",
+        "tint": "hsl(283 75% 58%)",
+        "label": "rgba(0, 0, 0, 0.92)",
+        "separator": "rgba(60, 60, 67, 0.13)",
+        "radiusLg": "14px"
+      },
+      "body": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 781
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "sidebar": {
+        "rect": {
+          "x": 0,
+          "y": 40,
+          "w": 248,
+          "h": 741
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(242, 242, 247, 0.76)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "titlebar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 40
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "toolbar": {
+        "rect": {
+          "x": 248,
+          "y": 40,
+          "w": 931,
+          "h": 52
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "largeTitle": {
+        "rect": {
+          "x": 272,
+          "y": 96,
+          "w": 144,
+          "h": 39
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "34px",
+        "fontWeight": "700",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playerBar": {
+        "rect": {
+          "x": 248,
+          "y": 703,
+          "w": 931,
+          "h": 78
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(250, 250, 252, 0.78)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "artInBar": {
+        "rect": {
+          "x": 266,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgba(60, 60, 67, 0.24)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playButton": {
+        "rect": {
+          "x": 707,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(0, 122, 255)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlayingTransport": {
+        "rect": {
+          "x": 282,
+          "y": 585,
+          "w": 62,
+          "h": 62
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(0, 122, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": true
+      },
+      "settingsSwitch": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(120, 120, 128, 0.16)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegment": {
+        "rect": {
+          "x": 140,
+          "y": 673,
+          "w": 187,
+          "h": 30
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "modeSegmentThumb": {
+        "rect": {
+          "x": 179,
+          "y": 675,
+          "w": 35,
+          "h": 26
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(255, 255, 255, 0.97)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "modeSegmentItems": 5,
+      "progressThumb": {
+        "rect": {
+          "x": 177,
+          "y": 530,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "volumeSlider": {
+        "rect": {
+          "x": 1031,
+          "y": 731,
+          "w": 92,
+          "h": 22
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "ratePill": {
+        "rect": {
+          "x": 941,
+          "y": 729,
+          "w": 46,
+          "h": 26
+        },
+        "color": "rgba(60, 60, 67, 0.62)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "badge": {
+        "rect": {
+          "x": 448,
+          "y": 217,
+          "w": 32,
+          "h": 15
+        },
+        "color": "rgba(60, 60, 67, 0.4)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "4px",
+        "font": "-apple-system",
+        "fontSize": "10px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlaying": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 781
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlayingArt": {
+        "rect": {
+          "x": 164,
+          "y": 101,
+          "w": 297,
+          "h": 297
+        },
+        "color": "rgba(60, 60, 67, 0.24)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "18px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "lyricsRegion": {
+        "rect": {
+          "x": 610,
+          "y": 102,
+          "w": 514,
+          "h": 639
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "counts": {
+        "rows": 17,
+        "columns": 15,
+        "lyricsLines": 61,
+        "activeLyrics": 1,
+        "lyricsBadges": 11,
+        "tabs": 2,
+        "settingsCards": 13,
+        "visibleRowsWithLyrics": 11
+      },
+      "artwork": {
+        "loaded": true,
+        "natural": [
+          300,
+          300
+        ],
+        "src": "blob:app://bundle/472ef9"
+      },
+      "lyricTypography": {
+        "activeSize": "21px",
+        "idleSize": "21px",
+        "activeColor": "rgba(0, 0, 0, 0.92)",
+        "idleColor": "rgba(60, 60, 67, 0.4)",
+        "innerTransform": "matrix(1, 0, 0, 1, 0, -883.741)"
+      },
+      "overflow": {
+        "horizontal": 0,
+        "vertical": 0
+      },
+      "viewport": {
+        "w": 1179,
+        "h": 781,
+        "dpr": 1.75
+      }
+    },
+    "image": {
+      "size": [
+        2064,
+        1367
+      ],
+      "bytesPerPixel": 4,
+      "whole": {
+        "rgb": [
+          245,
+          243,
+          245
+        ],
+        "luma": 244,
+        "contrast": 254
+      },
+      "sidebar": {
+        "rgb": [
+          250,
+          246,
+          249
+        ],
+        "luma": 247,
+        "contrast": 245
+      },
+      "content": {
+        "rgb": [
+          245,
+          244,
+          245
+        ],
+        "luma": 244,
+        "contrast": 254
+      },
+      "playerBar": {
+        "rgb": [
+          255,
+          255,
+          255
+        ],
+        "luma": 255,
+        "contrast": 0
+      },
+      "playerArtwork": {
+        "rgb": [
+          255,
+          255,
+          255
+        ],
+        "luma": 255,
+        "contrast": 0
+      }
+    }
+  },
+  {
+    "name": "设置",
+    "dom": {
+      "theme": "light",
+      "platform": "win32",
+      "tokens": {
+        "accent": "#007aff",
+        "tint": "hsl(283 75% 58%)",
+        "label": "rgba(0, 0, 0, 0.92)",
+        "separator": "rgba(60, 60, 67, 0.13)",
+        "radiusLg": "14px"
+      },
+      "body": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 781
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "sidebar": {
+        "rect": {
+          "x": 0,
+          "y": 40,
+          "w": 248,
+          "h": 741
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(242, 242, 247, 0.76)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "titlebar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 40
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "toolbar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "largeTitle": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "34px",
+        "fontWeight": "700",
+        "backdrop": "none",
+        "visible": false
+      },
+      "playerBar": {
+        "rect": {
+          "x": 248,
+          "y": 703,
+          "w": 931,
+          "h": 78
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(250, 250, 252, 0.78)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "artInBar": {
+        "rect": {
+          "x": 266,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgba(60, 60, 67, 0.24)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playButton": {
+        "rect": {
+          "x": 707,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(0, 122, 255)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlayingTransport": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(0, 122, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": false
+      },
+      "settingsSwitch": {
+        "rect": {
+          "x": 1080,
+          "y": 429,
+          "w": 51,
+          "h": 31
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(120, 120, 128, 0.16)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "modeSegment": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegmentThumb": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(255, 255, 255, 0.97)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegmentItems": 5,
+      "progressThumb": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "volumeSlider": {
+        "rect": {
+          "x": 1031,
+          "y": 731,
+          "w": 92,
+          "h": 22
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "ratePill": {
+        "rect": {
+          "x": 941,
+          "y": 729,
+          "w": 46,
+          "h": 26
+        },
+        "color": "rgba(60, 60, 67, 0.62)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "badge": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(60, 60, 67, 0.4)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "4px",
+        "font": "-apple-system",
+        "fontSize": "10px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": false
+      },
+      "nowPlaying": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "nowPlayingArt": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(60, 60, 67, 0.24)",
+        "background": "rgba(120, 120, 128, 0.08)",
+        "radius": "18px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "lyricsRegion": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(0, 0, 0, 0.92)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "counts": {
+        "rows": 19,
+        "columns": 15,
+        "lyricsLines": 61,
+        "activeLyrics": 1,
+        "lyricsBadges": 12,
+        "tabs": 2,
+        "settingsCards": 14,
+        "visibleRowsWithLyrics": 12
+      },
+      "artwork": {
+        "loaded": true,
+        "natural": [
+          300,
+          300
+        ],
+        "src": "blob:app://bundle/472ef9"
+      },
+      "lyricTypography": {
+        "activeSize": "21px",
+        "idleSize": "21px",
+        "activeColor": "rgba(0, 0, 0, 0.92)",
+        "idleColor": "rgba(60, 60, 67, 0.4)",
+        "innerTransform": "none"
+      },
+      "overflow": {
+        "horizontal": 0,
+        "vertical": 0
+      },
+      "viewport": {
+        "w": 1179,
+        "h": 781,
+        "dpr": 1.75
+      }
+    },
+    "image": {
+      "size": [
+        2064,
+        1367
+      ],
+      "bytesPerPixel": 4,
+      "whole": {
+        "rgb": [
+          247,
+          247,
+          250
+        ],
+        "luma": 247,
+        "contrast": 254
+      },
+      "sidebar": {
+        "rgb": [
+          242,
+          240,
+          248
+        ],
+        "luma": 241,
+        "contrast": 142
+      },
+      "content": {
+        "rgb": [
+          251,
+          252,
+          252
+        ],
+        "luma": 251,
+        "contrast": 254
+      },
+      "playerBar": {
+        "rgb": [
+          237,
+          241,
+          249
+        ],
+        "luma": 240,
+        "contrast": 190
+      },
+      "playerArtwork": {
+        "rgb": [
+          241,
+          242,
+          246
+        ],
+        "luma": 242,
+        "contrast": 45
+      }
+    }
+  },
+  {
+    "name": "正在播放（深色）",
+    "dom": {
+      "theme": "dark",
+      "platform": "win32",
+      "tokens": {
+        "accent": "#0a84ff",
+        "tint": "hsl(283 75% 58%)",
+        "label": "rgba(255, 255, 255, 0.96)",
+        "separator": "rgba(255, 255, 255, 0.085)",
+        "radiusLg": "14px"
+      },
+      "body": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 781
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgb(10, 10, 12)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "sidebar": {
+        "rect": {
+          "x": 0,
+          "y": 40,
+          "w": 248,
+          "h": 741
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(20, 20, 24, 0.68)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "titlebar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 40
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "toolbar": {
+        "rect": {
+          "x": 248,
+          "y": 40,
+          "w": 931,
+          "h": 52
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "largeTitle": {
+        "rect": {
+          "x": 272,
+          "y": 96,
+          "w": 144,
+          "h": 39
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "34px",
+        "fontWeight": "700",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playerBar": {
+        "rect": {
+          "x": 248,
+          "y": 703,
+          "w": 931,
+          "h": 78
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(22, 22, 27, 0.72)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "artInBar": {
+        "rect": {
+          "x": 266,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgba(235, 235, 245, 0.22)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playButton": {
+        "rect": {
+          "x": 707,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(10, 132, 255)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlayingTransport": {
+        "rect": {
+          "x": 282,
+          "y": 585,
+          "w": 62,
+          "h": 62
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(10, 132, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": true
+      },
+      "settingsSwitch": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(120, 120, 128, 0.24)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegment": {
+        "rect": {
+          "x": 140,
+          "y": 673,
+          "w": 187,
+          "h": 30
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "modeSegmentThumb": {
+        "rect": {
+          "x": 179,
+          "y": 675,
+          "w": 35,
+          "h": 26
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(40, 40, 46, 0.94)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "modeSegmentItems": 5,
+      "progressThumb": {
+        "rect": {
+          "x": 233,
+          "y": 530,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "volumeSlider": {
+        "rect": {
+          "x": 1031,
+          "y": 731,
+          "w": 92,
+          "h": 22
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "ratePill": {
+        "rect": {
+          "x": 941,
+          "y": 729,
+          "w": 46,
+          "h": 26
+        },
+        "color": "rgba(235, 235, 245, 0.62)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "badge": {
+        "rect": {
+          "x": 448,
+          "y": 217,
+          "w": 32,
+          "h": 15
+        },
+        "color": "rgba(235, 235, 245, 0.38)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "4px",
+        "font": "-apple-system",
+        "fontSize": "10px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlaying": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 781
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgb(10, 10, 12)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlayingArt": {
+        "rect": {
+          "x": 164,
+          "y": 101,
+          "w": 297,
+          "h": 297
+        },
+        "color": "rgba(235, 235, 245, 0.22)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "18px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "lyricsRegion": {
+        "rect": {
+          "x": 610,
+          "y": 102,
+          "w": 514,
+          "h": 639
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "counts": {
+        "rows": 17,
+        "columns": 15,
+        "lyricsLines": 61,
+        "activeLyrics": 1,
+        "lyricsBadges": 11,
+        "tabs": 2,
+        "settingsCards": 14,
+        "visibleRowsWithLyrics": 11
+      },
+      "artwork": {
+        "loaded": true,
+        "natural": [
+          300,
+          300
+        ],
+        "src": "blob:app://bundle/472ef9"
+      },
+      "lyricTypography": {
+        "activeSize": "21px",
+        "idleSize": "21px",
+        "activeColor": "rgba(255, 255, 255, 0.96)",
+        "idleColor": "rgba(235, 235, 245, 0.38)",
+        "innerTransform": "matrix(1, 0, 0, 1, 0, -1283.1)"
+      },
+      "overflow": {
+        "horizontal": 0,
+        "vertical": 0
+      },
+      "viewport": {
+        "w": 1179,
+        "h": 781,
+        "dpr": 1.75
+      }
+    },
+    "image": {
+      "size": [
+        2064,
+        1367
+      ],
+      "bytesPerPixel": 4,
+      "whole": {
+        "rgb": [
+          34,
+          32,
+          36
+        ],
+        "luma": 33,
+        "contrast": 255
+      },
+      "sidebar": {
+        "rgb": [
+          32,
+          28,
+          33
+        ],
+        "luma": 30,
+        "contrast": 252
+      },
+      "content": {
+        "rgb": [
+          32,
+          31,
+          33
+        ],
+        "luma": 31,
+        "contrast": 255
+      },
+      "playerBar": {
+        "rgb": [
+          10,
+          10,
+          12
+        ],
+        "luma": 10,
+        "contrast": 0
+      },
+      "playerArtwork": {
+        "rgb": [
+          10,
+          10,
+          12
+        ],
+        "luma": 10,
+        "contrast": 0
+      }
+    }
+  },
+  {
+    "name": "歌曲列表（深色）",
+    "dom": {
+      "theme": "dark",
+      "platform": "win32",
+      "tokens": {
+        "accent": "#0a84ff",
+        "tint": "hsl(283 75% 58%)",
+        "label": "rgba(255, 255, 255, 0.96)",
+        "separator": "rgba(255, 255, 255, 0.085)",
+        "radiusLg": "14px"
+      },
+      "body": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 781
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgb(10, 10, 12)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "sidebar": {
+        "rect": {
+          "x": 0,
+          "y": 40,
+          "w": 248,
+          "h": 741
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(20, 20, 24, 0.68)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "titlebar": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 1179,
+          "h": 40
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "toolbar": {
+        "rect": {
+          "x": 248,
+          "y": 40,
+          "w": 931,
+          "h": 52
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "largeTitle": {
+        "rect": {
+          "x": 272,
+          "y": 96,
+          "w": 144,
+          "h": 39
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "34px",
+        "fontWeight": "700",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playerBar": {
+        "rect": {
+          "x": 248,
+          "y": 703,
+          "w": 931,
+          "h": 78
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(22, 22, 27, 0.72)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "blur(34px) saturate(1.8)",
+        "visible": true
+      },
+      "artInBar": {
+        "rect": {
+          "x": 266,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgba(235, 235, 245, 0.22)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "playButton": {
+        "rect": {
+          "x": 707,
+          "y": 716,
+          "w": 52,
+          "h": 52
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(10, 132, 255)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlayingTransport": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(10, 132, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "backdrop": "none",
+        "visible": false
+      },
+      "settingsSwitch": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(120, 120, 128, 0.24)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegment": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "10px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegmentThumb": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(40, 40, 46, 0.94)",
+        "radius": "8px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "modeSegmentItems": 5,
+      "progressThumb": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgb(255, 255, 255)",
+        "radius": "50%",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "volumeSlider": {
+        "rect": {
+          "x": 1031,
+          "y": 731,
+          "w": 92,
+          "h": 22
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": true
+      },
+      "ratePill": {
+        "rect": {
+          "x": 941,
+          "y": 729,
+          "w": 46,
+          "h": 26
+        },
+        "color": "rgba(235, 235, 245, 0.62)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "999px",
+        "font": "-apple-system",
+        "fontSize": "12px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "badge": {
+        "rect": {
+          "x": 448,
+          "y": 217,
+          "w": 32,
+          "h": 15
+        },
+        "color": "rgba(235, 235, 245, 0.38)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "4px",
+        "font": "-apple-system",
+        "fontSize": "10px",
+        "fontWeight": "600",
+        "backdrop": "none",
+        "visible": true
+      },
+      "nowPlaying": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgb(10, 10, 12)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "nowPlayingArt": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(235, 235, 245, 0.22)",
+        "background": "rgba(120, 120, 128, 0.14)",
+        "radius": "18px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "lyricsRegion": {
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "color": "rgba(255, 255, 255, 0.96)",
+        "background": "rgba(0, 0, 0, 0)",
+        "radius": "0px",
+        "font": "-apple-system",
+        "fontSize": "15px",
+        "fontWeight": "400",
+        "backdrop": "none",
+        "visible": false
+      },
+      "counts": {
+        "rows": 17,
+        "columns": 15,
+        "lyricsLines": 61,
+        "activeLyrics": 1,
+        "lyricsBadges": 11,
+        "tabs": 2,
+        "settingsCards": 14,
+        "visibleRowsWithLyrics": 11
+      },
+      "artwork": {
+        "loaded": true,
+        "natural": [
+          300,
+          300
+        ],
+        "src": "blob:app://bundle/472ef9"
+      },
+      "lyricTypography": {
+        "activeSize": "21px",
+        "idleSize": "21px",
+        "activeColor": "rgba(255, 255, 255, 0.96)",
+        "idleColor": "rgba(235, 235, 245, 0.38)",
+        "innerTransform": "none"
+      },
+      "overflow": {
+        "horizontal": 0,
+        "vertical": 0
+      },
+      "viewport": {
+        "w": 1179,
+        "h": 781,
+        "dpr": 1.75
+      }
+    },
+    "image": {
+      "size": [
+        2064,
+        1367
+      ],
+      "bytesPerPixel": 4,
+      "whole": {
+        "rgb": [
+          25,
+          24,
+          32
+        ],
+        "luma": 25,
+        "contrast": 255
+      },
+      "sidebar": {
+        "rgb": [
+          27,
+          22,
+          34
+        ],
+        "luma": 24,
+        "contrast": 141
+      },
+      "content": {
+        "rgb": [
+          24,
+          25,
+          30
+        ],
+        "luma": 25,
+        "contrast": 255
+      },
+      "playerBar": {
+        "rgb": [
+          28,
+          31,
+          40
+        ],
+        "luma": 31,
+        "contrast": 251
+      },
+      "playerArtwork": {
+        "rgb": [
+          21,
+          21,
+          24
+        ],
+        "luma": 21,
+        "contrast": 49
+      }
+    }
+  }
+]
