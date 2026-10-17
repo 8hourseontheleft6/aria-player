@@ -1,5 +1,25 @@
 # 发版流程 / Releasing
 
+## 发布前必须替换的占位（否则链接全指向不存在的仓库）
+
+仓库里目前有三处占位，公开发布前必须换成真实的 GitHub 用户名：
+
+| 位置 | 现在 | 换成 |
+| --- | --- | --- |
+| `package.json` → `repository.url` | `https://github.com/OWNER/aria-player.git` | 你的仓库地址 |
+| `package.json` → `homepage` | `https://github.com/OWNER/aria-player#readme` | 同上 |
+| `package.json` → `bugs.url` | `https://github.com/OWNER/aria-player/issues` | 同上 |
+
+一条命令换完（把 `你的名字` 替换掉）：
+
+```bash
+node -e "const fs=require('fs');const p=require('./package.json');p.repository.url='https://github.com/你的名字/aria-player.git';p.homepage='https://github.com/你的名字/aria-player#readme';p.bugs.url='https://github.com/你的名字/aria-player/issues';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+npm run check      # 仍须全绿
+```
+
+另外确认：`author` 是 `deepseek`、`contributors` 是 `["8左边的白马6"]`；
+若想换联系方式或加邮箱，也在这一步一起改。
+
 ## 版本号怎么定
 
 - 公开前是 `0.1.0-beta.NN`（开发中，接口可能变）。**第一次公开发布建议 `0.1.0`**（去掉 `-beta`）：

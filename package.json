@@ -10,6 +10,9 @@
     "8左边的白马6"
   ],
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
