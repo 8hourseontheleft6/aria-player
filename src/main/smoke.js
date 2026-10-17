@@ -2010,6 +2010,80 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       Boolean(tintUnity.bareCover.tintText) && tintUnity.bareCover.tintText === tintUnity.barePalette.tintText,
       `无封面时：封面档 ${tintUnity.bareCover.tintText} / 稳定配色档 ${tintUnity.barePalette.tintText}（应相同）`)
 
+    /*
+     * 在线功能默认关闭的引导（T2.1）：
+     *   · 有内嵌封面时**不出现**提示（不打扰）；
+     *   · 没有封面且在线关着 → 出现一条可点提示，点一下就把总闸与"在线封面"打开；
+     *   · 全程不弹窗（提示是页面里的一行字，不是 toast）。
+     */
+    const coverHintCheck = await evaluate(win, `
+      const { store, actions } = window.__aria
+      const state = store.get()
+      const hint = document.querySelector('.now-playing__cover-hint')
+      if (!hint) return { hasNode: false }
+
+      const current = state.playback.trackId ? state.library.byId.get(state.playback.trackId) : null
+      const hiddenForCovered = hint.hidden
+
+      /* 造一首"没有封面"的曲目并选中它 → 提示应当出现 */
+      const bareId = 'cover-hint-probe'
+      const bare = {
+        id: bareId,
+        title: '无封面探针',
+        artist: 'probe',
+        albumArtist: 'probe',
+        album: 'no-cover',
+        path: 'C:/nonexistent/cover-hint-probe.mp3',
+        duration: 100,
+        artworkEmbedded: false,
+        artworkFile: null
+      }
+      actions.setSetting({ onlineFeatures: false, onlineCovers: false })
+      store.set((s) => ({
+        ...s,
+        library: { ...s.library, byId: new Map(s.library.byId).set(bareId, bare) },
+        playback: { ...s.playback, trackId: bareId }
+      }))
+      await new Promise((r) => setTimeout(r, 400))
+      const shownForBare = hint.hidden === false
+      const text = (hint.textContent || '').trim()
+
+      hint.click()
+      /* 等条件（不要固定 sleep）：设置真的落到 store、提示真的藏起来 */
+      for (let i = 0; i < 30; i++) {
+        const now = store.get().settings
+        if (now.onlineFeatures === true && now.onlineCovers === true && hint.hidden === true) break
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      const afterClick = {
+        onlineFeatures: store.get().settings.onlineFeatures,
+        onlineCovers: store.get().settings.onlineCovers,
+        hidden: hint.hidden
+      }
+
+      /* 收尾：回到原曲目 + 关回在线功能（后面的检查默认在线是关的） */
+      store.set((s) => ({
+        ...s,
+        playback: { ...s.playback, trackId: current ? current.id : null }
+      }))
+      actions.setSetting({ onlineFeatures: false, onlineCovers: false })
+      await new Promise((r) => setTimeout(r, 300))
+
+      return { hasNode: true, hiddenForCovered, shownForBare, text, afterClick }
+    `)
+    record('在线功能默认关着时的引导：没有封面才出现一条可点提示，点一下即开启',
+      coverHintCheck.hasNode === true &&
+      coverHintCheck.hiddenForCovered === true &&
+      coverHintCheck.shownForBare === true &&
+      String(coverHintCheck.text || '').includes('在线封面') &&
+      coverHintCheck.afterClick &&
+      coverHintCheck.afterClick.onlineFeatures === true &&
+      coverHintCheck.afterClick.onlineCovers === true &&
+      coverHintCheck.afterClick.hidden === true,
+      `有内嵌封面时隐藏=${coverHintCheck.hiddenForCovered}；换成无封面曲目后出现=${coverHintCheck.shownForBare}` +
+      `（文案「${coverHintCheck.text}」）；点击后 onlineFeatures=${coverHintCheck.afterClick && coverHintCheck.afterClick.onlineFeatures}、` +
+      `onlineCovers=${coverHintCheck.afterClick && coverHintCheck.afterClick.onlineCovers}、提示隐藏=${coverHintCheck.afterClick && coverHintCheck.afterClick.hidden}`)
+
     // media:// 协议：Range 支持与 CORS 头（seek 与 WebAudio 接入点都依赖它们）
     const protocolResult = await evaluate(win, `
       const track = window.__aria.player.currentTrack()

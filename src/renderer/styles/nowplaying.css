@@ -714,3 +714,37 @@ html[data-platform="darwin"] .now-playing__topbar {
     width: min(26vh, 170px);
   }
 }
+
+
+/*
+ * 「没有封面 · 点此打开在线封面」
+ *
+ * 在线功能默认关闭之后，新用户看到没封面会以为坏了（T2.1）。
+ * 这条提示只在真的没有内嵌封面时出现，样式按"低调的一条文字"来做 ——
+ * 它是引导，不是警告，不该和正在播放的标题抢注意力。
+ */
+.now-playing__cover-hint {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--tint) 60%, transparent);
+  cursor: pointer;
+}
+
+.now-playing__cover-hint:hover {
+  color: var(--label-2);
+}
+
+.now-playing__cover-hint[hidden] {
+  display: none;
+}
+
+html[data-reduce-motion='true'] .now-playing__cover-hint {
+  transition: none;
+}

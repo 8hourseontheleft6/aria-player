@@ -8,7 +8,7 @@ import { createSlider } from '../widgets/slider.js'
 import { createArtworkView } from '../widgets/artwork-node.js'
 import { createLyricsView } from '../widgets/lyrics-view.js'
 import { createVisualizer } from '../widgets/visualizer.js'
-import { openPopover } from '../widgets/overlay.js'
+import { openPopover, toast } from '../widgets/overlay.js'
 import { openPillMenu } from '../widgets/pill-menu.js'
 import { presetOptions, matchPreset, PRESETS } from '../../core/equalizer-presets.js'
 
@@ -144,7 +144,49 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
   const artistNode = h('div', { class: 'now-playing__artist truncate', text: '' })
   const albumNode = h('div', { class: 'now-playing__album truncate', text: '' })
 
-  const info = h('div', { class: 'now-playing__info' }, titleNode, artistNode, albumNode)
+  /*
+   * 「封面缺失 + 在线功能关着」时的引导。
+   *
+   * 用户要求（T2.1）：在线功能默认关闭之后，新用户看到"没封面"会以为坏了，
+   * 所以给一条**可点**的提示 —— 但只在真的没有内嵌封面时出现，而且放在播放页里
+   * （用户主动看的时候才看到），**不做启动弹窗**。
+   */
+  const coverHint = h('button', {
+    class: 'now-playing__cover-hint',
+    type: 'button',
+    title: '打开在线封面（会向 iTunes / Deezer 发起请求）',
+    onClick: async () => {
+      /*
+       * 用渲染层自己的 action（乐观更新 + 走 IPC 落盘），不直连 remote.settings ——
+       * 后者要等主进程回推才更新 store，点完一瞬间读数还是旧的。
+       */
+      await actions.setSetting({ onlineFeatures: true, onlineCovers: true })
+      coverHint.hidden = true
+      toast({ message: '已打开在线封面，正在补全…', type: 'success' })
+      /* 设置落到 store 之后再让封面重新解析一次 */
+      setTimeout(() => {
+        const track = store.get().playback.trackId ? store.get().library.byId.get(store.get().playback.trackId) : null
+        if (track) art.setTrack(track)
+      }, 500)
+    }
+  }, '没有封面 · 点此打开在线封面')
+  coverHint.hidden = true
+
+  /*
+   * 提示的显隐**由 store 驱动**（而不是只在 TRACK_CHANGED 里算）：
+   * 这样"打开在线封面"之后它会立刻消失，自检也能直接驱动验证。
+   */
+  const coverHintNeeded = (state) => {
+    const track = state.playback.trackId ? state.library.byId.get(state.playback.trackId) : null
+    if (!track) return false
+    if (track.artworkEmbedded || track.artworkFile) return false
+    return state.settings.onlineFeatures !== true
+  }
+  const syncCoverHint = () => {
+    coverHint.hidden = !coverHintNeeded(store.get())
+  }
+
+  const info = h('div', { class: 'now-playing__info' }, titleNode, artistNode, albumNode, coverHint)
 
   const progress = createSlider({
     className: 'slider--thin',
@@ -402,6 +444,9 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
    * 也就解释了为什么它不需要 z-index 也不需要给歌词留边距。
    */
   const body = h('div', { class: 'now-playing__body' }, left, right)
+  store.select((state) => `${state.playback.trackId}|${state.settings.onlineFeatures}|${state.settings.onlineCovers}`,
+    () => syncCoverHint())
+
   const element = h('section', { class: 'now-playing', id: 'now-playing', hidden: true },
     artBackground, veil, glow, topbar, body, visualizer ? visualizer.element : null)
 
@@ -428,6 +473,7 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
     artistNode.textContent = track.artist
     albumNode.textContent = `${track.album}${track.year ? ` · ${track.year}` : ''}`
     art.setTrack(track)
+    syncCoverHint()
     progress.setRange(0, track.duration || 1)
     progress.setValue(0)
     updateTimes(0, track.duration || 0)
