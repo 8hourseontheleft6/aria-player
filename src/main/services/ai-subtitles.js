@@ -539,12 +539,18 @@ function createAiSubtitlesService (ctx) {
     resetAudio()
 
     /*
-     * worker 脚本的路径：打包后它在 app.asar.unpacked 里（见 electron-builder.base.yml 的 asarUnpack）。
-     * 不能用 __dirname 拼 —— 那会指到 asar 内部，utilityProcess 按真实路径加载不了。
+     * worker 脚本的路径。
+     *
+     * 打包后它在 app.asar.unpacked 里（见 electron-builder.base.yml 的 asarUnpack）——
+     * utilityProcess 要按**真实路径**加载，asar 内部读不了；worker 还会 require 同目录的纯函数，
+     * 所以 services 也一起解出来。
+     *
+     * 这里用**存在性**判断而不是 app.isPackaged：两种形态都能跑，也能在开发态验证
+     * "打包后那份 worker" 到底能不能加载（自检/验收脚本就是这么验的）。
      */
-    const workerFile = app.isPackaged
-      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'src', 'main', 'workers', 'asr-worker.js')
-      : path.join(__dirname, '..', 'workers', 'asr-worker.js')
+    const unpackedWorker = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'src', 'main', 'workers', 'asr-worker.js')
+    const devWorker = path.join(__dirname, '..', 'workers', 'asr-worker.js')
+    const workerFile = fs.existsSync(unpackedWorker) ? unpackedWorker : devWorker
     emit('ai-subtitles:transcribe-progress', { stage: 'starting', done: 0, total: 1 })
 
     return await new Promise((resolve) => {

@@ -5,6 +5,14 @@
 
 extends: ./electron-builder.base.yml
 
+# 本体不用 AI 字幕（那是 player 档的能力），所以把 sherpa 运行时剔掉 —— 少 5MB 左右。
+# 注意：player / unified 的配置继承 base，不受这里影响。
+files:
+  - '!node_modules/sherpa-onnx-node/**'
+  - '!node_modules/sherpa-onnx-*/**'
+  - '!**/sherpa-onnx-*/**'
+  - '!src/main/workers/**'
+
 appId: com.aria.player
 productName: Aria
 
