@@ -544,7 +544,7 @@ export const myPlugin = {
 
 ## License
 
-[MIT](LICENSE) © 2026 Aria contributors
+[MIT](LICENSE) © 2026 deepseek, 8左边的白马6
 
 第三方依赖与素材（Electron、music-metadata、图标/字体/截图等）的来源与许可见
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

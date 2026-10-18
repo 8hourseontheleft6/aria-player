@@ -53,11 +53,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/OWNER/aria-player.git"
+    "url": "https://github.com/8hourseontheleft6/aria-player.git"
   },
-  "homepage": "https://github.com/OWNER/aria-player#readme",
+  "homepage": "https://github.com/8hourseontheleft6/aria-player#readme",
   "bugs": {
-    "url": "https://github.com/OWNER/aria-player/issues"
+    "url": "https://github.com/8hourseontheleft6/aria-player/issues"
   },
   "keywords": [
     "electron",

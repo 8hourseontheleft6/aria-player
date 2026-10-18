@@ -94,5 +94,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) (in Chinese), [CODE_OF_CONDUCT.md](CODE_O
 
 ## License
 
-[MIT](LICENSE) © 2026 Aria contributors.
+[MIT](LICENSE) © 2026 deepseek, 8左边的白马6.
 Third-party dependencies and assets: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
