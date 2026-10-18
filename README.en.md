@@ -34,6 +34,23 @@ Each product/mode has its **own `userData` directory** and its own single-instan
 side by side. Only Aria Player and Aria Unified register file associations — the full app never hijacks
 "double-click .mp3".
 
+### AI subtitles (local)
+
+When a song has no `.lrc`, a **local** model can transcribe the lyrics and their timing.
+Recognition runs entirely on your machine and never uploads audio; the only time the app
+goes online for this feature is when **you** press "Download model" (about 229 MB, once).
+
+- Off by default ("Settings → AI subtitles"). After the download it works fully offline.
+- Line-level timing comes from silero VAD speech segments; when VAD finds nothing it falls
+  back to fixed 15–20 second windows and the UI says the timing is estimated.
+- Results are cached per track (path + mtime + model fingerprint), 200 entries at most.
+- Two models, both **downloaded on demand** and **never bundled with the installer**:
+  - SenseVoice-small (int8) — **FunASR MODEL_LICENSE**, a custom model licence
+    (not an OSI-approved licence): <https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE>
+  - silero VAD — **MIT**: <https://github.com/snakers4/silero-vad/blob/master/LICENSE>
+- Optional post-processing (both off by default) can send the **lyric text only** — never audio —
+  to an OpenAI-compatible endpoint you configure yourself.
+
 ## Install / build / self-check
 
 ```bash

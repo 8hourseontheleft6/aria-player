@@ -1019,6 +1019,24 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         }).element
       }),
       row({
+        title: '模型许可与来源',
+        sub: '两个模型都**不随安装包分发**，只在你点「下载模型」时从上面的地址取到本机。'
+          + 'SenseVoice-small 用的是 FunASR MODEL_LICENSE（自定义模型许可，不是 OSI 认证的开源许可）；'
+          + 'silero VAD 是 MIT。点开看原文：',
+        control: h('div', { class: 'settings__row-control ai-subtitles__controls' },
+          h('button', {
+            class: 'btn',
+            type: 'button',
+            onClick: () => remote.openExternal('https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE')
+          }, 'SenseVoice 许可'),
+          h('button', {
+            class: 'btn',
+            type: 'button',
+            onClick: () => remote.openExternal('https://github.com/snakers4/silero-vad/blob/master/LICENSE')
+          }, 'silero VAD 许可')
+        )
+      }),
+      row({
         title: '识别模型',
         sub: '「下载」把三个文件写进「用户数据目录/ai-subtitles/models」，校验 SHA256 通过才算就绪；'
           + '断网或取消后可以续传，不会重下已经收到的部分。',

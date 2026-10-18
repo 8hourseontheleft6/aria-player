@@ -58,5 +58,8 @@ Aria 与 Apple Inc. 没有任何关系；未获其背书或赞助。文中提到
 - **这两个模型不打包进安装包**：只有在用户于「设置 → AI 字幕」里**主动点下载**之后，
   才会从上面的下载源取到本机（默认 HuggingFace，备用 hf-mirror.com），
   并在下载前在界面上写明来源与体积。
-- 模型许可以上游仓库卡片为准（SenseVoice 见 FunASR / SenseVoice 项目页，silero-vad 见
-  https://github.com/snakers4/silero-vad ）。我们只分发**下载地址与 SHA256**，不分发模型本身。
+- **许可**：
+  - SenseVoice-small：**FunASR MODEL_LICENSE**（自定义模型许可，**不是 OSI 认证的开源许可**）
+    <https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE>
+  - silero VAD：**MIT** <https://github.com/snakers4/silero-vad/blob/master/LICENSE>
+- 我们只分发**下载地址与 SHA256**，不分发模型本身。使用这些模型需要遵守上面各自的许可。
