@@ -699,7 +699,8 @@ function createAiSubtitlesService (ctx) {
     const textLines = (Array.isArray(lines) ? lines : []).map((line) => String(line == null ? '' : line))
     if (!textLines.length) return { ok: false, code: 'no-lines' }
     const field = mode === 'translate' ? 'translation' : 'text'
-    const model = String((settings.get().ai && settings.get().ai.model) || '')
+    const aiSettings = settings.get().ai || {}
+    const model = String(aiSettings.model || '')
     if (!model) return { ok: false, code: 'no-model' }
 
     const batches = llm.buildMessages({ mode, lines: textLines, meta, language })
@@ -710,7 +711,9 @@ function createAiSubtitlesService (ctx) {
 
     for (const { system, user, batch } of batches) {
       const key = llm.cacheKeyOf({
-        text: JSON.stringify(batch),
+        // 完整请求决定缓存：语言、歌曲上下文、接口地址都会影响结果。
+        // 不把密钥放进缓存键或缓存文件。
+        text: JSON.stringify({ system, user, baseUrl: String(aiSettings.baseUrl || '').trim().replace(/\/+$/, '') }),
         model,
         promptVersion: llm.PROMPT_VERSION + ':' + mode
       })
