@@ -583,17 +583,30 @@ html[data-platform="darwin"] .now-playing__topbar {
 }
 
 /* 歌词区域：上下渐隐遮罩，中间高亮清晰 */
+/*
+ * 注意：**遮罩不在这一层**。
+ *
+ * 原来是挂在这上面的 —— 而右上角的工具组（position:absolute; top:0）和底部「回到当前」
+ * 都是它的子元素，正好落在"顶部完全透明 → 16% 才实"和"84% 之后又淡出"这两段里，
+ * 于是无论怎么调 z-index 都是灰的。遮罩必须只罩滚动内容，不罩浮在上面的控件。
+ *
+ * 空状态 .lyrics-empty 也在滚动容器里，但它居中、落在 16%–84% 的清晰区，不受影响。
+ */
 .lyrics-region {
   position: relative;
   height: 100%;
   overflow: hidden;
-  mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
 }
 
+/*
+ * 遮罩挪到这里：只淡出**滚动的歌词**上下边缘，工具组与「回到当前」在遮罩之外。
+ * 滚动容器本来就是 inset:0 + overflow-y:auto，视觉上与原来挂在区域内等价。
+ */
 .lyrics {
   position: absolute;
   inset: 0;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16%, #000 84%, transparent 100%);
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
@@ -791,7 +804,8 @@ html[data-platform="darwin"] .now-playing__topbar {
   background: var(--fill-floating);
   backdrop-filter: blur(10px) saturate(160%);
   -webkit-backdrop-filter: blur(10px) saturate(160%);
-  opacity: 0.55;
+  /* 遮罩问题修掉之后，.65 已经够清楚；再高会在亮封面上抢歌词的注意力 */
+  opacity: 0.65;
   transition: opacity var(--dur) var(--ease-ios);
 }
 

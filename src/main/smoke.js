@@ -1387,6 +1387,47 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
     const toolbar = document.querySelector(".lyrics-toolbar")
     const source = document.querySelector(".lyrics-source")
 
+    /*
+     * 遮罩归属：必须在滚动容器 .lyrics 上，不能在 .lyrics-region 上 ——
+     * 挂在区域上会把右上角工具组与底部「回到当前」一起淡掉（用户看到"几乎看不见"的根因）。
+     */
+    const scroller = document.querySelector(".lyrics")
+    const region = document.querySelector(".lyrics-region")
+    const scrollerMask = scroller ? getComputedStyle(scroller).maskImage : ""
+    const regionMask = region ? getComputedStyle(region).maskImage : ""
+    const resume = document.querySelector(".lyrics-resume")
+    const resumeMask = resume ? getComputedStyle(resume).maskImage : ""
+    /* 空状态：居中的内容要落在遮罩 16%–84% 的清晰区里，否则上下会被削 */
+    const empty = document.querySelector(".lyrics-empty")
+    let emptyInsideClear = null
+    let emptyTopPercent = null
+    if (empty && scroller) {
+      /*
+       * .lyrics-empty 自己是一块 inset:0 的整高盒子（用来居中），
+       * 要量的是它的**内容**包围盒 —— 拿它自己的 rect 会永远得到 0%→100%。
+       */
+      const box = scroller.getBoundingClientRect()
+      const kids = [...empty.children].map((node) => node.getBoundingClientRect())
+      if (kids.length && box.height > 0) {
+        const top = Math.min(...kids.map((r) => r.top))
+        const bottom = Math.max(...kids.map((r) => r.bottom))
+        emptyTopPercent = (top - box.top) / box.height
+        const bottomPercent = (bottom - box.top) / box.height
+        emptyInsideClear = emptyTopPercent >= 0.16 && bottomPercent <= 0.86
+      }
+    }
+    /* 「回到当前」不能压住最后一行歌词 */
+    let resumeOverlaps = null
+    if (resume && scroller) {
+      const lines = [...scroller.querySelectorAll(".lyrics__line")]
+      const last = lines[lines.length - 1]
+      if (last) {
+        const a = resume.getBoundingClientRect()
+        const b = last.getBoundingClientRect()
+        resumeOverlaps = a.top < b.bottom && a.bottom > b.top
+      }
+    }
+
     const wide = window.innerWidth >= 1001
     const columnsShown = body ? getComputedStyle(body).gridTemplateColumns.split(" ").length : 0
     const leftOverflowY = left ? getComputedStyle(left).overflowY : ""
@@ -1418,6 +1459,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
     actions.setView("songs")
     await new Promise((r) => setTimeout(r, 300))
     return {
+      scrollerMask, regionMask, resumeMask, emptyInsideClear, emptyTopPercent, resumeOverlaps,
       wide, columnsShown, columnsHidden, restoreVisible, restoreHasLabel,
       pressedWhenHidden, pressedWhenShown,
       leftOverflowY, leftScrolls, toolbarOpacity, toolbarBg,
@@ -1434,6 +1476,12 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
     nowPlayingLook.toolbarOpacity >= 0.5 &&
     String(nowPlayingLook.toolbarBg) !== "rgba(0, 0, 0, 0)" &&
     String(nowPlayingLook.artBg).includes("gradient") &&
+    /* 遮罩必须在滚动容器上，不能在区域上 */
+    String(nowPlayingLook.scrollerMask).includes("gradient") &&
+    String(nowPlayingLook.regionMask) === "none" &&
+    /* 空状态与「回到当前」的复核 */
+    nowPlayingLook.emptyInsideClear === true &&
+    nowPlayingLook.resumeOverlaps !== true &&
     (nowPlayingLook.albumVisible === true || nowPlayingLook.albumText === ""),
     `窗口宽=${nowPlayingLook.wide}：显示时 ${nowPlayingLook.columnsShown} 列、隐藏时 ${nowPlayingLook.columnsHidden} 列；` +
       `「显示歌词」入口可见=${nowPlayingLook.restoreVisible}（含文案=${nowPlayingLook.restoreHasLabel}）；` +
@@ -1441,7 +1489,10 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       `左列 overflow-y=${nowPlayingLook.leftOverflowY}、真的在滚=${nowPlayingLook.leftScrolls}；` +
       `工具栏 opacity=${nowPlayingLook.toolbarOpacity}、背景=${nowPlayingLook.toolbarBg}；` +
       `来源文字色=${nowPlayingLook.sourceColor}；封面层=${String(nowPlayingLook.artBg).slice(0, 40)}…；` +
-      `占位专辑名「${nowPlayingLook.albumText}」可见=${nowPlayingLook.albumVisible}`)
+      `占位专辑名「${nowPlayingLook.albumText}」可见=${nowPlayingLook.albumVisible}；` +
+      `遮罩：滚动容器=${String(nowPlayingLook.scrollerMask).slice(0, 20)}…、区域=${nowPlayingLook.regionMask}、回到当前=${nowPlayingLook.resumeMask}；` +
+      `空状态在清晰区=${nowPlayingLook.emptyInsideClear}（顶部 ${nowPlayingLook.emptyTopPercent == null ? '—' : (nowPlayingLook.emptyTopPercent * 100).toFixed(0) + '%'}）；` +
+      `「回到当前」压住最后一行=${nowPlayingLook.resumeOverlaps === null ? "未出现（正常）" : nowPlayingLook.resumeOverlaps}`)
 
   win.setBounds(lookPreviousBounds)
   await sleep(500)

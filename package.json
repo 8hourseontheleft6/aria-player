@@ -1,7 +1,7 @@
 {
   "name": "aria-player",
   "productName": "Aria",
-  "version": "0.1.0-beta.60",
+  "version": "0.1.0-beta.61",
   "private": true,
   "description": "Aria —— iOS 设计风格的本地音乐播放器（Electron）",
   "main": "src/main/main.js",
