@@ -92,6 +92,21 @@ async function ensureVisible (win) {
   if (win.isDestroyed()) return false
   if (win.isMinimized()) win.restore()
   if (!win.isVisible()) win.show()
+    /*
+     * 抢前台。Windows 有前台锁：别的窗口（比如开着的聊天工具）占着前台时，
+     * 单纯 focus() 会被拒 —— 而"真拖"那几条检查依赖窗口真的在前台，
+     * 否则按下/拖动落到别的程序上，读数会变成 Δx=-47、Δy=-155 这种乱跳。
+     * 抢不到就最小化再恢复（老办法，Windows 会把它重新提到前台）。
+     */
+    win.focus()
+    await sleep(150)
+    if (!win.isFocused()) {
+      win.minimize()
+      await sleep(200)
+      win.restore()
+      win.focus()
+      await sleep(300)
+    }
   for (let i = 0; i < 24; i++) {
     try {
       const visible = await evaluate(win, 'return document.visibilityState === "visible"')
@@ -661,6 +676,17 @@ async function runRealDragChecks ({ win, record }) {
     }
   }
 
+  /** 在元素的指定页面坐标上按下去（坐标来自**真实光标**，不是"我以为"的位置） */
+  const pressAt = async (selector, clientX, clientY) => evaluate(win, `
+    const node = document.querySelector(${JSON.stringify(selector)})
+    if (!node) return false
+    node.dispatchEvent(new PointerEvent('pointerdown', {
+      button: 0,
+      bubbles: true,
+      clientX: ${Math.round(clientX)},
+      clientY: ${Math.round(clientY)}
+    }))
+    return true`)
   /** 在元素上按下去 */
   const press = async (selector) => evaluate(win, `
     const node = document.querySelector(${JSON.stringify(selector)})
@@ -690,13 +716,21 @@ async function runRealDragChecks ({ win, record }) {
     if (!point) return { ok: false, reason: `没找到 ${selector}` }
     moveCursor(point.screenX, point.screenY, win)
     await waitForCursor(point.screenX, point.screenY)
-    await sleep(250)
+    await sleep(300)
+    /*
+     * 以**真实光标**为准重算按下点：PowerShell 拉起要几百毫秒，期间光标可能被别的程序挪动，
+     * "我以为按在 (x,y)" 和 "实际按在 (x2,y2)" 差几十像素时，窗口会跟着错误位置跑
+     * （读数表现为 Δx=92、Δy=177 这种乱跳）。
+     */
+    const actual = screen.getCursorScreenPoint()
     const before = win.getBounds()
-    const pressed = await press(selector)
-    await sleep(350)
-    moveCursor(point.screenX + dx, point.screenY + dy, win)
-    await waitForCursor(point.screenX + dx, point.screenY + dy)
-    await sleep(250)
+    const clientX = Math.round(actual.x - before.x)
+    const clientY = Math.round(actual.y - before.y)
+    const pressed = await pressAt(selector, clientX, clientY)
+    await sleep(400)
+    moveCursor(actual.x + dx, actual.y + dy, win)
+    await waitForCursor(actual.x + dx, actual.y + dy)
+    await sleep(300)
     const after = win.getBounds()
     windowApi.endWindowDrag()
     await evaluate(win, `window.dispatchEvent(new PointerEvent('pointerup', { button: 0 })); return true`)
@@ -793,15 +827,17 @@ async function runRealDragChecks ({ win, record }) {
   await waitForCursor(topPoint.screenX, topPoint.screenY)
   await sleep(250)
   const beforeTop = win.getBounds()
+  /* 同上：按下点用**真实光标**换算（PowerShell 慢启动期间光标可能已被挪走） */
+  const actualTop = screen.getCursorScreenPoint()
   const pressedTop = await evaluate(win, `
-    const node = document.elementFromPoint(550, 2)
+    const node = document.elementFromPoint(${Math.round(actualTop.x - beforeTop.x)}, ${Math.round(actualTop.y - beforeTop.y)})
     if (!node) return { ok: false, cls: '' }
     const cls = node.className || ''
     node.dispatchEvent(new PointerEvent('pointerdown', {
       button: 0,
       bubbles: true,
-      clientX: 550,
-      clientY: 2
+      clientX: ${Math.round(actualTop.x - beforeTop.x)},
+      clientY: ${Math.round(actualTop.y - beforeTop.y)}
     }))
     return { ok: true, cls: String(cls) }`)
   await sleep(350)
