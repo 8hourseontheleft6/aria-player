@@ -747,3 +747,51 @@ html[data-reduce-motion='true'] .settings__card:hover {
 .settings__group.is-search-hit-group .settings__group-title {
   color: var(--tint);
 }
+
+
+/* ============================ AI 字幕（本地） ============================ */
+
+.ai-subtitles__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ai-subtitles__status-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ai-subtitles__status {
+  max-width: 46ch;
+  text-align: right;
+  white-space: normal;
+}
+
+/* 下载进度条：细、低调，颜色跟主题色走（和其它进度条同一套） */
+.ai-subtitles__bar {
+  width: 100%;
+  max-width: 220px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-quaternary);
+  overflow: hidden;
+}
+
+.ai-subtitles__bar-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tint);
+  transition: width var(--dur) var(--ease-ios);
+}
+
+/* 减少动画：进度条直接跳，不做过渡 */
+html[data-reduce-motion='true'] .ai-subtitles__bar-fill {
+  transition: none;
+}

@@ -758,3 +758,44 @@ html[data-platform="darwin"] .now-playing__topbar {
 html[data-reduce-motion='true'] .now-playing__cover-hint {
   transition: none;
 }
+
+
+/* ============================ AI 字幕（徽章 / 免责 / 空状态入口） ============================ */
+
+.lyrics__ai-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-2);
+  flex-wrap: wrap;
+}
+
+.lyrics__ai-badge {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--tint);
+  background: var(--tint-soft);
+  border: 0.5px solid color-mix(in srgb, var(--tint) 40%, transparent);
+}
+
+.lyrics__ai-text {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+}
+
+.lyrics-empty__ai {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: var(--space-2);
+}
+
+.lyrics-empty__ai-status {
+  font-size: var(--text-caption);
+  color: var(--label-3);
+  min-height: 1em;
+}

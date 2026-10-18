@@ -18,6 +18,11 @@ const EVENT_CHANNELS = new Set([
   'theme:changed',
   /* player 档位：双击文件 / 拖到 Dock / 第二个实例带来的曲目（主进程解析好后推过来） */
   'opened:incoming',
+  /* 本机 AI 字幕：模型下载进度/完成、转写进度/完成（只有 player 档会发） */
+  'ai-subtitles:progress',
+  'ai-subtitles:done',
+  'ai-subtitles:transcribe-progress',
+  'ai-subtitles:transcribe-done',
   // 在线音源下载进度（主进程按 uid 推送）
   'sources:download-progress',
   // 最小化 / 收进托盘时通知渲染层释放后台占用，回来时通知恢复

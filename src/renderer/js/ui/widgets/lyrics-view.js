@@ -23,8 +23,9 @@ import { icon } from '../../core/icons.js'
 import { EVENTS } from '../../core/bus.js'
 import { karaokeProgress } from '../../core/lrc.js'
 import { createSlider } from './slider.js'
-import { openPopover } from './overlay.js'
+import { openPopover, toast } from './overlay.js'
 import { remote } from '../../core/remote.js'
+import { aiSubtitlesAvailable, generateAiSubtitles } from '../../core/ai-subtitles.js'
 
 const RESUME_DELAY = 4200
 /** 拖动超过这么多像素才算「在拖歌词」，否则仍然算点击某一行 */
@@ -164,6 +165,120 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     ))
   }
 
+  /*
+   * ==================== AI 字幕（本地） ====================
+   *
+   * 只在这个产品有 remote.aiSubtitles、且设置里打开了「AI 字幕」时出现。
+   * 流程：模型没下载就先下载（可取消）→ 解码 → 分块 → 主进程识别（可取消）→ 写进 store.lyrics
+   * → 走本文件既有的行渲染（点行跳转、跟随高亮都还能用）。
+   * 任何一步失败都只弹一句可读的原因，**不碰播放**。
+   */
+  let aiJob = null
+  let aiLabel = null
+  let aiCancel = null
+
+  const aiEnabled = () => aiSubtitlesAvailable() && store.get().settings.aiSubtitles === true
+
+  function setAiBusy (text) {
+    if (aiLabel) aiLabel.textContent = text
+  }
+
+  async function startAiFlow () {
+    if (aiJob) return
+    const track = store.get().playback.trackId ? store.get().library.byId.get(store.get().playback.trackId) : null
+    if (!track) return
+    aiJob = { cancelled: false }
+    const job = aiJob
+    if (aiLabel) aiLabel.textContent = '准备中…'
+    if (aiCancel) aiCancel.hidden = false
+
+    try {
+      const status = await remote.aiSubtitles.status()
+      if (status.state !== 'ready') {
+        setAiBusy(status.state === 'downloading' ? '下载模型…' : '下载模型（229 MB，只需一次）…')
+        await remote.aiSubtitles.download({})
+        /* 等下载结束：进度事件驱动文案，完成/失败都会走 onDone */
+        const done = await new Promise((resolve) => {
+          const off = remote.aiSubtitles.onDone((payload) => {
+            off()
+            resolve(payload || { ok: false })
+          })
+        })
+        if (!done.ok) {
+          if (!job.cancelled && done.error && done.error.code !== 'cancelled') {
+            toast({ message: `模型下载失败：${done.error.message}`, type: 'error' })
+          }
+          return
+        }
+      }
+      if (job.cancelled) return
+
+      setAiBusy('解码音频…')
+      const result = await generateAiSubtitles(track, {
+        onStage: (stage, detail) => {
+          if (job.cancelled) return
+          if (stage === 'uploading') setAiBusy(`送音频 ${detail.done}/${detail.total}…`)
+          else if (stage === 'recognizing') setAiBusy('识别中（本地，首次约十几秒）…')
+        }
+      })
+      if (job.cancelled) return
+      if (!result.ok) {
+        const message = result.code === 'model-missing'
+          ? '还没有可用的模型，请先在设置里下载'
+          : (result.message || '识别失败')
+        toast({ message, type: 'error' })
+        return
+      }
+      if (!result.segments || !result.segments.length) {
+        toast({ message: '这段音频里没识别出歌词（纯音乐？）', type: 'info' })
+        return
+      }
+      const lines = result.segments.map((segment) => ({
+        time: Number(segment.start) || 0,
+        text: segment.text,
+        words: null,
+        translation: ''
+      }))
+      bus.emit(EVENTS.LYRICS_LOADED, {
+        lines,
+        source: 'ai',
+        estimated: result.estimatedTimeline === true,
+        fromCache: result.fromCache === true
+      })
+      toast({
+        message: result.fromCache ? '字幕来自缓存' : `已生成 ${lines.length} 行本地字幕`,
+        type: 'success'
+      })
+    } catch (error) {
+      toast({ message: `生成失败：${(error && error.message) || error}`, type: 'error' })
+    } finally {
+      aiJob = null
+      if (aiCancel) aiCancel.hidden = true
+      render()
+    }
+  }
+
+  /** 空状态里的那块 UI：按钮 / 进度文案 / 取消 */
+  function aiBlock () {
+    if (!aiEnabled()) return null
+    aiLabel = h('div', { class: 'lyrics-empty__ai-status', text: '' })
+    aiCancel = h('button', {
+      class: 'btn',
+      type: 'button',
+      hidden: true,
+      onClick: () => {
+        if (aiJob) aiJob.cancelled = true
+        remote.aiSubtitles.cancel()
+        remote.aiSubtitles.cancelTranscribe()
+        if (aiLabel) aiLabel.textContent = '已取消'
+        if (aiCancel) aiCancel.hidden = true
+      }
+    }, '取消')
+    const start = h('button', { class: 'btn btn--primary', type: 'button', onClick: () => startAiFlow() },
+      icon('waveform', { className: 'icon icon--stroke' }), '用 AI 生成本地字幕')
+    return h('div', { class: 'lyrics-empty__ai' }, start, aiCancel, aiLabel)
+  }
+
   function render () {
     const lyrics = store.get().lyrics
     element.style.setProperty('--lyric-scale', String(store.get().settings.lyricFontScale))
@@ -215,6 +330,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
           style: { display: 'flex', gap: '8px', justifyContent: 'center' }
         },
         onlineOff ? enableOnline : null,
+        aiBlock(),
         h('button', {
           class: onlineOff ? 'btn' : 'btn btn--primary',
           type: 'button',
@@ -226,6 +342,19 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     }
 
     clear(inner)
+    /*
+     * AI 生成的歌词：加一个徽章和免责声明。
+     * 用户必须一眼看出"这是机器听出来的"，而不是官方歌词 —— 所以徽章跟着内容走，
+     * 而不是只在生成成功那一下弹个 toast。
+     */
+    if (lyrics.source === 'ai') {
+      inner.appendChild(h('div', { class: 'lyrics__ai-note' },
+        h('span', { class: 'lyrics__ai-badge', text: 'AI · 本地' }),
+        h('span', { class: 'lyrics__ai-text', text: lyrics.estimated
+          ? '识别可能有误，时间轴为估算'
+          : '识别可能有误（本地模型，完全离线）' })
+      ))
+    }
     lineNodes = lyrics.lines.map((line, index) => {
       const textNode = line.words?.length
         ? h('span', { class: 'lyrics__words', text: line.text })
@@ -404,6 +533,16 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
   })
 
   /* ------------------------------ 事件 ------------------------------ */
+
+  /*
+   * 「AI 字幕」开关一变就重渲染。
+   *
+   * 不加这条的话，页面在开关打开**之前**渲染过一次空状态，之后没有任何事件触发重渲染 ——
+   * 用户会看到"开关打开了，但歌词页还是没按钮"（自检里就是这么红的）。
+   */
+  if (typeof store.select === 'function') {
+    store.select((state) => (state.settings && state.settings.aiSubtitles ? '1' : '0'), () => render())
+  }
 
   bus.on(EVENTS.LYRICS_LOADED, () => {
     userScrolling = false

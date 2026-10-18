@@ -1205,6 +1205,85 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       `缓存 ${transcribeChain.cacheAfterFirst} 条；第二次 fromCache=${transcribeChain.fromCacheSecond}、LRC 一致=${transcribeChain.sameLrc}；` +
       `空转点取消 accepted=${transcribeChain.idleCancel}（应为 false）；清缓存后 ${transcribeChain.clearedEntries} 条`)
 
+  /*
+   * AI 字幕：UI 入口（阶段 4）。
+   * 设置页：默认 **关**、有「下载模型」「清空缓存」；打开开关后歌词页空状态应出现「用 AI 生成本地字幕」。
+   * 只验入口存在与开关联动（不点真下载 —— 那是 229MB）。
+   */
+  const aiUi = await evaluate(win, `
+    const { actions, store } = window.__aria
+    const rowsOf = () => [...document.querySelectorAll(".settings__row")]
+    const textOf = (node) => (node.textContent || "")
+
+    /* 先确保开关是关的（上一轮可能留了 true） */
+    await actions.setSetting({ aiSubtitles: false })
+    actions.setView("settings")
+    await new Promise((r) => setTimeout(r, 600))
+    const rows = rowsOf()
+    const row = rows.find((node) => textOf(node).includes("AI 字幕（本地）"))
+    const toggle = row ? row.querySelector(".switch") : null
+    const out = {
+      hasRow: Boolean(row),
+      offByDefault: toggle ? toggle.getAttribute("aria-checked") === "false" : null,
+      hasDownload: rows.some((node) => textOf(node).includes("下载模型")),
+      hasClearCache: rows.some((node) => textOf(node).includes("清空缓存")),
+      statusText: (document.querySelector(".ai-subtitles__status") || {}).textContent || "",
+      enabled: false,
+      hasLyricsButton: false
+    }
+
+    /* 打开开关 → 歌词页空状态应出现 AI 入口 */
+    if (toggle) {
+      toggle.click()
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    out.enabled = store.get().settings.aiSubtitles === true
+    actions.openNowPlaying()
+    /*
+     * 等条件，不要固定 sleep：打开播放页后歌词先经历「正在载入歌词…」，
+     * 没 .lrc 才会切到空状态 —— 我们的按钮在空状态里。
+     */
+    for (let i = 0; i < 30; i++) {
+      if ([...document.querySelectorAll("button")].some((node) => textOf(node).includes("用 AI 生成本地字幕"))) {
+        out.hasLyricsButton = true
+        break
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+
+    /* 诊断：到底卡在哪一步 */
+    const lyricsState = store.get().lyrics
+    out.diagLyricsStatus = lyricsState ? lyricsState.status : "null"
+    out.diagLines = lyricsState && lyricsState.lines ? lyricsState.lines.length : -1
+    out.diagEmptyActions = Boolean(document.querySelector(".lyrics-empty__actions"))
+    out.diagAiBlock = Boolean(document.querySelector(".lyrics-empty__ai"))
+    out.diagEnabledFlag = window.__aria.store.get().settings.aiSubtitles === true
+    out.diagHasApi = Boolean(window.aria && window.aria.aiSubtitles)
+    const emptyText = document.querySelector(".lyrics-empty")
+    out.diagEmptyText = emptyText ? (emptyText.textContent || "").slice(0, 80) : ""
+
+    /* 收尾：关掉开关、收起播放页 */
+    actions.closeNowPlaying()
+    await actions.setSetting({ aiSubtitles: false })
+    actions.setView("songs")
+    await new Promise((r) => setTimeout(r, 300))
+    return out`)
+  record('AI 字幕：设置页有开关（默认关）与下载/清缓存，打开后歌词页出现生成入口',
+    aiUi.hasRow === true &&
+    aiUi.offByDefault === true &&
+    aiUi.hasDownload === true &&
+    aiUi.hasClearCache === true &&
+    aiUi.enabled === true &&
+    aiUi.hasLyricsButton === true,
+    `设置页有「AI 字幕（本地）」行=${aiUi.hasRow}、开关默认关=${aiUi.offByDefault}、` +
+      `有「下载模型」=${aiUi.hasDownload}、有「清空缓存」=${aiUi.hasClearCache}；` +
+      `状态文案「${String(aiUi.statusText).slice(0, 40)}」；点开关后 aiSubtitles=${aiUi.enabled}、` +
+      `歌词页出现生成入口=${aiUi.hasLyricsButton}；` +
+      `诊断：lyrics.status=${aiUi.diagLyricsStatus}、lines=${aiUi.diagLines}、` +
+      `空状态动作区=${aiUi.diagEmptyActions}、AI 块=${aiUi.diagAiBlock}、开关=${aiUi.diagEnabledFlag}、API=${aiUi.diagHasApi}、` +
+      `空状态文字「${aiUi.diagEmptyText}」`)
+
+
 
   /* ② 资料库 / 在线 / 歌词 / 监听这些能力**不存在**（不是"存在但关掉了"） */
   const forbidden = ['library', 'lyrics', 'online', 'ai', 'musicSources', 'tray', 'watcher', 'background']

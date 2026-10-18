@@ -879,7 +879,137 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     ]))
 
     /* ---------- 歌词 ---------- */
-    scroll.appendChild(group('歌词', [
+  
+  /*
+   * ============================ AI 字幕（本地） ============================
+   *
+   * 只有播放器档有 remote.aiSubtitles（本体里是 undefined，整块不渲染）。
+   * 默认**关**：不点头就不下载 229MB、不联网、不占空间。
+   *
+   * 这一块的状态全部来自主进程（services/ai-subtitles.js）：
+   *   not-downloaded / downloading / ready / error —— 这里不猜，只显示。
+   */
+  if (remote.aiSubtitles) {
+    const label = h('div', { class: 'settings__row-sub ai-subtitles__status', text: '正在读取模型状态…' })
+    const progressFill = h('div', { class: 'ai-subtitles__bar-fill' })
+    const progressWrap = h('div', { class: 'ai-subtitles__bar', hidden: true }, progressFill)
+    const cacheLine = h('div', { class: 'settings__row-sub', text: '缓存：—' })
+
+    const downloadButton = h('button', { class: 'btn', type: 'button' }, '下载模型')
+    const cancelButton = h('button', { class: 'btn', type: 'button', hidden: true }, '取消')
+    const removeButton = h('button', { class: 'btn', type: 'button' }, '删除模型')
+    const clearCacheButton = h('button', { class: 'btn', type: 'button' }, '清空缓存')
+
+    /** 把一次 status() 的结果画出来 */
+    const paint = (status) => {
+      const state = status.state
+      const progress = status.progress
+      if (state === 'ready') {
+        label.textContent = `已就绪 · ${status.modelBytesText}（完全离线，模型在 ${status.modelsDir}）`
+      } else if (state === 'downloading') {
+        const percent = progress ? Math.round(progress.percent) : 0
+        const speed = progress && progress.speed ? ` · ${formatBytes(progress.speed)}/s` : ''
+        label.textContent = `正在下载 ${percent}% · ${formatBytes(progress ? progress.received : 0)} / ${status.modelBytesText}${speed}`
+      } else if (state === 'error') {
+        const error = status.error || {}
+        label.textContent = `上次没成功：${error.message || '未知原因'}${error.detail ? '（' + error.detail + '）' : ''}`
+      } else {
+        label.textContent = `未下载 · 需要 ${status.modelBytesText}（SenseVoice-small + silero VAD）`
+      }
+      if (status.partialBytes > 0 && state !== 'ready') {
+        label.textContent += ` · 已下载 ${status.partialBytesText}（可续传）`
+      }
+
+      progressWrap.hidden = state !== 'downloading'
+      if (progress) progressFill.style.width = Math.max(0, Math.min(100, progress.percent)) + '%'
+
+      downloadButton.hidden = state === 'ready' || state === 'downloading'
+      downloadButton.textContent = status.partialBytes > 0 ? '继续下载' : '下载模型'
+      cancelButton.hidden = state !== 'downloading'
+      removeButton.hidden = state !== 'ready' && !status.partialBytes
+      cacheLine.textContent = `缓存：${status.cache.entries} 条 · ${status.cache.bytesText}（上限 ${status.cache.limitEntries} 条 / ${formatBytes(status.cache.limitBytes)}）`
+    }
+
+    const refresh = async () => {
+      try {
+        paint(await remote.aiSubtitles.status())
+      } catch (error) {
+        label.textContent = `读不到模型状态：${error && error.message}`
+      }
+    }
+
+    downloadButton.addEventListener('click', () => {
+      refresh()
+      remote.aiSubtitles.download({}).then(refresh).catch((error) => {
+        toast({ message: `下载失败：${error && error.message}`, type: 'error' })
+      })
+    })
+    cancelButton.addEventListener('click', () => { remote.aiSubtitles.cancel().then(refresh) })
+    removeButton.addEventListener('click', () => {
+      remote.aiSubtitles.removeModel().then(() => {
+        toast({ message: '模型已删除（可随时重新下载）', type: 'success' })
+        refresh()
+      })
+    })
+    clearCacheButton.addEventListener('click', () => {
+      remote.aiSubtitles.clearCache().then(() => {
+        toast({ message: '已清空字幕缓存', type: 'success' })
+        refresh()
+      })
+    })
+
+    /* 下载进度事件：只在真的在下载时重画，避免无谓的 DOM 抖动 */
+    if (typeof remote.aiSubtitles.onProgress === 'function') {
+      remote.aiSubtitles.onProgress((payload) => {
+        if (!payload) return
+        label.textContent = payload.state === 'downloading'
+          ? `正在下载 ${Math.round(payload.percent)}% · ${formatBytes(payload.received)} / ${formatBytes(payload.total)}${payload.speed ? ' · ' + formatBytes(payload.speed) + '/s' : ''}`
+          : label.textContent
+        progressWrap.hidden = payload.state !== 'downloading'
+        progressFill.style.width = Math.max(0, Math.min(100, payload.percent)) + '%'
+        downloadButton.hidden = payload.state === 'downloading'
+        cancelButton.hidden = payload.state !== 'downloading'
+      })
+    }
+    if (typeof remote.aiSubtitles.onDone === 'function') {
+      remote.aiSubtitles.onDone((payload) => {
+        if (payload && payload.ok === false && payload.error) {
+          toast({ message: `模型下载失败：${payload.error.message}`, type: 'error' })
+        }
+        refresh()
+      })
+    }
+
+    refresh()
+
+    scroll.appendChild(group('AI 字幕', [
+      row({
+        title: 'AI 字幕（本地）',
+        sub: '用本机模型把歌声识别成歌词，完全离线。默认关闭：打开后才会下载模型、才会在歌词页出现「生成」。'
+          + '模型来源：HuggingFace 上的 SenseVoice-small（int8，229 MB）+ silero VAD；'
+          + '运行时 sherpa-onnx（Apache-2.0）。识别在独立进程里跑，下载或识别失败都不会影响播放。',
+        control: switchControl(settings.aiSubtitles === true, (value) => actions.setSetting({ aiSubtitles: value }))
+      }),
+      row({
+        title: '识别模型',
+        sub: '「下载」把三个文件写进「用户数据目录/ai-subtitles/models」，校验 SHA256 通过才算就绪；'
+          + '断网或取消后可以续传，不会重下已经收到的部分。',
+        control: h('div', { class: 'settings__row-control ai-subtitles__controls' },
+          downloadButton, cancelButton, removeButton
+        )
+      }),
+      row({
+        title: '模型状态',
+        control: h('div', { class: 'settings__row-control ai-subtitles__status-wrap' }, label, progressWrap)
+      }),
+      row({
+        title: '字幕缓存',
+        sub: '识别结果按「路径 + 修改时间 + 模型指纹」缓存，同一首歌第二次直接命中、不再识别。',
+        control: h('div', { class: 'settings__row-control ai-subtitles__controls' }, cacheLine, clearCacheButton)
+      })
+    ]))
+  }
+  scroll.appendChild(group('歌词', [
       row({
         title: '搜索到歌词时跳到那一句',
         sub: '在「含歌词等」范围里搜到的歌，点开时自动跳到歌词命中的那一句（在结果里悬停可以看到是哪一句）',
