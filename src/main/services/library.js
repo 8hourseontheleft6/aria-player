@@ -8,6 +8,7 @@ const { isAudioFile } = require('../util/mime')
 const { walkFiles, findNamedImage, listDirIndex, invalidateDirIndex } = require('../util/files')
 const { readMetadata, readEmbeddedArtwork } = require('./metadata')
 const { decodeTextBuffer } = require('../util/text')
+const { writeJsonAtomic } = require('../util/atomic-json')
 
 const CACHE_VERSION = 3
 const SCAN_CONCURRENCY = 6
@@ -52,12 +53,11 @@ function createLibraryService (ctx) {
 
   async function saveCache () {
     try {
-      await fsp.mkdir(path.dirname(cacheFile), { recursive: true })
-      await fsp.writeFile(cacheFile, JSON.stringify({
+      await writeJsonAtomic(cacheFile, {
         version: CACHE_VERSION,
         scannedAt,
         tracks
-      }), 'utf8')
+      })
     } catch (err) {
       console.error('[library] 缓存写入失败:', err)
     }

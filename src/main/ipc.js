@@ -3,10 +3,12 @@
 const { ipcMain, BrowserWindow, app, globalShortcut, nativeTheme, shell, dialog } = require('electron')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
+const { publicSettings } = require('./services/settings')
 
 /** 主 -> 渲染的频道白名单（preload 也依赖这份清单，保持同步） */
 const EVENT_CHANNELS = [
   'settings:changed',
+  'settings:save-error',
   'library:scan-progress',
   'library:watch-update',
   'library:watch-error',
@@ -80,20 +82,23 @@ function registerIpc (ctx) {
   /** @type {Map<string, Function>} */
   const handlers = {
     /* ---------- 设置 ---------- */
-    'settings:get': () => settings.get(),
-    'settings:set': (_event, patch) => {
-      const next = settings.set(patch || {})
+    'settings:get': () => publicSettings(settings.get()),
+    'settings:set': async (_event, patch) => {
+      settings.set(patch || {})
+      await settings.flush()
       if (patch && Object.prototype.hasOwnProperty.call(patch, 'theme')) {
         require('./window').applyTheme(ctx, patch.theme)
       }
       if (patch && Object.prototype.hasOwnProperty.call(patch, 'globalMediaKeys')) {
         registerMediaKeys(ctx)
       }
-      return next
+      return publicSettings(settings.get())
     },
-    'settings:reset': () => {
+    'settings:reset': async () => {
       const { DEFAULTS } = require('./services/settings')
-      return settings.set({ ...DEFAULTS, window: settings.get().window, folders: settings.get().folders })
+      settings.set({ ...DEFAULTS, window: settings.get().window, folders: settings.get().folders })
+      await settings.flush()
+      return publicSettings(settings.get())
     },
 
     /* ---------- 资料库 ---------- */
@@ -403,7 +408,8 @@ function registerIpc (ctx) {
 
   /* ---------- 主进程事件 -> 渲染层 ---------- */
   const forwarders = [
-    ['settings:changed', (payload) => broadcast('settings:changed', payload)],
+    ['settings:changed', (payload) => broadcast('settings:changed', publicSettings(payload))],
+    ['settings:save-error', (payload) => broadcast('settings:save-error', payload)],
     ['library:scan-progress', (payload) => broadcast('library:scan-progress', payload)],
     ['ai-subtitles:progress', (payload) => broadcast('ai-subtitles:progress', payload)],
     ['ai-subtitles:done', (payload) => broadcast('ai-subtitles:done', payload)],

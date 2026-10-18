@@ -18,7 +18,8 @@ function createStub () {
       get: unavailable('读取设置'),
       set: unavailable('写入设置'),
       reset: unavailable('重置设置'),
-      onChanged: noop
+      onChanged: noop,
+      onSaveError: noop
     },
     library: {
       state: unavailable('读取资料库'),
