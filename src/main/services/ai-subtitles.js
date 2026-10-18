@@ -19,7 +19,7 @@ const fsp = require('node:fs/promises')
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
-const { app, net } = require('electron')
+const { app, net, utilityProcess } = require('electron')
 
 const {
   MODEL_FILES,
@@ -29,9 +29,18 @@ const {
   sourceById,
   fileUrl,
   formatBytes,
+  cacheKeyOf,
   totalModelBytes,
   modelFingerprint
 } = require('./ai-subtitles-constants')
+const { toLrc, parseLrc } = require('./subtitles-format')
+
+/*
+ * 自检用的假识别器开关（ARIA_AI_SUBTITLE_FAKE=1）：不要求 228MB 真模型在盘上，
+ * 这样整条链路（分块 IPC → worker → 合并 → LRC → 缓存）都能被验到。只有这个环境变量
+ * 存在时才会走假识别器，正常用户永远走真的 —— 见 workers/asr-worker.js。
+ */
+const FAKE_MODE = process.env.ARIA_AI_SUBTITLE_FAKE === '1'
 
 const RETRY_LIMIT = 3
 const PROGRESS_INTERVAL_MS = 250
@@ -424,8 +433,215 @@ function createAiSubtitlesService (ctx) {
     }
   }
 
+  /* ==================== 阶段 3：转写编排 ==================== */
+
+  /** 分块收到的 PCM（渲染层解好的 16k 单声道 Int16） */
+  let audio = { chunks: [], sampleRate: 16000 }
+  /** 正在跑的 worker */
+  let worker = null
+  let transcribeCancelled = false
+
+  function resetAudio () {
+    audio = { chunks: [], sampleRate: 16000 }
+  }
+
+  /** 渲染层分块送 PCM：不攒在渲染层，避免一次性把几分钟音频塞进一个 IPC 消息 */
+  function pushAudio ({ index, total, sampleRate, data }) {
+    audio.sampleRate = Number(sampleRate) || 16000
+    audio.chunks[Number(index) || 0] = Buffer.from(String(data || ''), 'base64')
+    return { received: audio.chunks.filter(Boolean).length, total: Number(total) || 0 }
+  }
+
+  function audioSeconds () {
+    const bytes = audio.chunks.filter(Boolean).reduce((sum, chunk) => sum + chunk.length, 0)
+    return bytes / 2 / (audio.sampleRate || 16000)
+  }
+
+  async function cacheFile (key) {
+    return path.join(cacheDir(), key + '.json')
+  }
+
+  async function readCache (key) {
+    try {
+      const raw = await fsp.readFile(await cacheFile(key), 'utf8')
+      const parsed = JSON.parse(raw)
+      if (!parsed || !Array.isArray(parsed.segments)) return null
+      return parsed
+    } catch {
+      return null
+    }
+  }
+
+  /** 写缓存并顺手做容量控制（200 条 / 20MB，超了删最旧的） */
+  async function writeCache (key, payload) {
+    await fsp.mkdir(cacheDir(), { recursive: true })
+    await fsp.writeFile(await cacheFile(key), JSON.stringify(payload), 'utf8')
+    await pruneCache()
+    return await cacheInfo()
+  }
+
+  async function pruneCache () {
+    let names = []
+    try {
+      names = (await fsp.readdir(cacheDir())).filter((name) => name.endsWith('.json'))
+    } catch {
+      return
+    }
+    const items = []
+    for (const name of names) {
+      const full = path.join(cacheDir(), name)
+      const stat = await fsp.stat(full).catch(() => null)
+      if (!stat) continue
+      items.push({ full, bytes: stat.size, mtime: stat.mtimeMs })
+    }
+    /* 先按条数删，再按体积删；都从最旧开始 */
+    items.sort((a, b) => a.mtime - b.mtime)
+    let totalBytes = items.reduce((sum, item) => sum + item.bytes, 0)
+    let count = items.length
+    for (const item of items) {
+      if (count <= CACHE_LIMIT_ENTRIES && totalBytes <= CACHE_LIMIT_BYTES) break
+      await fsp.rm(item.full, { force: true }).catch(() => {})
+      count--
+      totalBytes -= item.bytes
+    }
+  }
+
+  /**
+   * 转写一首歌。
+   * 命中缓存就直接返回（同一首歌不应该重复识别）；否则起 utilityProcess 跑，
+   * 跑完（或取消）**立刻 kill 进程** —— spike 里量到识别器常驻要 300MB，且没有 free()。
+   */
+  async function transcribe ({ path: trackPath, mtime, model }) {
+    const key = cacheKeyOf({ path: trackPath, mtime, model: model || modelFingerprint() })
+    if (!key) return { ok: false, code: 'no-cache-key' }
+    const cached = await readCache(key)
+    if (cached) {
+      resetAudio()
+      return {
+        ok: true,
+        fromCache: true,
+        lrc: cached.lrc,
+        segments: cached.segments,
+        usedVad: cached.usedVad !== false,
+        estimatedTimeline: cached.estimatedTimeline === true
+      }
+    }
+    if (!FAKE_MODE && !(await allReady())) {
+      resetAudio()
+      return { ok: false, code: 'model-missing' }
+    }
+    if (worker) return { ok: false, code: 'busy' }
+
+    transcribeCancelled = false
+    const paths = { model: modelPath(MODEL_FILES[0]), tokens: modelPath(MODEL_FILES[1]), vad: modelPath(MODEL_FILES[2]) }
+    const samplesBase64 = Buffer.concat(audio.chunks.filter(Boolean)).toString('base64')
+    const seconds = audioSeconds()
+    resetAudio()
+
+    const workerFile = path.join(__dirname, '..', 'workers', 'asr-worker.js')
+    emit('ai-subtitles:transcribe-progress', { stage: 'starting', done: 0, total: 1 })
+
+    return await new Promise((resolve) => {
+      let settled = false
+      const finish = (payload) => {
+        if (settled) return
+        settled = true
+        if (worker) {
+          try { worker.kill() } catch { /* 已经退出 */ }
+          worker = null
+        }
+        resolve(payload)
+      }
+
+      try {
+        worker = utilityProcess.fork(workerFile, [], {
+          serviceName: 'aria-asr',
+          stdio: 'ignore',
+          env: { ...process.env }
+        })
+      } catch (err) {
+        finish({ ok: false, code: 'worker-failed', message: String(err && err.message) })
+        return
+      }
+
+      worker.on('message', async (message) => {
+        if (!message) return
+        if (message.type === 'progress') {
+          emit('ai-subtitles:transcribe-progress', { stage: 'recognizing', done: message.done, total: message.total })
+          return
+        }
+        if (message.type === 'error') {
+          emit('ai-subtitles:transcribe-done', { ok: false, error: message })
+          finish({ ok: false, code: message.code || 'recognize-failed', message: message.message })
+          return
+        }
+        if (message.type === 'result') {
+          const segments = Array.isArray(message.segments) ? message.segments : []
+          if (!segments.length) {
+            emit('ai-subtitles:transcribe-done', { ok: true, empty: true })
+            finish({ ok: true, empty: true, segments: [], lrc: '[ai]' })
+            return
+          }
+          const lrc = toLrc(segments)
+          /* 等缓存真的落盘再返回：否则调用方紧接着查缓存会读到 0 条 */
+          await writeCache(key, {
+            key,
+            path: trackPath || '',
+            mtime: mtime == null ? '' : mtime,
+            model: model || modelFingerprint(),
+            segments,
+            lrc,
+            usedVad: message.usedVad !== false,
+            estimatedTimeline: message.estimatedTimeline === true,
+            createdAt: Date.now(),
+            audioSeconds: message.audioSeconds || seconds,
+            recognizedLines: parseLrc(lrc).length
+          })
+          emit('ai-subtitles:transcribe-done', { ok: true, lines: segments.length })
+          finish({
+            ok: true,
+            fromCache: false,
+            lrc,
+            segments,
+            usedVad: message.usedVad !== false,
+            estimatedTimeline: message.estimatedTimeline === true,
+            elapsedMs: message.elapsedMs || 0,
+            audioSeconds: message.audioSeconds || seconds
+          })
+        }
+      })
+      worker.on('exit', (code) => {
+        if (!settled) finish({ ok: false, code: transcribeCancelled ? 'cancelled' : 'worker-exited', message: 'code ' + code })
+      })
+
+      worker.postMessage({
+        type: 'transcribe',
+        model: paths.model,
+        tokens: paths.tokens,
+        vad: paths.vad,
+        sampleRate: audio.sampleRate || 16000,
+        samples: samplesBase64,
+        options: {}
+      })
+    })
+  }
+
+  /** 取消转写：直接 kill 进程（sherpa 没有 free()） */
+  function cancelTranscribe () {
+    transcribeCancelled = true
+    if (!worker) return { cancelled: false }
+    try { worker.kill() } catch { /* 已经退出 */ }
+    worker = null
+    resetAudio()
+    emit('ai-subtitles:transcribe-done', { ok: false, error: { code: 'cancelled', message: '已取消' } })
+    return { cancelled: true }
+  }
+
   return {
     status,
+    pushAudio,
+    transcribe,
+    cancelTranscribe,
     download,
     cancel,
     removeModel,

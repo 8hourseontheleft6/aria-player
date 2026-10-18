@@ -15,6 +15,8 @@ const EVENT_CHANNELS = [
   'theme:changed',
   /* AI 字幕：下载进度 / 完成（player 档才有） */
   'ai-subtitles:progress',
+  'ai-subtitles:transcribe-progress',
+  'ai-subtitles:transcribe-done',
   'ai-subtitles:done',
   /* player 档位：双击文件 / 拖到 Dock / 第二个实例带来的曲目 */
   'opened:incoming'
@@ -327,7 +329,10 @@ function registerIpc (ctx) {
           'ai-subtitles:cancel': () => ctx.get('aiSubtitles').cancel(),
           'ai-subtitles:remove-model': () => ctx.get('aiSubtitles').removeModel(),
           'ai-subtitles:cache-info': () => ctx.get('aiSubtitles').cacheInfo(),
-          'ai-subtitles:clear-cache': () => ctx.get('aiSubtitles').clearCache()
+          'ai-subtitles:clear-cache': () => ctx.get('aiSubtitles').clearCache(),
+          'ai-subtitles:push-audio': (_event, payload) => ctx.get('aiSubtitles').pushAudio(payload || {}),
+          'ai-subtitles:transcribe': (_event, payload) => ctx.get('aiSubtitles').transcribe(payload || {}),
+          'ai-subtitles:cancel-transcribe': () => ctx.get('aiSubtitles').cancelTranscribe()
         }
       : {}),
     ...(ctx.has('openedFiles')
@@ -399,6 +404,8 @@ function registerIpc (ctx) {
     ['library:scan-progress', (payload) => broadcast('library:scan-progress', payload)],
     ['ai-subtitles:progress', (payload) => broadcast('ai-subtitles:progress', payload)],
     ['ai-subtitles:done', (payload) => broadcast('ai-subtitles:done', payload)],
+    ['ai-subtitles:transcribe-progress', (payload) => broadcast('ai-subtitles:transcribe-progress', payload)],
+    ['ai-subtitles:transcribe-done', (payload) => broadcast('ai-subtitles:transcribe-done', payload)],
     ['library:watch-update', (payload) => broadcast('library:watch-update', payload)],
     ['library:watch-error', (payload) => broadcast('library:watch-error', payload)]
   ]

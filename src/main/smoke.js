@@ -1138,6 +1138,74 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       `取消后 state=${aiSubtitles.afterCancelState}（${aiSubtitles.afterCancelCode}）；` +
       `删除模型 removed=${aiSubtitles.removed} → state=${aiSubtitles.finalState}、残留 .part=${aiSubtitles.finalPartial} B`)
 
+  /*
+   * AI 字幕：转写链路（阶段 3）。
+   * 用 `ARIA_AI_SUBTITLE_FAKE=1` 的假识别器跑完整条链 —— 不依赖 228MB 真模型：
+   * 分块推 PCM → utilityProcess → 合并 → LRC → 写缓存 → **再来一次应命中缓存**。
+   * 没有开假识别器时这条会跳过（报"未启用"而不是红）。
+   */
+  const transcribeChain = await evaluate(win, `
+    const ai = window.aria && window.aria.aiSubtitles
+    if (!ai) return { missing: true }
+    await ai.clearCache()
+    const total = 4
+    for (let i = 0; i < total; i++) {
+      /* 每块 0.5 秒静音（16k 单声道 Int16） */
+      const samples = new Int16Array(8000)
+      const bytes = new Uint8Array(samples.buffer)
+      let binary = ""
+      for (let k = 0; k < bytes.length; k += 0x8000) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000))
+      }
+      await ai.pushAudio({ index: i, total, sampleRate: 16000, data: btoa(binary) })
+    }
+    const first = await ai.transcribe({ path: "C:/smoke/ai-subtitles-probe.mp3", mtime: 1700000000 })
+    const afterFirst = await ai.cacheInfo()
+    /* 同一首再来一次：必须命中缓存，且不再跑识别 */
+    for (let i = 0; i < total; i++) {
+      const samples = new Int16Array(8000)
+      const bytes = new Uint8Array(samples.buffer)
+      let binary = ""
+      for (let k = 0; k < bytes.length; k += 0x8000) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000))
+      }
+      await ai.pushAudio({ index: i, total, sampleRate: 16000, data: btoa(binary) })
+    }
+    const second = await ai.transcribe({ path: "C:/smoke/ai-subtitles-probe.mp3", mtime: 1700000000 })
+    const idleCancel = await ai.cancelTranscribe()
+    const cleared = await ai.clearCache()
+    return {
+      missing: false,
+      firstOk: first.ok,
+      firstCode: first.code || "",
+      fromCacheFirst: first.fromCache === true,
+      lines: Array.isArray(first.segments) ? first.segments.length : -1,
+      lrcHead: String(first.lrc || "").split("\\n")[0],
+      estimated: first.estimatedTimeline === true,
+      cacheAfterFirst: afterFirst.entries,
+      fromCacheSecond: second.fromCache === true,
+      sameLrc: String(second.lrc || "") === String(first.lrc || ""),
+      idleCancel: idleCancel.cancelled,
+      clearedEntries: cleared.entries
+    }`)
+  record('AI 字幕：转写链路（分块 PCM → worker → 合并 → LRC → 缓存命中）',
+    transcribeChain.missing !== true &&
+    (transcribeChain.firstOk === true
+      /* 没开假识别器时：要么没模型（跳过），要么真识别成功 */
+      ? (transcribeChain.lines >= 1 &&
+         transcribeChain.lrcHead === "[ai]" &&
+         transcribeChain.cacheAfterFirst === 1 &&
+         transcribeChain.fromCacheSecond === true &&
+         transcribeChain.sameLrc === true &&
+         transcribeChain.idleCancel === false &&
+         transcribeChain.clearedEntries === 0)
+      : transcribeChain.firstCode === 'model-missing'),
+    `首次：ok=${transcribeChain.firstOk}${transcribeChain.firstCode ? '（' + transcribeChain.firstCode + '）' : ''}、` +
+      `行数 ${transcribeChain.lines}、首行「${transcribeChain.lrcHead}」、时间轴为估算=${transcribeChain.estimated}；` +
+      `缓存 ${transcribeChain.cacheAfterFirst} 条；第二次 fromCache=${transcribeChain.fromCacheSecond}、LRC 一致=${transcribeChain.sameLrc}；` +
+      `空转点取消 accepted=${transcribeChain.idleCancel}（应为 false）；清缓存后 ${transcribeChain.clearedEntries} 条`)
+
+
   /* ② 资料库 / 在线 / 歌词 / 监听这些能力**不存在**（不是"存在但关掉了"） */
   const forbidden = ['library', 'lyrics', 'online', 'ai', 'musicSources', 'tray', 'watcher', 'background']
   const present = forbidden.filter((name) => ctx.has(name))

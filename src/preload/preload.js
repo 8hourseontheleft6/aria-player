@@ -113,6 +113,11 @@ contextBridge.exposeInMainWorld('aria', {
         removeModel: () => ipcRenderer.invoke('ai-subtitles:remove-model'),
         cacheInfo: () => ipcRenderer.invoke('ai-subtitles:cache-info'),
         clearCache: () => ipcRenderer.invoke('ai-subtitles:clear-cache'),
+        pushAudio: (payload) => ipcRenderer.invoke('ai-subtitles:push-audio', payload),
+        transcribe: (payload) => ipcRenderer.invoke('ai-subtitles:transcribe', payload),
+        cancelTranscribe: () => ipcRenderer.invoke('ai-subtitles:cancel-transcribe'),
+        onTranscribeProgress: (handler) => on('ai-subtitles:transcribe-progress', handler),
+        onTranscribeDone: (handler) => on('ai-subtitles:transcribe-done', handler),
         onProgress: (handler) => on('ai-subtitles:progress', handler),
         onDone: (handler) => on('ai-subtitles:done', handler)
       }
