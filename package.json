@@ -44,7 +44,8 @@
     "dist:unified:mac": "electron-builder --config electron-builder.unified.yml --mac --publish never"
   },
   "dependencies": {
-    "music-metadata": "^11.9.0"
+    "music-metadata": "^11.9.0",
+    "sherpa-onnx-node": "^1.13.8"
   },
   "devDependencies": {
     "electron": "43.7.9",
