@@ -538,7 +538,13 @@ function createAiSubtitlesService (ctx) {
     const seconds = audioSeconds()
     resetAudio()
 
-    const workerFile = path.join(__dirname, '..', 'workers', 'asr-worker.js')
+    /*
+     * worker 脚本的路径：打包后它在 app.asar.unpacked 里（见 electron-builder.base.yml 的 asarUnpack）。
+     * 不能用 __dirname 拼 —— 那会指到 asar 内部，utilityProcess 按真实路径加载不了。
+     */
+    const workerFile = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'src', 'main', 'workers', 'asr-worker.js')
+      : path.join(__dirname, '..', 'workers', 'asr-worker.js')
     emit('ai-subtitles:transcribe-progress', { stage: 'starting', done: 0, total: 1 })
 
     return await new Promise((resolve) => {

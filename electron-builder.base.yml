@@ -17,6 +17,9 @@ asar: true
 asarUnpack:
   - node_modules/sherpa-onnx-node/**
   - node_modules/sherpa-onnx-*/**
+  # utilityProcess 要按真实路径 fork 脚本，脚本又 require 同目录的纯函数 —— 一起解出来
+  - src/main/workers/**
+  - src/main/services/**
 
 files:
   - src/**/*
