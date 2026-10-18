@@ -544,6 +544,27 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     store.select((state) => (state.settings && state.settings.aiSubtitles ? '1' : '0'), () => render())
   }
 
+  /*
+   * 切歌、关面板都要中止识别。
+   *
+   * 不中止的话，用户切到下一首之后，上一个 worker 还在烧 CPU（识别器一次要 300MB），
+   * 而且结果会在切歌之后才回来、把新歌的歌词覆盖掉 —— 两个都是真问题。
+   */
+  const abortAiJob = (reason) => {
+    if (!aiJob) return
+    aiJob.cancelled = true
+    remote.aiSubtitles.cancelTranscribe()
+    if (aiLabel) aiLabel.textContent = reason
+    if (aiCancel) aiCancel.hidden = true
+  }
+
+  bus.on(EVENTS.TRACK_CHANGED, () => abortAiJob('已切歌，识别中止'))
+  if (typeof store.select === 'function') {
+    store.select((state) => (state.ui && state.ui.nowPlayingOpen ? '1' : '0'), (value) => {
+      if (value === '0') abortAiJob('已收起播放页，识别中止')
+    })
+  }
+
   bus.on(EVENTS.LYRICS_LOADED, () => {
     userScrolling = false
     scroller.classList.remove('is-user-scrolling')
