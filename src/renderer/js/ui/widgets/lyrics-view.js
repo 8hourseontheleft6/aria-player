@@ -628,15 +628,17 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
    * 进度事件：下载模型与识别都往同一条进度条上报，不另起 UI。
    * 下载的百分比来自主进程（received/total），识别用的是"第几段/共几段"。
    */
-  if (typeof remote.aiSubtitles.onProgress === 'function') {
-    remote.aiSubtitles.onProgress((payload) => {
+  /* 本体（full 档）没有 remote.aiSubtitles —— 不判空会让整个渲染层起不来 */
+  const aiApi = remote.aiSubtitles || null
+  if (aiApi && typeof aiApi.onProgress === 'function') {
+    aiApi.onProgress((payload) => {
       if (!payload || payload.state !== 'downloading') return
       if (!aiJob) return
       setAiProgress(payload.percent, '下载模型 ' + Math.round(payload.percent) + '%')
     })
   }
-  if (typeof remote.aiSubtitles.onTranscribeProgress === 'function') {
-    remote.aiSubtitles.onTranscribeProgress((payload) => {
+  if (aiApi && typeof aiApi.onTranscribeProgress === 'function') {
+    aiApi.onTranscribeProgress((payload) => {
       if (!payload || !aiJob) return
       if (payload.stage === 'starting') {
         setAiProgress(null, '准备识别…')
