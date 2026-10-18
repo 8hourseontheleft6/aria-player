@@ -8,7 +8,7 @@
  *  · 这里只提供「机制」—— 加载、管理、运行**用户自己放进来的**音源脚本。
  *    本仓库不内置任何指向具体商业音乐服务的音源；没有音源时搜索结果就是空的，
  *    这正是「不添加音源就什么也搜不到」的行为。
- *  · 脚本在 vm 沙箱里执行，只能拿到显式提供的几个能力（request / crypto / zlib /
+ *  · 脚本在独立线程的 QuickJS/WASM 中执行，只能拿到显式提供的能力（request / crypto / zlib /
  *    buffer / URL / 定时器），拿不到 require、fs、process、Electron。
  *  · 音源脚本访问什么服务、是否合规，由使用者自己负责。
  *
@@ -54,12 +54,10 @@ const { app, net } = require('electron')
 const fsp = require('node:fs/promises')
 const fsSync = require('node:fs')
 const path = require('node:path')
-const vm = require('node:vm')
 const { spawn } = require('node:child_process')
-const crypto = require('node:crypto')
-const zlib = require('node:zlib')
 const { Buffer } = require('node:buffer')
 const nodeStream = require('node:stream')
+const { createSourceRuntime } = require('./source-runtime')
 
 const USER_AGENT = 'Aria/0.0.0-dev (local music player)'
 const SEARCH_TIMEOUT = 15000
@@ -68,6 +66,7 @@ const SOURCE_LOAD_TIMEOUT = 4000
 /** LX 脚本可能在初始化时先请求自己的接口再发 inited，所以要等一会儿 */
 const LX_INIT_WAIT = 8000
 const MAX_RESULTS_PER_SOURCE = 40
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 /** 文件名 → 稳定的音源 id */
 function toId (file) {
@@ -96,11 +95,15 @@ function createRequest (getSignal, defaultTimeout = 12000) {
       target += (target.includes('?') ? '&' : '?') + search.toString()
     }
 
+    const parsedUrl = new URL(target)
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('音源只允许请求 http(s) 地址')
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeout)
+    const boundedTimeout = Math.max(1, Math.min(30000, Number(timeout) || defaultTimeout))
+    const timer = setTimeout(() => controller.abort(), boundedTimeout)
     const external = getSignal()
     const onAbort = () => controller.abort()
-    if (external) external.addEventListener('abort', onAbort, { once: true })
+    if (external?.aborted) controller.abort()
+    else if (external) external.addEventListener('abort', onAbort, { once: true })
 
     try {
       const response = await net.fetch(target, {
@@ -111,7 +114,23 @@ function createRequest (getSignal, defaultTimeout = 12000) {
           : (typeof body === 'string' ? body : JSON.stringify(body)),
         signal: controller.signal
       })
-      const buffer = Buffer.from(await response.arrayBuffer())
+      if (Number(response.headers.get('content-length')) > MAX_RESPONSE_BYTES) {
+        controller.abort()
+        throw new Error('音源响应超过 4 MiB')
+      }
+      const chunks = []
+      let received = 0
+      if (response.body) {
+        for await (const chunk of response.body) {
+          received += chunk.length
+          if (received > MAX_RESPONSE_BYTES) {
+            controller.abort()
+            throw new Error('音源响应超过 4 MiB')
+          }
+          chunks.push(Buffer.from(chunk))
+        }
+      }
+      const buffer = Buffer.concat(chunks)
       const type = response.headers.get('content-type') || ''
       let parsed = null
       if (responseType === 'json' || (responseType === 'auto' && type.includes('json'))) {
@@ -143,6 +162,10 @@ function createMusicSourcesService (ctx) {
 
   /** @type {Map<string, { id, file, name, description, version, module, error, mtimeMs }>} */
   const loaded = new Map()
+  ctx.onCleanup(() => {
+    for (const entry of loaded.values()) entry.runtime?.close()
+    loaded.clear()
+  })
   let loadedOnce = false
   /** 每个音源的调用统计（本次会话内；用来在设置里看哪个音源好用） */
   const stats = { calls: {}, downloads: 0 }
@@ -184,131 +207,11 @@ function createMusicSourcesService (ctx) {
     return dir
   }
 
-  /**
-   * 把脚本代码装进沙箱并执行，拿到它的 module.exports。
-   *
-   * 同时提供一套 **LX Music 自定义源兼容宿主**：LX 的音源脚本不导出对象，
-   * 而是通过全局 `lx` 用事件协议跟宿主通信（文档：
-   * https://lxmusic.toside.cn/desktop/custom-source）。它们第一句通常就是
-   * `const { EVENT_NAMES, request, on, send } = globalThis.lx` ——
-   * 没有这个全局就会直接抛 "Cannot destructure property 'EVENT_NAMES'"。
-   *
-   * 注意（很重要）：按官方规范，LX 音源只负责 `musicUrl` / `lyric` / `pic`，
-   * **不负责搜索**（搜索是 LX 客户端自己用内置源做的）。所以这类脚本在我们这里
-   * 只能当解析器，不会产生搜索结果，界面上会明确标出来。
-   */
-  function evaluate (code, file) {
-    const lxState = {
-      inited: null,
-      handlers: new Map(),
-      errors: []
-    }
-
-    const lxEvents = { request: 'request', inited: 'inited', updateAlert: 'updateAlert' }
-
-    const emitToScript = (event, payload) => {
-      const list = lxState.handlers.get(event) || []
-      return list.map((handler) => handler(payload))
-    }
-
-    const lxHost = {
-      EVENT_NAMES: lxEvents,
-      version: '2.0.0',
-      env: 'desktop',
-      currentScriptInfo: {
-        name: path.basename(file, '.js'),
-        description: '',
-        version: ''
-      },
-      on (event, handler) {
-        if (typeof handler !== 'function') return
-        const list = lxState.handlers.get(event) || []
-        list.push(handler)
-        lxState.handlers.set(event, list)
-      },
-      off (event, handler) {
-        const list = lxState.handlers.get(event) || []
-        lxState.handlers.set(event, list.filter((item) => item !== handler))
-      },
-      send (event, payload) {
-        if (event === lxEvents.inited) lxState.inited = payload || {}
-        return true
-      },
-      // 旧版回调风格：lx.request(url, options, (err, response, body) => {})
-      request (url, options, callback) {
-        const promise = createRequest(() => null)(url, options || {})
-        if (typeof callback === 'function') {
-          promise.then(
-            (response) => callback(null, response, response.body),
-            (err) => callback(err)
-          )
-          return undefined
-        }
-        return promise
-      },
-      utils: {
-        crypto: {
-          createHash: (...args) => crypto.createHash(...args),
-          createHmac: (...args) => crypto.createHmac(...args),
-          randomBytes: (...args) => crypto.randomBytes(...args),
-          md5: (data) => crypto.createHash('md5').update(data).digest('hex'),
-          aesEncrypt: (buffer, mode, key, iv) => {
-            const cipher = crypto.createCipheriv(mode, key, iv)
-            return Buffer.concat([cipher.update(buffer), cipher.final()])
-          },
-          rsaEncrypt: (buffer, key) => crypto.publicEncrypt(key, buffer),
-          randomBytes: (size) => crypto.randomBytes(size)
-        },
-        buffer: {
-          from: (...args) => Buffer.from(...args),
-          bufToString: (buffer, format) => Buffer.from(buffer).toString(format)
-        }
-      }
-    }
-
-    const sandbox = {
-      module: { exports: {} },
-      exports: {},
-      lx: lxHost,
-      console: {
-        log: (...args) => console.log(`[source:${path.basename(file)}]`, ...args),
-        warn: (...args) => console.warn(`[source:${path.basename(file)}]`, ...args),
-        error: (...args) => console.error(`[source:${path.basename(file)}]`, ...args)
-      },
-      Buffer,
-      URL,
-      URLSearchParams,
-      TextDecoder,
-      setTimeout,
-      clearTimeout,
-      setInterval,
-      clearInterval,
-      crypto: {
-        createHash: (...args) => crypto.createHash(...args),
-        createHmac: (...args) => crypto.createHmac(...args),
-        randomBytes: (...args) => crypto.randomBytes(...args),
-        randomUUID: () => crypto.randomUUID()
-      },
-      zlib: {
-        gzipSync: (...args) => zlib.gzipSync(...args),
-        gunzipSync: (...args) => zlib.gunzipSync(...args),
-        inflateSync: (...args) => zlib.inflateSync(...args),
-        deflateSync: (...args) => zlib.deflateSync(...args)
-      },
-      request: createRequest(() => null)
-    }
-    sandbox.global = sandbox
-    sandbox.globalThis = sandbox
-    const context = vm.createContext(sandbox)
-    const script = new vm.Script(code, { filename: file })
-    // timeout 只管同步执行；异步部分由调用方的墙钟超时兜住
-    script.runInContext(context, { timeout: SOURCE_LOAD_TIMEOUT })
-    const exported = sandbox.module.exports
-    const fromModule = exported && typeof exported === 'object' && Object.keys(exported).length > 0
-      ? exported
-      : (sandbox.exports && Object.keys(sandbox.exports).length > 0 ? sandbox.exports : null)
-
-    return { exported: fromModule, lx: lxState }
+  /** QuickJS/WASM 在独立线程中执行；保留 CommonJS 与 LX 兼容接口。 */
+  async function evaluate (code, file) {
+    return createSourceRuntime(code, file,
+      (url, options, signal) => createRequest(() => signal)(url, options),
+      { timeout: SOURCE_LOAD_TIMEOUT })
   }
 
   /** LX 音源声明的子音源（{ key: { name, type, actions, qualitys } }） */
@@ -632,7 +535,8 @@ function createMusicSourcesService (ctx) {
         continue
       }
       const existing = loaded.get(id)
-      if (existing && existing.mtimeMs === Math.round(stat.mtimeMs)) continue
+      if (existing && existing.mtimeMs === Math.round(stat.mtimeMs) && !existing.runtime?.isClosed()) continue
+      existing?.runtime?.close()
 
       const entry = {
         id,
@@ -647,7 +551,8 @@ function createMusicSourcesService (ctx) {
       }
       try {
         const code = await fsp.readFile(file, 'utf8')
-        const result = evaluate(code, file)
+        const result = await evaluate(code, file)
+        entry.runtime = result
         const isModuleStyle = result.exported &&
           (typeof result.exported.search === 'function' || typeof result.exported.resolveUrl === 'function')
         /*
@@ -687,6 +592,7 @@ function createMusicSourcesService (ctx) {
         entry.module = isModuleStyle ? result.exported : null
         entry.lx = result.lx
       } catch (err) {
+        entry.runtime?.close()
         entry.error = String(err?.message || err)
         console.warn(`[sources] ${name} 装载失败：${entry.error}`)
       }
@@ -696,7 +602,10 @@ function createMusicSourcesService (ctx) {
     for (const id of [...loaded.keys()]) {
       const entry = loaded.get(id)
       if (entry?.builtin || entry?.external) continue
-      if (!seen.has(id)) loaded.delete(id)
+      if (!seen.has(id)) {
+        entry.runtime?.close()
+        loaded.delete(id)
+      }
     }
     mountBuiltins()
     mountExternalProviders()
@@ -739,10 +648,11 @@ function createMusicSourcesService (ctx) {
      * 再落盘并走完整的 load()：LX 脚本的 inited 可能是异步来的，
      * 这里必须用和正常运行同一套判断，否则会把能用的脚本拒之门外。
      */
-    const result = evaluate(code, file)
+    const result = await evaluate(code, file)
     const looksModule = result.exported &&
       (typeof result.exported.search === 'function' || typeof result.exported.resolveUrl === 'function')
     const looksLx = Boolean(result.lx?.inited) || (result.lx?.handlers?.get('request')?.length || 0) > 0
+    result.close()
     if (!looksModule && !looksLx) {
       throw new Error(
         '无法识别的音源脚本：既没有导出 { search, resolveUrl }，也没有按 LX 音乐的规范注册 request 处理器'
@@ -768,6 +678,8 @@ function createMusicSourcesService (ctx) {
   async function remove (id) {
     const entry = loaded.get(id)
     if (entry) {
+      if (entry.builtin || entry.external) throw new Error('内置音源和外部搜索器不能作为脚本删除')
+      entry.runtime?.close()
       try {
         await fsp.rm(entry.file, { force: true })
       } catch {
@@ -1030,9 +942,9 @@ function createMusicSourcesService (ctx) {
   async function installFromUrl (url) {
     const target = String(url || '').trim()
     if (!/^https?:\/\//i.test(target)) throw new Error('请填写 http(s) 开头的脚本地址')
-    const response = await net.fetch(target, { headers: { 'User-Agent': USER_AGENT } })
+    const response = await createRequest(() => null)(target, { responseType: 'text' })
     if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`)
-    const text = await response.text()
+    const text = response.body
     if (!text.trim()) throw new Error('链接返回的内容是空的')
     const guessed = decodeURIComponent(target.split('/').pop() || '').split('?')[0] || 'source'
     return install(text, guessed.replace(/\.js$/i, ''))

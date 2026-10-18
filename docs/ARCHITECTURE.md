@@ -22,10 +22,15 @@ aria-player/
 │   │   │   ├── lyrics.js           .lrc 定位与解析
 │   │   │   ├── online.js           LRCLIB / iTunes 在线补全（默认关闭）
 │   │   │   ├── music-sources.js    音源宿主：脚本沙箱 / LX 兼容层 / 外部搜索器 / remote:// 代理
+│   │   │   ├── source-runtime.js   音源工作线程生命周期、请求取消与调用截止时间
 │   │   │   ├── watcher.js          目录监听（防抖 + 扩展名过滤）
 │   │   │   ├── background.js       最小化后释放后台占用，回前台恢复
 │   │   │   └── tray.js             托盘、系统媒体键、任务栏进度
 │   │   ├── util/                   纯函数工具（文件、mime、位图、文本编码）
+│   │   │   └── atomic-json.js      原子替换 JSON 文件与上一版备份
+│   │   ├── workers/               后台任务
+│   │   │   ├── music-source-worker.js  QuickJS/WASM 解释器与受限数据接口
+│   │   │   └── source-environment.js   解释器内部的 CommonJS / LX 兼容环境
 │   │   ├── smoke.js                自检（条数跑 `npm run smoke` 看；含注入渲染层的代码片段）
 │   │   ├── screenshot.js           截图（npm run shots）
 │   │   ├── perf.js                 帧率诊断（npm run perf）
@@ -73,6 +78,7 @@ aria-player/
 │           └── fps.css             帧率浮层
 ├── scripts/
 │   ├── checks/                     静态检查：未用 import / 注入代码语法 / 设计令牌
+│   ├── backend-tests/              无 GUI 回归：IPC、密钥、持久化、缓存与脚本隔离
 │   ├── probes/                     命令行探针：资料库 / 歌词 / 艺人字段（不启 Electron）
 │   └── preview.js                  把截图转成文本预览
 ├── docs/
