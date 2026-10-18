@@ -11,6 +11,7 @@ const {
   audioPathsFrom: audioPathsFromProfile, userDataDirFor
 } = require('./profile')
 const { createSettingsService } = require('./services/settings')
+const { createAiSubtitlesService } = require('./services/ai-subtitles')
 const { createLibraryService } = require('./services/library')
 const { createLyricsService } = require('./services/lyrics')
 const { createOnlineService } = require('./services/online')
@@ -58,6 +59,7 @@ console.log(`[main] 产品 ${product.id}（${product.productName}）× 档位 ${
  */
 const SERVICE_FACTORIES = {
   settings: createSettingsService,
+  aiSubtitles: createAiSubtitlesService,
   library: createLibraryService,
   lyrics: createLyricsService,
   online: createOnlineService,

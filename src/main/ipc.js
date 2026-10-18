@@ -13,6 +13,9 @@ const EVENT_CHANNELS = [
   'window:maximized',
   'media:command',
   'theme:changed',
+  /* AI 字幕：下载进度 / 完成（player 档才有） */
+  'ai-subtitles:progress',
+  'ai-subtitles:done',
   /* player 档位：双击文件 / 拖到 Dock / 第二个实例带来的曲目 */
   'opened:incoming'
 ]
@@ -311,6 +314,22 @@ function registerIpc (ctx) {
       }
     },
 
+    /*
+     * 本机 AI 字幕（player 档专属）：模型下载 / 取消 / 删除 / 缓存。
+     *
+     * 和 opened 一样用条件展开 —— 本体没有这个服务，这些频道就不存在，
+     * 渲染层问一句 window.aria.aiSubtitles 有没有就知道该不该显示入口。
+     */
+    ...(ctx.has('aiSubtitles')
+      ? {
+          'ai-subtitles:status': () => ctx.get('aiSubtitles').status(),
+          'ai-subtitles:download': (_event, payload) => ctx.get('aiSubtitles').download(payload || {}),
+          'ai-subtitles:cancel': () => ctx.get('aiSubtitles').cancel(),
+          'ai-subtitles:remove-model': () => ctx.get('aiSubtitles').removeModel(),
+          'ai-subtitles:cache-info': () => ctx.get('aiSubtitles').cacheInfo(),
+          'ai-subtitles:clear-cache': () => ctx.get('aiSubtitles').clearCache()
+        }
+      : {}),
     ...(ctx.has('openedFiles')
       ? {
           'opened:recent': async () => {
@@ -378,6 +397,8 @@ function registerIpc (ctx) {
   const forwarders = [
     ['settings:changed', (payload) => broadcast('settings:changed', payload)],
     ['library:scan-progress', (payload) => broadcast('library:scan-progress', payload)],
+    ['ai-subtitles:progress', (payload) => broadcast('ai-subtitles:progress', payload)],
+    ['ai-subtitles:done', (payload) => broadcast('ai-subtitles:done', payload)],
     ['library:watch-update', (payload) => broadcast('library:watch-update', payload)],
     ['library:watch-error', (payload) => broadcast('library:watch-error', payload)]
   ]

@@ -101,6 +101,23 @@ contextBridge.exposeInMainWorld('aria', {
     importM3u: (payload) => ipcRenderer.invoke('playlist:import', payload)
   },
 
+  /*
+   * 本机 AI 字幕：只有播放器档有（和 opened 同一个判据 —— 没有资料库的那个档位）。
+   * 本体里这个键是 undefined，界面据此隐藏入口。
+   */
+  aiSubtitles: profile.capabilities && profile.capabilities.library === false
+    ? {
+        status: () => ipcRenderer.invoke('ai-subtitles:status'),
+        download: (payload) => ipcRenderer.invoke('ai-subtitles:download', payload),
+        cancel: () => ipcRenderer.invoke('ai-subtitles:cancel'),
+        removeModel: () => ipcRenderer.invoke('ai-subtitles:remove-model'),
+        cacheInfo: () => ipcRenderer.invoke('ai-subtitles:cache-info'),
+        clearCache: () => ipcRenderer.invoke('ai-subtitles:clear-cache'),
+        onProgress: (handler) => on('ai-subtitles:progress', handler),
+        onDone: (handler) => on('ai-subtitles:done', handler)
+      }
+    : undefined,
+
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),

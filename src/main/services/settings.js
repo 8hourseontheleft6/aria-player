@@ -20,6 +20,11 @@ const DEFAULTS = {
    *   palette —— 由「艺人|专辑」哈希出的稳定配色（不联网、不看封面，颜色一定整齐）。
    */
   tintSource: 'cover',
+  /*
+   * 本机 AI 字幕：默认**关**。开了它才会去下载模型（228MB）、才会在歌词页
+   * 出现「生成」入口 —— 不点头就不下、不联网、不占空间。
+   */
+  aiSubtitles: false,
   volume: 0.85,
   muted: false,
   playbackRate: 1,

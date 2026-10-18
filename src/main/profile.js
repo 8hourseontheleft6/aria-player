@@ -62,7 +62,9 @@ const PROFILES = {
      * 注意这里**没有** library / watcher / online / lyrics —— 少了它们，
      * 资料库扫描、目录监听、在线查图在 player 里根本不存在（而不是"存在但关掉了"）。
      */
-    services: ['settings', 'openedFiles'],
+    /* aiSubtitles：本机 AI 字幕（模型可选下载、完全离线识别）。只有播放器档有 ——
+   * 本体的歌词走「在线补全 / 本地 .lrc」，不需要它。 */
+  services: ['settings', 'openedFiles', 'aiSubtitles'],
     // 一个插件都不注册：没有在线歌词/封面，也没有曲目信息面板
     plugins: [],
     // 三个能力都没有 —— 与上面的 services / plugins 严格对应

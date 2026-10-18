@@ -1071,11 +1071,72 @@ async function runSharedChecks ({ win, record }) {
  */
 async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
   /* ① 主进程挂的服务：一个不多、一个不少 */
-  const expectedServices = ['openedFiles', 'settings']
+  /*
+   * aiSubtitles = 本机 AI 字幕（模型可选下载、识别在本机跑），player 档专属。
+   * 登记在这里的意思是：以后再加服务，必须先证明它确实是这个档位要的。
+   */
+  const expectedServices = ['aiSubtitles', 'openedFiles', 'settings']
   const services = ctx.list().slice().sort()
   record('主进程只挂了本档位的服务（表外的都没被 define）',
     services.join('|') === expectedServices.join('|'),
     `ctx.list() = [${services.join('、')}]（应为 [${expectedServices.join('、')}]）`)
+
+  /*
+   * 本机 AI 字幕（阶段 2：模型管理）—— 只验状态机，**不真下 228MB**。
+   * 走的是真服务（真 IPC、真 userData 目录），只把「真的下完」这一步省掉：
+   * 未下载 → 下载（1.2 秒后取消，.part 留着供续传）→ 删除（回到未下载，.part 也要清）。
+   */
+  const aiSubtitles = await evaluate(win, `
+    const ai = window.aria && window.aria.aiSubtitles
+    if (!ai) return { missing: true }
+    await ai.removeModel()
+    const before = await ai.status()
+    const idleCancel = await ai.cancel()
+    const cleared = await ai.clearCache()
+    await ai.download({})
+    await new Promise((r) => setTimeout(r, 1200))
+    const mid = await ai.status()
+    const cancelled = await ai.cancel()
+    await new Promise((r) => setTimeout(r, 600))
+    const afterCancel = await ai.status()
+    const removed = await ai.removeModel()
+    const final = await ai.status()
+    return {
+      missing: false,
+      beforeState: before.state,
+      modelBytes: before.modelBytes,
+      partialBefore: before.partialBytes,
+      cacheBefore: before.cache.entries,
+      idleCancelled: idleCancel.cancelled,
+      clearedEntries: cleared.entries,
+      midState: mid.state,
+      cancelAccepted: cancelled.cancelled,
+      afterCancelState: afterCancel.state,
+      afterCancelCode: afterCancel.error ? afterCancel.error.code : "",
+      removed: removed.removed,
+      finalState: final.state,
+      finalPartial: final.partialBytes
+    }`)
+  record('AI 字幕：模型管理的状态机（未下载 → 下载中可取消 → 删除回到未下载）',
+    aiSubtitles.missing !== true &&
+    aiSubtitles.beforeState === 'not-downloaded' &&
+    aiSubtitles.modelBytes === 240193589 &&
+    aiSubtitles.partialBefore === 0 &&
+    aiSubtitles.cacheBefore === 0 &&
+    aiSubtitles.idleCancelled === false &&
+    aiSubtitles.clearedEntries === 0 &&
+    aiSubtitles.midState !== 'ready' &&
+    aiSubtitles.cancelAccepted === (aiSubtitles.midState === 'downloading') &&
+    aiSubtitles.afterCancelState === 'error' &&
+    aiSubtitles.removed === true &&
+    aiSubtitles.finalState === 'not-downloaded' &&
+    aiSubtitles.finalPartial === 0,
+    `未下载时 state=${aiSubtitles.beforeState}、三个模型共 ${aiSubtitles.modelBytes} B、` +
+      `.part=${aiSubtitles.partialBefore} B、缓存 ${aiSubtitles.cacheBefore} 条；` +
+      `空转点取消 accepted=${aiSubtitles.idleCancelled}（应为 false）；清缓存后 ${aiSubtitles.clearedEntries} 条；` +
+      `下载中 state=${aiSubtitles.midState}；点取消 accepted=${aiSubtitles.cancelAccepted}；` +
+      `取消后 state=${aiSubtitles.afterCancelState}（${aiSubtitles.afterCancelCode}）；` +
+      `删除模型 removed=${aiSubtitles.removed} → state=${aiSubtitles.finalState}、残留 .part=${aiSubtitles.finalPartial} B`)
 
   /* ② 资料库 / 在线 / 歌词 / 监听这些能力**不存在**（不是"存在但关掉了"） */
   const forbidden = ['library', 'lyrics', 'online', 'ai', 'musicSources', 'tray', 'watcher', 'background']

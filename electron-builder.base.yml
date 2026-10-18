@@ -11,6 +11,13 @@
 
 asar: true
 
+# .node / .dll 不能从 asar 里 load，必须解出来。
+# sherpa-onnx-node 是 N-API 运行时，平台包（win-x64 22.4MB / darwin-arm64 约 34MB）按
+# os.platform()+os.arch() 动态 require —— 打包时在哪个机器上打，就只会带那个平台的包。
+asarUnpack:
+  - node_modules/sherpa-onnx-node/**
+  - node_modules/sherpa-onnx-*/**
+
 files:
   - src/**/*
   - package.json
