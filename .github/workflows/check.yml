@@ -1,6 +1,6 @@
 name: check
 
-# 只跑**静态**检查（不跑 GUI 自检）。
+# 跑静态检查与无需 GUI 的后端回归（不跑 GUI 自检）。
 #
 # 为什么不跑 smoke：那套自检要在真窗口里跑（Electron 起 GUI、抢单实例锁、挪系统光标），
 # 既需要 GUI 会话，也会因为跑两次互相把对方挡掉 —— CI 里只会得到一堆假红。
@@ -30,6 +30,9 @@ jobs:
 
       - name: 静态检查（13 步）
         run: npm run check
+
+      - name: 后端回归（无需 GUI）
+        run: npm run test:backend
 
       - name: 夹具脚本能跑（不提交产物，只验证它能生成）
         run: npm run fixtures

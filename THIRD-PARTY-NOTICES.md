@@ -9,6 +9,8 @@ Aria 以 MIT 许可发布（见 [LICENSE](LICENSE)）。下面列出**运行时�
 | --- | --- | --- | --- |
 | [Electron](https://www.electronjs.org/) | 桌面运行时（含 Chromium 与 Node.js） | MIT | 安装包里还带着 Chromium / Node.js 的第三方组件与各自的许可，见 Electron 发布包内的 `LICENSES.chromium.html` |
 | [music-metadata](https://github.com/Borewit/music-metadata) | 读取音频标签与内嵌封面 | MIT | 只在主进程使用 |
+| [quickjs-emscripten](https://github.com/justjake/quickjs-emscripten) | 独立工作线程中的音源脚本解释器 | MIT | 包含 QuickJS/QuickJS-ng 与 Emscripten 运行时，依各依赖包附带许可分发 |
+| [buffer](https://github.com/feross/buffer) | 解释器内部的 Buffer 兼容实现 | MIT | 同时使用 MIT 许可的 base64-js、BSD-3-Clause 许可的 ieee754 |
 
 ## 开发/打包工具（不会进安装包）
 

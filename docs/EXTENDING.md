@@ -341,20 +341,28 @@ module.exports = {
 
 ### 沙箱里有什么
 
-脚本跑在 Node 的 `vm` 上下文里，**只有**下面这些：
+每个脚本在独立工作线程的 QuickJS/WASM 解释器中运行；主进程与解释器只交换序列化数据，
+不传入 Node 对象、函数或异常原型。提供下面这些兼容接口：
 
 | 能力 | 说明 |
 | --- | --- |
 | `request(url, options)` | 极简 HTTP 客户端：`{ method, headers, body, params, timeout, responseType }` → `{ status, ok, headers, body, raw }` |
-| `crypto` | `createHash / createHmac / randomBytes / randomUUID` |
+| `crypto` | `createHash / createHmac`（`update / digest`）、`randomBytes / randomUUID` |
 | `zlib` | `gzipSync / gunzipSync / inflateSync / deflateSync` |
 | `Buffer` `URL` `URLSearchParams` `TextDecoder` | 常用内置对象 |
 | `setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` | 定时器 |
-| `console` | 输出会带上 `[source:文件名]` 前缀 |
+| `console` | 提供 `log / warn / error` 空操作，第三方脚本不能向应用日志写任意内容 |
 
 **没有** `require`、`fs`、`process`、Electron API，也拿不到渲染层。
 单次搜索 15 秒、解析地址 20 秒超时；某个音源抛错或超时只影响它自己，
 界面上会把它标成出错、其他音源照常出结果。
+
+每个解释器堆上限 32 MiB，单段同步执行/微任务最多约 1 秒，超时后终止该线程并取消它的网络请求；
+重新加载音源可创建新运行器。脚本上限 2 MiB，HTTP 响应上限 4 MiB，最多同时发出 16 个请求、
+保留 128 个定时器。每秒最多向宿主发送 128 条、合计 16 MiB 的状态/结果/请求消息；
+格式无效或超过限制会关闭该音源。`request` 仅允许 HTTP/HTTPS；它仍可访问本机或内网的 HTTP 服务，
+所以导入脚本前应确认其来源。`TextDecoder` 提供单次解码，暂不支持流式解码。
+外部搜索器是用户配置的本机可执行程序，不经过这层解释器隔离。
 
 ### LX 音乐音源的兼容层
 

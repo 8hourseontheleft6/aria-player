@@ -15,6 +15,8 @@
   },
   "scripts": {
     "start": "electron .",
+    "test:backend": "node scripts/checks/check-backend.js",
+    "test:backend:electron": "electron scripts/checks/check-backend-electron.js",
     "dev": "electron . --dev",
     "smoke": "electron . --smoke",
     "check": "node scripts/checks/check-imports.js && node scripts/checks/check-injected.js && node scripts/checks/check-profiles.js && node scripts/checks/check-styles.js && node scripts/checks/check-contrast.js && node scripts/checks/check-frosted.js && node scripts/checks/check-shots.js && node scripts/checks/check-architecture.js && node scripts/checks/check-mac-source-zip.js && node scripts/checks/check-docs.js && node scripts/checks/check-menu-roles.js && node scripts/checks/check-mac-config.js && node --check src/main/main.js && node scripts/checks/check-ai-subtitles.js",
@@ -44,7 +46,9 @@
     "dist:unified:mac": "electron-builder --config electron-builder.unified.yml --mac --publish never"
   },
   "dependencies": {
+    "buffer": "6.0.3",
     "music-metadata": "^11.9.0",
+    "quickjs-emscripten": "0.32.0",
     "sherpa-onnx-node": "^1.13.8"
   },
   "devDependencies": {
