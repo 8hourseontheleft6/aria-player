@@ -1283,6 +1283,84 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       `空状态动作区=${aiUi.diagEmptyActions}、AI 块=${aiUi.diagAiBlock}、开关=${aiUi.diagEnabledFlag}、API=${aiUi.diagHasApi}、` +
       `空状态文字「${aiUi.diagEmptyText}」`)
 
+  /*
+   * 用户报的 bug：AI 识别「完成」了，但歌词页还是「未找到歌词」什么也不显示。
+   * 根因是只 emit 事件、没把结果写进 store.lyrics（渲染读的是 store）。
+   * 这条从头点一次：打开开关 → 进播放页 → 点「用 AI 生成本地字幕」→ 必须真的出现行和徽章。
+   */
+  /*
+     * 这条需要一个"正在播放的曲目"：player 套件在不带文件启动时列表是空的，
+     * 所以先塞一个 fixture 进去（走产品自己的 handleDrop，不伪造 store）。
+     */
+  const aiFixture = require('node:path').join(__dirname, '..', '..', 'tests', 'player-smoke', 'smoke-open.wav')
+  const aiGenerated = await evaluate(win, `
+    const { actions, store } = window.__aria
+    const dropped = await window.aria.library.handleDrop(${JSON.stringify(aiFixture)})
+    actions.applyDropResult(dropped)
+    await new Promise((r) => setTimeout(r, 1500))
+    await actions.setSetting({ aiSubtitles: false })
+    actions.setView("settings")
+    await new Promise((r) => setTimeout(r, 500))
+    const row = [...document.querySelectorAll(".settings__row")]
+      .find((node) => (node.textContent || "").includes("AI 字幕（本地）"))
+    const toggle = row ? row.querySelector(".switch") : null
+    if (toggle) toggle.click()
+    await new Promise((r) => setTimeout(r, 400))
+
+    actions.openNowPlaying()
+    let clicked = false
+    for (let i = 0; i < 30; i++) {
+      const button = [...document.querySelectorAll("button")]
+        .find((node) => (node.textContent || "").includes("用 AI 生成本地字幕"))
+      if (button) {
+        /* 开始之前：「取消」必须是隐藏的（hidden 被 .btn 覆盖过一次） */
+        const cancelBefore = [...document.querySelectorAll(".lyrics-empty__ai button")]
+          .find((node) => (node.textContent || "").trim() === "取消")
+        const cancelHiddenBefore = cancelBefore ? getComputedStyle(cancelBefore).display === "none" : true
+        button.click()
+        clicked = true
+        window.__aiCancelHiddenBefore = cancelHiddenBefore
+        break
+      }
+      await new Promise((r) => setTimeout(r, 100))
+    }
+
+    /* 等结果真的落到页面上（最多 20 秒；假识别器一般 1~2 秒） */
+    let linesShown = 0
+    let badge = false
+    let stillEmpty = true
+    for (let i = 0; i < 100; i++) {
+      const lyrics = store.get().lyrics
+      linesShown = lyrics && lyrics.lines ? lyrics.lines.length : 0
+      badge = Boolean(document.querySelector(".lyrics__ai-badge"))
+      stillEmpty = (document.querySelector(".lyrics-empty") || {}).textContent ? true : false
+      if (linesShown > 0 && badge) break
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    const renderedLines = document.querySelectorAll(".lyrics__line").length
+    /* 诊断：失败原因写在 data-ai-error 上 */
+    const aiErrorDiag = (document.querySelector(".lyrics-empty") || document.querySelector(".lyrics") || {}).dataset
+      ? ((document.querySelector("[data-ai-error]") || {}).getAttribute ? (document.querySelector("[data-ai-error]").getAttribute("data-ai-error") || "") : "")
+      : ""
+    const disclaimer = (document.querySelector(".lyrics__ai-text") || {}).textContent || ""
+
+    actions.closeNowPlaying()
+    await actions.setSetting({ aiSubtitles: false })
+    actions.setView("songs")
+    await new Promise((r) => setTimeout(r, 300))
+    return { clicked, linesShown, badge, stillEmpty, renderedLines, disclaimer, aiErrorDiag, cancelHiddenBefore: window.__aiCancelHiddenBefore === true }`)
+  record('AI 字幕：点生成之后歌词真的显示出来（行 + 徽章 + 免责）',
+    aiGenerated.clicked === true &&
+    aiGenerated.linesShown > 0 &&
+    aiGenerated.badge === true &&
+    aiGenerated.renderedLines > 0 &&
+    aiGenerated.stillEmpty === false &&
+    aiGenerated.disclaimer.includes("识别可能有误"),
+    `点了生成=${aiGenerated.clicked}；store 里 ${aiGenerated.linesShown} 行、DOM 里 ${aiGenerated.renderedLines} 行；` +
+      `徽章=${aiGenerated.badge}、空状态还在=${aiGenerated.stillEmpty}、免责「${aiGenerated.disclaimer}」；` +
+      `点之前「取消」是隐藏的=${aiGenerated.cancelHiddenBefore}；诊断=${aiGenerated.aiErrorDiag || "（无）"}`)
+
+
 
 
   /* ② 资料库 / 在线 / 歌词 / 监听这些能力**不存在**（不是"存在但关掉了"） */

@@ -785,6 +785,20 @@ html[data-reduce-motion='true'] .now-playing__cover-hint {
   color: var(--label-3);
 }
 
+/* 这一行会随窗口变窄；不换行就会把按钮挤出屏幕（截图里「重新载入」被切掉就是这样） */
+.lyrics-empty__actions {
+  flex-wrap: wrap !important;
+}
+
+/*
+ * 不能只靠 hidden 属性：.btn 自带 display，会把 [hidden] 覆盖掉 ——
+ * 「取消」在没开始识别时也会显示，就是这个原因。
+ */
+.lyrics-empty__ai .btn[hidden],
+.lyrics-empty__ai [hidden] {
+  display: none !important;
+}
+
 .lyrics-empty__ai {
   display: flex;
   align-items: center;

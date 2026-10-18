@@ -185,8 +185,19 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
 
   async function startAiFlow () {
     if (aiJob) return
-    const track = store.get().playback.trackId ? store.get().library.byId.get(store.get().playback.trackId) : null
-    if (!track) return
+    /*
+     * 取当前曲目：先走 byId（资料库档），再退回 tracks 列表按 id 找（播放器档只有"最近打开"的列表）。
+     * 只认 byId 的话，播放器档会返回 undefined —— 用户点了按钮什么也不会发生。
+     */
+    const state = store.get()
+    const trackId = state.playback.trackId
+    const byId = state.library && state.library.byId ? state.library.byId.get(trackId) : null
+    const byList = byId || ((state.library && state.library.tracks) || []).find((item) => item.id === trackId) || null
+    const track = byList
+    if (!track) {
+      element.dataset.aiError = 'no-track:id=' + String(trackId) + ',tracks=' + ((state.library && state.library.tracks && state.library.tracks.length) || 0)
+      return
+    }
     aiJob = { cancelled: false }
     const job = aiJob
     if (aiLabel) aiLabel.textContent = '准备中…'
@@ -194,7 +205,8 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
 
     try {
       const status = await remote.aiSubtitles.status()
-      if (status.state !== 'ready') {
+      /* fake 模式（自检）没有真模型，跳过下载那一步 */
+      if (!status.fake && status.state !== 'ready') {
         setAiBusy(status.state === 'downloading' ? '下载模型…' : '下载模型（229 MB，只需一次）…')
         await remote.aiSubtitles.download({})
         /* 等下载结束：进度事件驱动文案，完成/失败都会走 onDone */
@@ -223,6 +235,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
       })
       if (job.cancelled) return
       if (!result.ok) {
+        element.dataset.aiError = (result.code || '') + ':' + (result.message || '')
         const message = result.code === 'model-missing'
           ? '还没有可用的模型，请先在设置里下载'
           : (result.message || '识别失败')
@@ -230,26 +243,43 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
         return
       }
       if (!result.segments || !result.segments.length) {
+        element.dataset.aiError = 'empty:' + '没识别出歌词'
         toast({ message: '这段音频里没识别出歌词（纯音乐？）', type: 'info' })
         return
       }
+      delete element.dataset.aiError
       const lines = result.segments.map((segment) => ({
         time: Number(segment.start) || 0,
         text: segment.text,
         words: null,
         translation: ''
       }))
-      bus.emit(EVENTS.LYRICS_LOADED, {
-        lines,
-        source: 'ai',
-        estimated: result.estimatedTimeline === true,
-        fromCache: result.fromCache === true
-      })
+      /*
+       * 关键：**先写 store，再 emit**。
+       *
+       * 渲染函数是从 store.get().lyrics 读的（不是从事件载荷里读），
+       * 只 emit 不写 store 的话，页面会重新渲染成"还是没歌词" —— 用户看到的就是
+       * "识别完成了但什么都不显示"。
+       */
+      store.set((state) => ({
+        ...state,
+        lyrics: {
+          ...state.lyrics,
+          status: 'ready',
+          lines,
+          plain: [],
+          source: 'ai',
+          estimated: result.estimatedTimeline === true,
+          fromCache: result.fromCache === true
+        }
+      }))
+      bus.emit(EVENTS.LYRICS_LOADED, { lines })
       toast({
         message: result.fromCache ? '字幕来自缓存' : `已生成 ${lines.length} 行本地字幕`,
         type: 'success'
       })
     } catch (error) {
+      element.dataset.aiError = 'threw:' + ((error && error.message) || error)
       toast({ message: `生成失败：${(error && error.message) || error}`, type: 'error' })
     } finally {
       aiJob = null
@@ -274,7 +304,11 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
         if (aiCancel) aiCancel.hidden = true
       }
     }, '取消')
-    const start = h('button', { class: 'btn btn--primary', type: 'button', onClick: () => startAiFlow() },
+    /*
+     * 用次要按钮（.btn）：这一行里「重新载入」已经是主按钮，
+     * 两个蓝色实心并排会让人不知道点哪个 —— 而且更容易溢出。
+     */
+    const start = h('button', { class: 'btn', type: 'button', onClick: () => startAiFlow() },
       icon('waveform', { className: 'icon icon--stroke' }), '用 AI 生成本地字幕')
     return h('div', { class: 'lyrics-empty__ai' }, start, aiCancel, aiLabel)
   }

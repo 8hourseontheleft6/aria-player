@@ -23,14 +23,16 @@ const FAKE = process.env.ARIA_AI_SUBTITLE_FAKE === '1'
 
 /** 假识别器：给定音频时长产出几行稳定可断言的字幕 */
 function fakeRecognize (audioSeconds) {
-  const lines = []
   const texts = ['这是本地识别的示例字幕', '模型没有下载也能跑通链路', '时间轴来自 token 级时间戳']
-  let cursor = 1.0
-  for (const text of texts) {
-    const end = Math.min(audioSeconds, cursor + 2.2)
-    if (cursor >= audioSeconds) break
-    lines.push({ start: cursor, end, text })
-    cursor = end + 0.4
+  const duration = Math.max(0.6, Number(audioSeconds) || 0)
+  const lines = []
+  /* 至少给一行：自检里丢进去的 fixture 可能只有零点几秒，不能因此返回空 */
+  const count = duration >= 4 ? 2 : 1
+  let cursor = Math.min(0.3, duration * 0.2)
+  for (let i = 0; i < count; i++) {
+    const span = i === count - 1 ? Math.max(0.25, duration - cursor) : Math.min(2.2, duration / count)
+    lines.push({ start: cursor, end: Math.min(duration, cursor + span), text: texts[i % texts.length] })
+    cursor += span
   }
   return { segments: lines, usedVad: true, estimatedTimeline: false, lang: 'zh' }
 }

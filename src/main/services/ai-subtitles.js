@@ -300,6 +300,8 @@ function createAiSubtitlesService (ctx) {
     return {
       state,
       ready,
+      /* 自检用的假识别器在跑（UI 据此跳过 229MB 下载，正常用户永远是 false） */
+      fake: FAKE_MODE,
       modelBytes: totalModelBytes(),
       modelBytesText: formatBytes(totalModelBytes()),
       partialBytes: partBytes.reduce((sum, value) => sum + value, 0),
