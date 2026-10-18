@@ -166,6 +166,11 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
   切不出段时退化成 15–20 秒定窗，界面上会写「时间轴为估算」。
 - 识别结果按「路径 + 修改时间 + 模型指纹」缓存（上限 200 条 / 20 MB），同一首歌第二次直接命中。
 - 模型可以随时「删除模型」清干净；字幕缓存也能一键清空。
+- 两个模型都**不随安装包分发**，只在你点「下载模型」时获取，许可各自独立：
+  SenseVoice-small 用的是 **FunASR MODEL_LICENSE**（自定义模型许可，**不是 OSI 认证的开源许可**，
+  <https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE>）；
+  silero VAD 是 **MIT**（<https://github.com/snakers4/silero-vad/blob/master/LICENSE>）。
+  详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 - 解码用的是浏览器自带的解码器（mp3 / m4a / flac / wav / ogg / opus / aac）；
   wma / aiff 这类解不开的格式会明确告诉你先转格式。
 
