@@ -1090,6 +1090,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
     const ai = window.aria && window.aria.aiSubtitles
     if (!ai) return { missing: true }
     await ai.removeModel()
+    await ai.clearCache()
     const before = await ai.status()
     const idleCancel = await ai.cancel()
     const cleared = await ai.clearCache()
@@ -1256,7 +1257,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
     out.diagLyricsStatus = lyricsState ? lyricsState.status : "null"
     out.diagLines = lyricsState && lyricsState.lines ? lyricsState.lines.length : -1
     out.diagEmptyActions = Boolean(document.querySelector(".lyrics-empty__actions"))
-    out.diagAiBlock = Boolean(document.querySelector(".lyrics-empty__ai"))
+    out.diagAiBlock = Boolean(document.querySelector(".lyrics-empty__ai-progress"))
     out.diagEnabledFlag = window.__aria.store.get().settings.aiSubtitles === true
     out.diagHasApi = Boolean(window.aria && window.aria.aiSubtitles)
     const emptyText = document.querySelector(".lyrics-empty")

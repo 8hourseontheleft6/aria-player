@@ -176,6 +176,8 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
   let aiJob = null
   let aiLabel = null
   let aiCancel = null
+  let aiProgressBar = null
+  let aiProgressFill = null
 
   const aiEnabled = () => aiSubtitlesAvailable() && store.get().settings.aiSubtitles === true
 
@@ -202,6 +204,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     const job = aiJob
     if (aiLabel) aiLabel.textContent = '准备中…'
     if (aiCancel) aiCancel.hidden = false
+    setAiProgress(0, '准备中…')
 
     try {
       const status = await remote.aiSubtitles.status()
@@ -284,14 +287,24 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     } finally {
       aiJob = null
       if (aiCancel) aiCancel.hidden = true
+      if (aiProgressBar) aiProgressBar.hidden = true
       render()
     }
   }
 
-  /** 空状态里的那块 UI：按钮 / 进度文案 / 取消 */
-  function aiBlock () {
+  /** 空状态里的按钮（**只有一颗**，和「重新载入」同一行才不会错位） */
+  function aiStartButton () {
+    if (!aiEnabled()) return null
+    return h('button', { class: 'btn', type: 'button', onClick: () => startAiFlow() },
+      icon('waveform', { className: 'icon icon--stroke' }), '用 AI 生成本地字幕')
+  }
+
+  /** 空状态里的第二行：进度条 + 文案 + 取消（平常是空的，开始后才出现） */
+  function aiStatusRow () {
     if (!aiEnabled()) return null
     aiLabel = h('div', { class: 'lyrics-empty__ai-status', text: '' })
+    const fill = h('div', { class: 'lyrics-empty__ai-bar-fill' })
+    const bar = h('div', { class: 'lyrics-empty__ai-bar', hidden: true }, fill)
     aiCancel = h('button', {
       class: 'btn',
       type: 'button',
@@ -302,15 +315,24 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
         remote.aiSubtitles.cancelTranscribe()
         if (aiLabel) aiLabel.textContent = '已取消'
         if (aiCancel) aiCancel.hidden = true
+        if (bar) bar.hidden = true
       }
     }, '取消')
-    /*
-     * 用次要按钮（.btn）：这一行里「重新载入」已经是主按钮，
-     * 两个蓝色实心并排会让人不知道点哪个 —— 而且更容易溢出。
-     */
-    const start = h('button', { class: 'btn', type: 'button', onClick: () => startAiFlow() },
-      icon('waveform', { className: 'icon icon--stroke' }), '用 AI 生成本地字幕')
-    return h('div', { class: 'lyrics-empty__ai' }, start, aiCancel, aiLabel)
+    aiProgressBar = bar
+    aiProgressFill = fill
+    return h('div', { class: 'lyrics-empty__ai-progress' }, bar, h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, aiLabel, aiCancel))
+  }
+
+  /** 进度：0~100 填条，0 表示"不确定进度"（只显示文案） */
+  function setAiProgress (percent, text) {
+    if (aiLabel && text != null) aiLabel.textContent = text
+    if (!aiProgressBar || !aiProgressFill) return
+    if (percent == null) {
+      aiProgressBar.hidden = true
+      return
+    }
+    aiProgressBar.hidden = false
+    aiProgressFill.style.width = Math.max(0, Math.min(100, percent)) + '%'
   }
 
   function render () {
@@ -359,17 +381,20 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
         text: onlineOff
           ? '本地没有找到 .lrc 文件。「在线歌词」打开后会自动联网匹配（也可在设置 → 在线功能里切换）。'
           : '把同名 .lrc 文件放在歌曲旁边即可自动加载；也支持「歌名 - 歌手.lrc」这类命名。',
-        action: h('div', {
-          class: 'lyrics-empty__actions',
-          style: { display: 'flex', gap: '8px', justifyContent: 'center' }
-        },
-        onlineOff ? enableOnline : null,
-        aiBlock(),
+        action: h('div', { class: 'lyrics-empty__stack' },
+          h('div', {
+            class: 'lyrics-empty__actions',
+            style: { display: 'flex', gap: '8px', justifyContent: 'center' }
+          },
+          onlineOff ? enableOnline : null,
+          aiStartButton(),
         h('button', {
           class: onlineOff ? 'btn' : 'btn btn--primary',
           type: 'button',
-          onClick: () => player.reloadLyrics()
-        }, icon('refresh', { className: 'icon icon--stroke' }), '重新载入')
+            onClick: () => player.reloadLyrics()
+          }, icon('refresh', { className: 'icon icon--stroke' }), '重新载入')
+          ),
+          aiStatusRow()
         )
       })
       return
@@ -596,6 +621,30 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
   if (typeof store.select === 'function') {
     store.select((state) => (state.ui && state.ui.nowPlayingOpen ? '1' : '0'), (value) => {
       if (value === '0') abortAiJob('已收起播放页，识别中止')
+    })
+  }
+
+  /*
+   * 进度事件：下载模型与识别都往同一条进度条上报，不另起 UI。
+   * 下载的百分比来自主进程（received/total），识别用的是"第几段/共几段"。
+   */
+  if (typeof remote.aiSubtitles.onProgress === 'function') {
+    remote.aiSubtitles.onProgress((payload) => {
+      if (!payload || payload.state !== 'downloading') return
+      if (!aiJob) return
+      setAiProgress(payload.percent, '下载模型 ' + Math.round(payload.percent) + '%')
+    })
+  }
+  if (typeof remote.aiSubtitles.onTranscribeProgress === 'function') {
+    remote.aiSubtitles.onTranscribeProgress((payload) => {
+      if (!payload || !aiJob) return
+      if (payload.stage === 'starting') {
+        setAiProgress(null, '准备识别…')
+        return
+      }
+      const total = Math.max(1, Number(payload.total) || 1)
+      const done = Number(payload.done) || 0
+      setAiProgress((done / total) * 100, '识别中 ' + done + '/' + total)
     })
   }
 

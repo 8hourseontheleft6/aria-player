@@ -228,7 +228,16 @@ html[data-platform="darwin"] .now-playing__topbar {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /*
+   * `safe center`：装得下就居中，装不下就退回 flex-start 并允许滚动。
+   *
+   * 原来只写 center —— 内容比这一行高时，溢出的部分会被**均分到上下两边**，
+   * 于是封面顶边被裁到屏幕外（用户截图里那张占位图"跑出屏幕上面"就是这个）。
+   * 这不是"窗口太矮"的问题，是布局对溢出没有定义行为。
+   */
+  justify-content: safe center;
+  overflow-y: auto;
+  overflow-x: hidden;
   gap: 26px;
   min-width: 0;
   min-height: 0;
@@ -797,6 +806,43 @@ html[data-reduce-motion='true'] .now-playing__cover-hint {
 .lyrics-empty__ai .btn[hidden],
 .lyrics-empty__ai [hidden] {
   display: none !important;
+}
+
+/* 空状态里的按钮行与进度行竖排：两者是两行，不该互相挤对齐 */
+.lyrics-empty__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 识别/下载进度：细条 + 一行小字，和设置页里那条同一个观感 */
+.lyrics-empty__ai-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 14px;
+}
+
+.lyrics-empty__ai-bar {
+  width: 200px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-quaternary);
+  overflow: hidden;
+}
+
+.lyrics-empty__ai-bar-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tint);
+  transition: width var(--dur) var(--ease-ios);
+}
+
+html[data-reduce-motion='true'] .lyrics-empty__ai-bar-fill {
+  transition: none;
 }
 
 .lyrics-empty__ai {
