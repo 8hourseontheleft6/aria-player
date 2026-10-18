@@ -10,6 +10,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron')
 /** 主 -> 渲染 的频道白名单，必须与 src/main/ipc.js 保持一致 */
 const EVENT_CHANNELS = new Set([
   'settings:changed',
+  'settings:save-error',
   'library:scan-progress',
   'library:watch-update',
   'library:watch-error',
@@ -135,7 +136,8 @@ contextBridge.exposeInMainWorld('aria', {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (patch) => ipcRenderer.invoke('settings:set', patch),
     reset: () => ipcRenderer.invoke('settings:reset'),
-    onChanged: (handler) => on('settings:changed', handler)
+    onChanged: (handler) => on('settings:changed', handler),
+    onSaveError: (handler) => on('settings:save-error', handler)
   },
 
   library: {

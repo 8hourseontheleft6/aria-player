@@ -4,6 +4,8 @@ const { app } = require('electron')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
+const { randomUUID } = require('node:crypto')
+const { writeJsonAtomic } = require('../util/atomic-json')
 
 /** 默认设置。新增字段只需在这里补一行，旧配置文件会自动合并。 */
 const DEFAULTS = {
@@ -139,10 +141,22 @@ function isPlainObject (value) {
 function mergeDeep (base, patch) {
   const out = { ...base }
   for (const [key, value] of Object.entries(patch || {})) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue
+    if (key === 'hasKey') continue // 只读的公开状态不能写回持久化设置
     if (isPlainObject(value) && isPlainObject(base[key])) out[key] = mergeDeep(base[key], value)
     else out[key] = value
   }
   return out
+}
+
+/** IPC 的设置视图：内部服务仍用 get() 读取密钥，界面只知道是否已配置。 */
+function publicSettings (settings) {
+  const result = JSON.parse(JSON.stringify(settings))
+  if (result.ai) {
+    result.ai.hasKey = Boolean(result.ai.key)
+    delete result.ai.key
+  }
+  return result
 }
 
 /**
@@ -150,19 +164,46 @@ function mergeDeep (base, patch) {
  */
 function createSettingsService (ctx) {
   const filePath = path.join(app.getPath('userData'), 'settings.json')
-  let state = { ...DEFAULTS }
+  let state = JSON.parse(JSON.stringify(DEFAULTS))
   let writeTimer = null
-  let writing = null
+  let writing = Promise.resolve()
+
+  function reportWriteError (err) {
+    console.error('[settings] 写入失败:', err.code || err.name || 'write-failed')
+    ctx.emit('settings:save-error', { code: err.code || 'write-failed', message: '设置保存失败，请检查磁盘空间和目录权限' })
+  }
+
+  async function readSettings (file) {
+    const parsed = JSON.parse(await fsp.readFile(file, 'utf8'))
+    if (!isPlainObject(parsed)) throw new SyntaxError('设置文件必须是 JSON 对象')
+    return parsed
+  }
 
   async function load () {
     try {
-      const raw = await fsp.readFile(filePath, 'utf8')
-      state = mergeDeep(DEFAULTS, JSON.parse(raw))
-    } catch {
-      state = { ...DEFAULTS }
-      // 首次启动：默认把系统音乐目录加入资料库
-      const musicDir = app.getPath('music')
-      if (musicDir && fs.existsSync(musicDir)) state.folders = [musicDir]
+      state = mergeDeep(DEFAULTS, await readSettings(filePath))
+    } catch (error) {
+      // 权限/IO 错误不能伪装成首次启动，更不能把用户数据覆盖成默认值。
+      if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+      let recovered = null
+      try {
+        recovered = await readSettings(`${filePath}.bak`)
+      } catch (backupError) {
+        if (backupError.code !== 'ENOENT' && !(backupError instanceof SyntaxError)) throw backupError
+      }
+      if (error instanceof SyntaxError) {
+        const preserved = `${filePath}.corrupt-${randomUUID()}`
+        await fsp.rename(filePath, preserved)
+        console.warn('[settings] 损坏的配置已保留:', preserved)
+      }
+      state = mergeDeep(JSON.parse(JSON.stringify(DEFAULTS)), recovered || {})
+      if (recovered) {
+        await writeJsonAtomic(filePath, state)
+        console.warn('[settings] 已从上一份有效配置恢复')
+      } else {
+        const musicDir = app.getPath('music')
+        if (musicDir && fs.existsSync(musicDir)) state.folders = [musicDir]
+      }
     }
     return state
   }
@@ -175,16 +216,25 @@ function createSettingsService (ctx) {
     if (writeTimer) clearTimeout(writeTimer)
     writeTimer = setTimeout(() => {
       writeTimer = null
-      writing = persist()
+      persist().catch(reportWriteError)
     }, 250)
   }
 
-  async function persist () {
+  function persist () {
+    const value = snapshot()
+    // 排队写入，前一次失败也不能永久阻塞后续重试。
+    writing = writing.catch(() => {}).then(() => writeJsonAtomic(filePath, value, { backup: true }))
+    return writing
+  }
+
+  async function flush () {
+    if (writeTimer) clearTimeout(writeTimer)
+    writeTimer = null
     try {
-      await fsp.mkdir(path.dirname(filePath), { recursive: true })
-      await fsp.writeFile(filePath, JSON.stringify(state, null, 2), 'utf8')
-    } catch (err) {
-      console.error('[settings] 写入失败:', err)
+      await persist()
+    } catch (error) {
+      reportWriteError(error)
+      throw error
     }
   }
 
@@ -193,8 +243,7 @@ function createSettingsService (ctx) {
       clearTimeout(writeTimer)
       writeTimer = null
     }
-    if (writing) await writing.catch(() => {})
-    await persist()
+    await flush()
   })
 
   return {
@@ -213,13 +262,14 @@ function createSettingsService (ctx) {
      * @param {{ silent?: boolean, immediate?: boolean }} [options]
      */
     set (patch, options = {}) {
+      if (!isPlainObject(patch)) throw new TypeError('设置更新必须是对象')
       state = mergeDeep(state, patch)
       if (options.immediate) {
         if (writeTimer) {
           clearTimeout(writeTimer)
           writeTimer = null
         }
-        writing = persist()
+        persist().catch(reportWriteError)
       } else {
         scheduleWrite()
       }
@@ -234,8 +284,8 @@ function createSettingsService (ctx) {
     },
 
     /** 立即落盘（退出前调用） */
-    flush: persist
+    flush
   }
 }
 
-module.exports = { createSettingsService, DEFAULTS }
+module.exports = { createSettingsService, DEFAULTS, publicSettings }

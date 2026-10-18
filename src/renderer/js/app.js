@@ -1311,6 +1311,7 @@ async function main () {
   }
 
   remote.settings.onChanged((next) => applySettings(next))
+  remote.settings.onSaveError((error) => toast({ message: error.message, type: 'error' }))
 
   /* 下载进度：主进程按 uid 推过来，写进 store 供结果行显示 */
   remote.sources.onDownloadProgress((progress) => {

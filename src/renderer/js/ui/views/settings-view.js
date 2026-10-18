@@ -1514,10 +1514,10 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       class: 'settings__input',
       type: 'password',
       spellcheck: 'false',
-      placeholder: ai.key ? '已保存（留空则不修改）' : 'sk-…（本地模型可留空）',
+      placeholder: ai.hasKey ? '已保存（留空则不修改）' : 'sk-…（本地模型可留空）',
       value: ''
     })
-    const saveAi = (patch) => actions.setSetting({ ai: { ...ai, ...patch } })
+    const saveAi = (patch) => actions.setSetting({ ai: patch })
     on(aiBase, 'change', () => saveAi({ baseUrl: aiBase.value.trim() }))
     on(aiModel, 'change', () => saveAi({ model: aiModel.value.trim() }))
     on(aiKey, 'change', () => {
