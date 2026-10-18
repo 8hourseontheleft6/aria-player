@@ -41,3 +41,22 @@ Aria 以 MIT 许可发布（见 [LICENSE](LICENSE)）。下面列出**运行时�
 
 Aria 与 Apple Inc. 没有任何关系；未获其背书或赞助。文中提到的其它产品名与商标归各自所有者所有。
 "iOS"、"macOS"、"Windows" 等名称仅用于**说明兼容性与设计参考**，不表示任何隶属关系。
+
+## sherpa-onnx（运行时，随安装包分发）
+
+- 项目：https://github.com/k2-fsa/sherpa-onnx
+- 许可：**Apache License 2.0**
+- 在本应用里的形态：npm 包 `sherpa-onnx-node`（N-API 包装）+ 平台包
+  `sherpa-onnx-win-x64`（内含 `sherpa-onnx.node`、`sherpa-onnx-c-api.dll`、`onnxruntime.dll`）。
+- 用途：在**本机**跑语音识别（「AI 字幕」）。不上传任何音频。
+
+## SenseVoice 模型与 silero VAD 模型（**不随包分发**）
+
+- SenseVoice-small（int8）：HuggingFace 仓库
+  `csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 里的 `model.int8.onnx` + `tokens.txt`。
+- silero VAD：`silero_vad.onnx`，来自 sherpa-onnx 官方 release（`asr-models`）。
+- **这两个模型不打包进安装包**：只有在用户于「设置 → AI 字幕」里**主动点下载**之后，
+  才会从上面的下载源取到本机（默认 HuggingFace，备用 hf-mirror.com），
+  并在下载前在界面上写明来源与体积。
+- 模型许可以上游仓库卡片为准（SenseVoice 见 FunASR / SenseVoice 项目页，silero-vad 见
+  https://github.com/snakers4/silero-vad ）。我们只分发**下载地址与 SHA256**，不分发模型本身。
