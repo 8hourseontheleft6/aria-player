@@ -25,6 +25,14 @@ const DEFAULTS = {
    * 出现「生成」入口 —— 不点头就不下、不联网、不占空间。
    */
   aiSubtitles: false,
+  /*
+   * AI 字幕的两段**可选**文本后处理（默认都关）：
+   * 开了才把**歌词文本**（不含音频）发到用户自己填的模型接口。
+   */
+  aiCorrect: false,
+  aiTranslate: false,
+  /* 空字符串 = 跟随界面语言 */
+  aiTranslateLanguage: '',
   volume: 0.85,
   muted: false,
   playbackRate: 1,

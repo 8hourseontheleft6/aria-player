@@ -278,6 +278,19 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
           fromCache: result.fromCache === true
         }
       }))
+      /*
+       * 两段**可选**的文本后处理：校正 → 翻译。
+       * 任何一步失败都只是不发"已处理"的信号，歌词本身照常显示（徽章降级为「AI · 本地」）。
+       */
+      /*
+       * 后处理失败**绝不能**影响歌词显示 —— 所以单独包一层，
+       * 并把原因写进 data-ai-error（排障用）。
+       */
+      try {
+        await runPostProcess(track)
+      } catch (error) {
+        element.dataset.aiError = 'post:' + ((error && error.message) || error)
+      }
       bus.emit(EVENTS.LYRICS_LOADED, { lines })
       toast({
         message: result.fromCache ? '字幕来自缓存' : `已生成 ${lines.length} 行本地字幕`,
@@ -292,6 +305,90 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
       if (aiProgressBar) aiProgressBar.hidden = true
       render()
     }
+  }
+
+  /** 把当前 lyrics.line 的文本抽出来（只发文本，不发音频） */
+  function currentTexts () {
+    const lyrics = store.get().lyrics
+    return (lyrics.lines || []).map((line) => String(line.text || ''))
+  }
+
+  function applyToLyrics (values, field) {
+    store.set((state) => {
+      const lines = (state.lyrics.lines || []).map((line, index) => {
+        const hit = values.find((item) => item.i === index)
+        if (!hit) return line
+        return field === 'translation'
+          ? { ...line, translation: hit.value }
+          : { ...line, text: hit.value }
+      })
+      return { ...state, lyrics: { ...state.lyrics, lines } }
+    })
+  }
+
+  /**
+   * 校正 + 翻译。
+   * 顺序固定：先校正（改 text），再翻译（读的是校正后的 text）。
+   */
+  async function runPostProcess (track) {
+    const settingsNow = store.get().settings
+    const meta = { title: track.title, artist: track.artist, album: track.album }
+    let corrected = false
+    let translated = false
+
+    if (settingsNow.aiCorrect === true) {
+      setAiProgress(null, 'AI 校正中…')
+      const outcome = await remote.aiSubtitles.postProcess({
+        mode: 'correct',
+        lines: currentTexts(),
+        meta
+      })
+      if (outcome && outcome.ok) {
+        /* 切回原文要用：先把原文留一份 */
+        const original = currentTexts()
+        applyToLyrics(outcome.values, 'text')
+        store.set((state) => ({ ...state, lyrics: { ...state.lyrics, aiOriginal: original } }))
+        corrected = true
+      } else {
+        toast({ message: 'AI 校正失败，保留识别原文', type: 'info' })
+      }
+    }
+
+    if (settingsNow.aiTranslate === true) {
+      setAiProgress(null, 'AI 翻译中…')
+      const outcome = await remote.aiSubtitles.postProcess({
+        mode: 'translate',
+        lines: currentTexts(),
+        meta,
+        language: settingsNow.aiTranslateLanguage || ''
+      })
+      if (outcome && outcome.ok) {
+        applyToLyrics(outcome.values, 'translation')
+        translated = true
+      } else {
+        toast({ message: 'AI 翻译失败，只显示原文', type: 'info' })
+      }
+    }
+
+    store.set((state) => ({
+      ...state,
+      lyrics: { ...state.lyrics, aiCorrected: corrected, aiTranslated: translated }
+    }))
+    setAiProgress(null, '')
+  }
+
+  /** 切回未校正的原文 */
+  function revertToOriginal () {
+    const original = store.get().lyrics.aiOriginal
+    if (!Array.isArray(original)) return
+    store.set((state) => ({
+      ...state,
+      lyrics: {
+        ...state.lyrics,
+        lines: (state.lyrics.lines || []).map((line, index) => ({ ...line, text: original[index] == null ? line.text : original[index] })),
+        aiCorrected: false
+      }
+    }))
   }
 
   /** 空状态里的按钮（**只有一颗**，和「重新载入」同一行才不会错位） */
@@ -409,11 +506,23 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
      * 而不是只在生成成功那一下弹个 toast。
      */
     if (lyrics.source === 'ai') {
+      const badge = lyrics.aiTranslated ? 'AI · 本地 · 翻译'
+        : lyrics.aiCorrected ? 'AI · 校正'
+          : 'AI · 本地'
       inner.appendChild(h('div', { class: 'lyrics__ai-note' },
-        h('span', { class: 'lyrics__ai-badge', text: 'AI · 本地' }),
+        h('span', { class: 'lyrics__ai-badge', text: badge }),
         h('span', { class: 'lyrics__ai-text', text: lyrics.estimated
           ? '识别可能有误，时间轴为估算'
-          : '识别可能有误（本地模型，完全离线）' })
+          : lyrics.aiTranslated
+            ? '识别可能有误；译文由你配置的模型生成'
+            : '识别可能有误（本地模型，完全离线）' }),
+        lyrics.aiCorrected && Array.isArray(lyrics.aiOriginal)
+          ? h('button', {
+            class: 'btn btn--plain lyrics__ai-revert',
+            type: 'button',
+            onClick: () => revertToOriginal()
+          }, '看原文')
+          : null
       ))
     }
     lineNodes = lyrics.lines.map((line, index) => {

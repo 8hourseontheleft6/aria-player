@@ -64,7 +64,7 @@ const PROFILES = {
      */
     /* aiSubtitles：本机 AI 字幕（模型可选下载、完全离线识别）。只有播放器档有 ——
    * 本体的歌词走「在线补全 / 本地 .lrc」，不需要它。 */
-  services: ['settings', 'openedFiles', 'aiSubtitles'],
+  services: ['settings', 'openedFiles', 'aiSubtitles', 'ai'],
     // 一个插件都不注册：没有在线歌词/封面，也没有曲目信息面板
     plugins: [],
     // 三个能力都没有 —— 与上面的 services / plugins 严格对应

@@ -332,7 +332,10 @@ function registerIpc (ctx) {
           'ai-subtitles:clear-cache': () => ctx.get('aiSubtitles').clearCache(),
           'ai-subtitles:push-audio': (_event, payload) => ctx.get('aiSubtitles').pushAudio(payload || {}),
           'ai-subtitles:transcribe': (_event, payload) => ctx.get('aiSubtitles').transcribe(payload || {}),
-          'ai-subtitles:cancel-transcribe': () => ctx.get('aiSubtitles').cancelTranscribe()
+          'ai-subtitles:cancel-transcribe': () => ctx.get('aiSubtitles').cancelTranscribe(),
+          'ai-subtitles:post-process': (_event, payload) => ctx.get('aiSubtitles').postProcess(payload || {}),
+          'ai-subtitles:llm-cache-info': () => ctx.get('aiSubtitles').llmCacheInfo(),
+          'ai-subtitles:clear-llm-cache': () => ctx.get('aiSubtitles').clearLlmCache()
         }
       : {}),
     ...(ctx.has('openedFiles')

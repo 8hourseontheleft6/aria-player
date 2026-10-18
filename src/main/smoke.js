@@ -1075,7 +1075,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
    * aiSubtitles = 本机 AI 字幕（模型可选下载、识别在本机跑），player 档专属。
    * 登记在这里的意思是：以后再加服务，必须先证明它确实是这个档位要的。
    */
-  const expectedServices = ['aiSubtitles', 'openedFiles', 'settings']
+  const expectedServices = ['ai', 'aiSubtitles', 'openedFiles', 'settings']
   const services = ctx.list().slice().sort()
   record('主进程只挂了本档位的服务（表外的都没被 define）',
     services.join('|') === expectedServices.join('|'),
@@ -1494,6 +1494,119 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       `空状态在清晰区=${nowPlayingLook.emptyInsideClear}（顶部 ${nowPlayingLook.emptyTopPercent == null ? '—' : (nowPlayingLook.emptyTopPercent * 100).toFixed(0) + '%'}）；` +
       `「回到当前」压住最后一行=${nowPlayingLook.resumeOverlaps === null ? "未出现（正常）" : nowPlayingLook.resumeOverlaps}`)
 
+  /*
+   * AI 字幕的文本后处理（阶段 A 校正 / 阶段 B 翻译）。
+   * 用**本地假接口**（127.0.0.1）跑通两条链，不依赖任何外部模型：
+   *   ① 校正：返回 {i, text} → 行文本被替换；
+   *   ② 翻译：返回 {i, translation} → 行译文被写入；
+   *   ③ 索引多一个 → 整批丢弃（降级，不污染原文）；
+   *   ④ 接口不通 → 返回 ok:false（降级）。
+   */
+  const http = require('node:http')
+  let llmMode = 'correct'
+  const fakeLlm = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (chunk) => { body += chunk })
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json')
+      const wantExtra = body.includes('__extra__')
+      /* 从 user 消息里把那一批 JSON 抠出来，原样回填（校正加前缀、翻译加译文） */
+      let items = []
+      try {
+        /*
+         * body 是 **JSON 请求体** —— 里面的换行是转义的 \\n，
+         * 直接对原始 body 按行切会切出空数组（第一版就是这么错的）。
+         * 先 parse，再从 user 消息里取最后一行（那一行才是批次 JSON）。
+         */
+        let userText = ''
+        try {
+          const payload = JSON.parse(body)
+          userText = ((payload.messages || []).find((m) => m.role === 'user') || {}).content || ''
+        } catch { userText = '' }
+        const lastLine = userText.split('\n').filter((line) => line.trim().startsWith('[')).pop() || '[]'
+        const batch = JSON.parse(lastLine)
+        items = batch.map((item) => llmMode === 'correct'
+          ? { i: item.i, text: '校正:' + item.text }
+          : { i: item.i, translation: '译文:' + item.text })
+        if (wantExtra) items = items.concat([{ i: 999, text: '多余', translation: '多余' }])
+      } catch { items = [] }
+      res.end(JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: JSON.stringify(items) } }],
+        model: 'fake-llm'
+      }))
+    })
+  })
+  await new Promise((resolve) => fakeLlm.listen(0, '127.0.0.1', resolve))
+  const llmPort = fakeLlm.address().port
+  const llmBase = `http://127.0.0.1:${llmPort}`
+
+  const previousAi = ctx.get('settings').get().ai
+  const llmResult = { }
+  try {
+    ctx.get('settings').set({
+      ai: { enabled: true, baseUrl: llmBase, key: 'test-key', model: 'fake-llm', timeout: 8000 }
+    })
+    const subtitles = ctx.get('aiSubtitles')
+    await subtitles.clearLlmCache()
+
+    /* ① 校正 */
+    llmMode = 'correct'
+    const corrected = await subtitles.postProcess({ mode: 'correct', lines: ['第一行', '第二行'], meta: { title: '歌', artist: '人' } })
+    llmResult.correctOk = corrected.ok === true
+    llmResult.correctValues = (corrected.values || []).map((item) => item.value)
+    llmResult.correctRaw = JSON.stringify(corrected).slice(0, 260)
+    llmResult.correctField = corrected.field
+    llmResult.correctError = corrected.lastError || ''
+    llmResult.correctCode = corrected.code || ''
+
+    /* ② 翻译 */
+    llmMode = 'translate'
+    const translated = await subtitles.postProcess({ mode: 'translate', lines: ['第一行', '第二行'], meta: { title: '歌' }, language: 'English' })
+    llmResult.translateOk = translated.ok === true
+    llmResult.translateValues = (translated.values || []).map((item) => item.value)
+    llmResult.translateRaw = JSON.stringify(translated).slice(0, 260)
+    llmResult.translateField = translated.field
+
+    /* ②b 缓存：同样的输入第二次应命中（cached 计数 > 0） */
+    const again = await subtitles.postProcess({ mode: 'correct', lines: ['第一行', '第二行'], meta: { title: '歌', artist: '人' } })
+    llmResult.cachedAgain = again.ok === true && Number(again.cached) > 0
+    llmResult.llmCache = await subtitles.llmCacheInfo()
+
+    /* ③ 索引不齐 → 整批丢弃 */
+    llmMode = 'correct'
+    const extra = await subtitles.postProcess({ mode: 'correct', lines: ['__extra__ 这一行'], meta: {} })
+    llmResult.extraDropped = extra.ok === false && extra.code === 'all-batches-failed'
+    llmResult.extraReason = extra.lastError || ''
+
+    /* ④ 接口不通 → 降级 */
+    ctx.get('settings').set({ ai: { enabled: true, baseUrl: 'http://127.0.0.1:9', key: '', model: 'fake-llm', timeout: 1500 } })
+    const offline = await subtitles.postProcess({ mode: 'correct', lines: ['断网这一行'], meta: {} })
+    llmResult.offlineOk = offline.ok === false
+
+    const cleared = await subtitles.clearLlmCache()
+    llmResult.clearedEntries = cleared.entries
+  } finally {
+    ctx.get('settings').set({ ai: previousAi })
+    fakeLlm.close()
+  }
+
+  record('AI 字幕：文本后处理（本地假接口）—— 校正/翻译/缓存/索引不齐/接口不通',
+    llmResult.correctOk === true &&
+    llmResult.correctField === 'text' &&
+    (llmResult.correctValues || []).every((value) => String(value).startsWith('校正:')) &&
+    llmResult.translateOk === true &&
+    llmResult.translateField === 'translation' &&
+    (llmResult.translateValues || []).every((value) => String(value).startsWith('译文:')) &&
+    llmResult.cachedAgain === true &&
+    llmResult.extraDropped === true &&
+    llmResult.offlineOk === true &&
+    llmResult.clearedEntries === 0,
+    `校正 ok=${llmResult.correctOk}、原始=${llmResult.correctRaw}；` +
+      `翻译 ok=${llmResult.translateOk}、原始=${llmResult.translateRaw}；` +
+      `第二次命中缓存=${llmResult.cachedAgain}（缓存 ${llmResult.llmCache ? llmResult.llmCache.entries : '?'} 条）；` +
+      `索引多一个→整批丢弃=${llmResult.extraDropped}；接口不通→降级=${llmResult.offlineOk}；清空后 ${llmResult.clearedEntries} 条`)
+
+
   win.setBounds(lookPreviousBounds)
   await sleep(500)
 
@@ -1502,7 +1615,8 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
 
 
   /* ② 资料库 / 在线 / 歌词 / 监听这些能力**不存在**（不是"存在但关掉了"） */
-  const forbidden = ['library', 'lyrics', 'online', 'ai', 'musicSources', 'tray', 'watcher', 'background']
+  /* ai 现在在 player 里是**合法**的（AI 字幕的后处理要复用 chat），所以从黑名单拿掉，改由上面的 expectedServices 管 */
+  const forbidden = ['library', 'lyrics', 'online', 'musicSources', 'tray', 'watcher', 'background']
   const present = forbidden.filter((name) => ctx.has(name))
   record('资料库 / 在线 / 歌词 / 目录监听在 player 档位里根本不存在',
     present.length === 0,

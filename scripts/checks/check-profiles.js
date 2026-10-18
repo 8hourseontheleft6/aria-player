@@ -40,7 +40,7 @@ const FULL_PLUGINS = ['trackInfoPanel', 'quickActions', 'onlineMedia']
  * player 档位允许的服务：设置 + 「打开的文件」+ 本机 AI 字幕（模型可选下载、识别在本机跑）。
  * 加名字要在这里登记 —— 这是刻意的棘轮：不登记就说明是「顺手挂上去的」，那种要拦。
  */
-const PLAYER_SERVICES_ALLOWED = ['settings', 'openedFiles', 'aiSubtitles']
+const PLAYER_SERVICES_ALLOWED = ['settings', 'openedFiles', 'aiSubtitles', 'ai']
 
 const problems = []
 

@@ -991,6 +991,34 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         control: switchControl(settings.aiSubtitles === true, (value) => actions.setSetting({ aiSubtitles: value }))
       }),
       row({
+        title: 'AI 校正识别结果',
+        sub: '把识别出来的**歌词文本**（不含音频）发给你在「外部模型」里填的接口，让它只修同音字、漏字、断句和标点，'
+          + '不增删行、不改写意思。默认关闭；失败会保留原文，不影响歌词显示。',
+        control: switchControl(settings.aiCorrect === true, (value) => actions.setSetting({ aiCorrect: value }))
+      }),
+      row({
+        title: 'AI 翻译',
+        sub: '把（校正后的）歌词逐行翻译成目标语言，显示在每行下面。默认关闭；同样只发送文本。',
+        control: switchControl(settings.aiTranslate === true, (value) => actions.setSetting({ aiTranslate: value }))
+      }),
+      row({
+        title: '翻译目标语言',
+        sub: '留空表示跟随界面语言。',
+        control: createPillSelect({
+          items: [
+            { value: '', label: '跟随界面' },
+            { value: '简体中文', label: '简体中文' },
+            { value: '繁體中文', label: '繁體中文' },
+            { value: 'English', label: 'English' },
+            { value: '日本語', label: '日本語' },
+            { value: '한국어', label: '한국어' }
+          ],
+          value: settings.aiTranslateLanguage || '',
+          title: '翻译目标语言',
+          onPick: (value) => actions.setSetting({ aiTranslateLanguage: value })
+        }).element
+      }),
+      row({
         title: '识别模型',
         sub: '「下载」把三个文件写进「用户数据目录/ai-subtitles/models」，校验 SHA256 通过才算就绪；'
           + '断网或取消后可以续传，不会重下已经收到的部分。',

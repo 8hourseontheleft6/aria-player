@@ -34,6 +34,7 @@ const {
   modelFingerprint
 } = require('./ai-subtitles-constants')
 const { toLrc, parseLrc } = require('./subtitles-format')
+const llm = require('./subtitles-llm')
 
 /*
  * 自检用的假识别器开关（ARIA_AI_SUBTITLE_FAKE=1）：不要求 228MB 真模型在盘上，
@@ -57,6 +58,7 @@ const ERROR_TEXT = {
 }
 
 function createAiSubtitlesService (ctx) {
+  const settings = ctx.get('settings')
   const root = () => path.join(app.getPath('userData'), 'ai-subtitles')
   const modelsRoot = () => path.join(root(), 'models')
   const modelDir = () => path.join(modelsRoot(), 'sense-voice')
@@ -651,8 +653,129 @@ function createAiSubtitlesService (ctx) {
     return { cancelled: true }
   }
 
+  /* ==================== 阶段 A/B：文本后处理 ==================== */
+
+  function llmCacheDir () {
+    return path.join(root(), 'llm-cache')
+  }
+
+  async function readLlmCache (key) {
+    try {
+      const raw = await fsp.readFile(path.join(llmCacheDir(), key + '.json'), 'utf8')
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed && parsed.items) ? parsed.items : null
+    } catch {
+      return null
+    }
+  }
+
+  async function writeLlmCache (key, items) {
+    await fsp.mkdir(llmCacheDir(), { recursive: true })
+    await fsp.writeFile(path.join(llmCacheDir(), key + '.json'), JSON.stringify({ key, items, at: Date.now() }), 'utf8')
+    /* 上限 200 条：按 mtime 从最旧删 */
+    const names = (await fsp.readdir(llmCacheDir()).catch(() => [])).filter((name) => name.endsWith('.json'))
+    if (names.length <= 200) return
+    const items2 = []
+    for (const name of names) {
+      const full = path.join(llmCacheDir(), name)
+      const stat = await fsp.stat(full).catch(() => null)
+      if (stat) items2.push({ full, mtime: stat.mtimeMs })
+    }
+    items2.sort((a, b) => a.mtime - b.mtime)
+    for (const item of items2.slice(0, items2.length - 200)) {
+      await fsp.rm(item.full, { force: true }).catch(() => {})
+    }
+  }
+
+  /**
+   * 文本后处理：把行文本交给外部模型校正 / 翻译。
+   *
+   * 只在主进程跑（key 不落渲染层）；任何一批失败都**保留原文**，绝不阻塞歌词显示。
+   * @param {{ mode: 'correct'|'translate', lines: string[], meta?: object, language?: string }} input
+   */
+  async function postProcess ({ mode, lines, meta, language } = {}) {
+    const ai = ctx.has && ctx.has('ai') ? ctx.get('ai') : null
+    if (!ai) return { ok: false, code: 'ai-unavailable' }
+    const textLines = (Array.isArray(lines) ? lines : []).map((line) => String(line == null ? '' : line))
+    if (!textLines.length) return { ok: false, code: 'no-lines' }
+    const field = mode === 'translate' ? 'translation' : 'text'
+    const model = String((settings.get().ai && settings.get().ai.model) || '')
+    if (!model) return { ok: false, code: 'no-model' }
+
+    const batches = llm.buildMessages({ mode, lines: textLines, meta, language })
+    const values = []
+    let failed = 0
+    let cached = 0
+    let lastError = ''
+
+    for (const { system, user, batch } of batches) {
+      const key = llm.cacheKeyOf({
+        text: JSON.stringify(batch),
+        model,
+        promptVersion: llm.PROMPT_VERSION + ':' + mode
+      })
+      let items = await readLlmCache(key)
+      if (items) {
+        cached++
+      } else {
+        const reply = await ai.chat({
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+          ],
+          temperature: 0
+        })
+        if (!reply || reply.ok !== true) { failed++; lastError = (reply && reply.message) || 'no-reply'; continue }
+        const checked = llm.validateIndexed(llm.extractJsonArray(reply.content), batch.map((item) => item.i), field)
+        if (!checked.ok) { failed++; lastError = 'index:' + checked.reason; continue }
+        items = checked.items
+        await writeLlmCache(key, items).catch(() => {})
+      }
+      for (const item of items) values.push({ i: item.i, value: item.value })
+    }
+
+    if (!values.length) return { ok: false, code: 'all-batches-failed', failed, lastError }
+    return {
+      ok: true,
+      mode,
+      field,
+      values,
+      batches: batches.length,
+      failed,
+      cached,
+      badge: llm.badgeOf({ corrected: mode === 'correct', translated: mode === 'translate' })
+    }
+  }
+
+  /** LLM 缓存信息 / 清空（设置页"字幕缓存"旁边用） */
+  async function llmCacheInfo () {
+    const dir = llmCacheDir()
+    let entries = 0
+    let bytes = 0
+    try {
+      for (const name of await fsp.readdir(dir)) {
+        if (!name.endsWith('.json')) continue
+        entries++
+        bytes += await sizeOf(path.join(dir, name))
+      }
+    } catch { /* 目录不存在 */ }
+    return { entries, bytes, bytesText: formatBytes(bytes), limitEntries: 200 }
+  }
+
+  async function clearLlmCache () {
+    const dir = llmCacheDir()
+    await fsp.mkdir(dir, { recursive: true })
+    for (const name of await fsp.readdir(dir).catch(() => [])) {
+      await fsp.rm(path.join(dir, name), { force: true, recursive: true }).catch(() => {})
+    }
+    return await llmCacheInfo()
+  }
+
   return {
     status,
+    postProcess,
+    llmCacheInfo,
+    clearLlmCache,
     pushAudio,
     transcribe,
     cancelTranscribe,

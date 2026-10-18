@@ -160,6 +160,84 @@ check('体积文案', () => {
   assert.equal(constants.formatBytes(240193589), '229 MB')
 })
 
+/* ---------- 文本后处理（阶段 A/B）========== */
+const llm = require('../../src/main/services/subtitles-llm')
+
+check('分批：每批 ≤40 行、行号是全局下标', () => {
+  const lines = Array.from({ length: 95 }, (_, i) => 'line' + i)
+  const batches = llm.batchLines(lines)
+  assert.equal(batches.length, 3)
+  assert.equal(batches[0].length, 40)
+  assert.equal(batches[2].length, 15)
+  assert.equal(batches[0][0].i, 0)
+  assert.equal(batches[1][0].i, 40)
+  assert.equal(batches[2][14].i, 94)
+  assert.equal(batches[1][3].text, 'line43')
+})
+
+check('JSON 解析：容忍围栏与前后废话，解析失败返回 null', () => {
+  assert.deepEqual(llm.extractJsonArray('[{ "i": 0, "text": "好" }]'), [{ i: 0, text: '好' }])
+  assert.deepEqual(llm.extractJsonArray('```json\n[{"i":0,"text":"好"}]\n```'), [{ i: 0, text: '好' }])
+  assert.deepEqual(llm.extractJsonArray('好的，结果如下：[{"i":1,"text":"a"}] 希望有帮助'), [{ i: 1, text: 'a' }])
+  assert.equal(llm.extractJsonArray('没有数组'), null)
+  assert.equal(llm.extractJsonArray('[{"i":0,'), null)
+  assert.equal(llm.extractJsonArray('{"i":0}'), null)
+})
+
+check('索引校验：多一个/少一个/重复/空值全都整批丢弃', () => {
+  assert.equal(llm.validateIndexed([{ i: 0, text: 'a' }, { i: 1, text: 'b' }], [0, 1], 'text').ok, true)
+  assert.equal(llm.validateIndexed([{ i: 0, text: 'a' }], [0, 1], 'text').reason, 'missing-index')
+  assert.equal(llm.validateIndexed([{ i: 0, text: 'a' }, { i: 1, text: 'b' }, { i: 2, text: 'c' }], [0, 1], 'text').reason, 'extra-index')
+  assert.equal(llm.validateIndexed([{ i: 0, text: 'a' }, { i: 0, text: 'b' }], [0, 1], 'text').reason, 'duplicate-index')
+  assert.equal(llm.validateIndexed([{ i: 0, text: '' }], [0], 'text').reason, 'empty-text')
+  assert.equal(llm.validateIndexed([{ i: 0, text: 'x' }], [0], 'translation').reason, 'empty-translation')
+  assert.equal(llm.validateIndexed([{ i: 'x', text: 'a' }], [0], 'text').reason, 'bad-index')
+  assert.equal(llm.validateIndexed(null, [0], 'text').reason, 'not-array')
+  assert.equal(llm.validateIndexed([{ i: 0, translation: 'x' }], [0], 'translation').ok, true)
+})
+
+check('缓存键：原文/模型/prompt 版本任一变化都要失效', () => {
+  const base = llm.cacheKeyOf({ text: '原歌词', model: 'm1' })
+  assert.match(base, /^[0-9a-f]{40}$/)
+  assert.notEqual(base, llm.cacheKeyOf({ text: '原歌词2', model: 'm1' }))
+  assert.notEqual(base, llm.cacheKeyOf({ text: '原歌词', model: 'm2' }))
+  assert.notEqual(base, llm.cacheKeyOf({ text: '原歌词', model: 'm1', promptVersion: 'llm-v2' }))
+  assert.equal(base, llm.cacheKeyOf({ text: '原歌词', model: 'm1' }))
+})
+
+check('prompt：带上下文、约束里明确"不得增删行/不得润色"', () => {
+  const [first] = llm.buildMessages({ mode: 'correct', lines: ['甲', '乙'], meta: { title: '歌', artist: '人', album: '辑' } })
+  assert.ok(first.system.includes('不允许：增删行'))
+  assert.ok(first.system.includes('拿不准就原样保留'))
+  assert.ok(first.user.includes('歌名：歌'))
+  assert.ok(first.user.includes('艺人：人'))
+  assert.ok(first.user.includes('专辑：辑'))
+  assert.ok(first.user.includes('[{"i":0,"text":"甲"}'))
+  const [translated] = llm.buildMessages({ mode: 'translate', lines: ['甲'], language: 'English' })
+  assert.ok(translated.system.includes('English'))
+  assert.ok(translated.system.includes('translation'))
+})
+
+check('回填：校正只改 text、翻译只写 translation，行数不变', () => {
+  const lines = [{ time: 1, text: '错字' }, { time: 2, text: '第二行' }]
+  const fixed = llm.applyCorrections(lines, [{ i: 0, value: '正字' }])
+  assert.equal(fixed.length, 2)
+  assert.equal(fixed[0].text, '正字')
+  assert.equal(fixed[1].text, '第二行')
+  assert.equal(fixed[0].time, 1)
+  const translated = llm.applyTranslations(fixed, [{ i: 0, value: 'The word' }])
+  assert.equal(translated[0].translation, 'The word')
+  assert.equal(translated[0].text, '正字')
+  /* 原数组不被改 */
+  assert.equal(lines[0].text, '错字')
+})
+
+check('徽章：校正/翻译成功与降级', () => {
+  assert.equal(llm.badgeOf({ corrected: false, translated: false }), 'AI · 本地')
+  assert.equal(llm.badgeOf({ corrected: true, translated: false }), 'AI · 校正')
+  assert.equal(llm.badgeOf({ corrected: true, translated: true }), 'AI · 本地 · 翻译')
+})
+
 if (problems.length) {
   console.log('\nAI 字幕纯函数检查：' + problems.length + ' 个问题')
   for (const problem of problems) console.log('  · ' + problem)
