@@ -1361,6 +1361,92 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       `徽章=${aiGenerated.badge}、空状态还在=${aiGenerated.stillEmpty}、免责「${aiGenerated.disclaimer}」；` +
       `点之前「取消」是隐藏的=${aiGenerated.cancelHiddenBefore}；诊断=${aiGenerated.aiErrorDiag || "（无）"}`)
 
+  /*
+   * 正在播放页的观感（用户两张截图）：
+   *   ① 宽窗口下隐藏歌词不应该把整页压成中间一条窄柱；
+   *   ② 左列不该常驻一条原生滚动条；
+   *   ③ 歌词右上角的工具栏不该「完全隐形」；
+   *   ④ 无封面占位不该空（要有淡色渐变 + 底部专辑名）。
+   */
+  /*
+   * 先把窗口拉宽 —— 「宽窗口下保留两列」这条规则只有在 >=1001px 时才成立，
+   * 自检窗口默认没这么宽，不拉宽等于没验。测完还原。
+   */
+  const lookPreviousBounds = win.getBounds()
+  win.setContentSize(1400, 820)
+  await sleep(600)
+  const nowPlayingLook = await evaluate(win, `
+    const { actions, store } = window.__aria
+    actions.setSetting({ lyricsVisible: true })
+    actions.openNowPlaying()
+    await new Promise((r) => setTimeout(r, 800))
+
+    const body = document.querySelector(".now-playing__body")
+    const left = document.querySelector(".now-playing__left")
+    const art = document.querySelector(".now-playing__art")
+    const toolbar = document.querySelector(".lyrics-toolbar")
+    const source = document.querySelector(".lyrics-source")
+
+    const wide = window.innerWidth >= 1001
+    const columnsShown = body ? getComputedStyle(body).gridTemplateColumns.split(" ").length : 0
+    const leftOverflowY = left ? getComputedStyle(left).overflowY : ""
+    const leftScrolls = left ? left.scrollHeight > left.clientHeight + 1 : false
+    const toolbarOpacity = toolbar ? Number(getComputedStyle(toolbar).opacity) : 0
+    const toolbarBg = toolbar ? getComputedStyle(toolbar).backgroundColor : ""
+    const sourceColor = source ? getComputedStyle(source).color : ""
+    const artBg = art ? getComputedStyle(art).backgroundImage : ""
+    const albumNode = document.querySelector(".now-playing__art-album")
+    const albumText = albumNode ? (albumNode.textContent || "") : ""
+    const albumVisible = albumNode ? getComputedStyle(albumNode).display !== "none" : false
+
+    /* 隐藏歌词 → 宽窗口下应仍是两列，并出现「显示歌词」入口 */
+    actions.toggleLyrics()
+    await new Promise((r) => setTimeout(r, 600))
+    const columnsHidden = body ? getComputedStyle(body).gridTemplateColumns.split(" ").length : 0
+    const restore = document.querySelector(".lyrics-show-again")
+    const restoreVisible = restore ? getComputedStyle(restore).display !== "none" : false
+    const restoreButton = restore ? restore.querySelector("button") : null
+    const restoreHasLabel = restoreButton ? /显示歌词/.test(restoreButton.textContent || "") : false
+    const toggle = document.querySelector(".now-playing__tool[aria-pressed]") || document.querySelector("[aria-pressed]")
+    const pressedWhenHidden = toggle ? toggle.getAttribute("aria-pressed") : null
+    if (restoreButton) restoreButton.click()
+    await new Promise((r) => setTimeout(r, 500))
+    const pressedWhenShown = toggle ? toggle.getAttribute("aria-pressed") : null
+
+    actions.setSetting({ lyricsVisible: true })
+    await actions.closeNowPlaying()
+    actions.setView("songs")
+    await new Promise((r) => setTimeout(r, 300))
+    return {
+      wide, columnsShown, columnsHidden, restoreVisible, restoreHasLabel,
+      pressedWhenHidden, pressedWhenShown,
+      leftOverflowY, leftScrolls, toolbarOpacity, toolbarBg,
+      sourceColor, artBg, albumText, albumVisible
+    }`)
+  record('正在播放页：隐藏歌词仍保留两列、左列不常驻滚动条、工具栏与无封面占位都看得见',
+    nowPlayingLook.columnsShown === 2 &&
+    nowPlayingLook.columnsHidden === (nowPlayingLook.wide ? 2 : 1) &&
+    nowPlayingLook.restoreVisible === true &&
+    nowPlayingLook.restoreHasLabel === true &&
+    nowPlayingLook.pressedWhenHidden === 'false' &&
+    nowPlayingLook.pressedWhenShown === 'true' &&
+    !nowPlayingLook.leftScrolls &&
+    nowPlayingLook.toolbarOpacity >= 0.5 &&
+    String(nowPlayingLook.toolbarBg) !== "rgba(0, 0, 0, 0)" &&
+    String(nowPlayingLook.artBg).includes("gradient") &&
+    (nowPlayingLook.albumVisible === true || nowPlayingLook.albumText === ""),
+    `窗口宽=${nowPlayingLook.wide}：显示时 ${nowPlayingLook.columnsShown} 列、隐藏时 ${nowPlayingLook.columnsHidden} 列；` +
+      `「显示歌词」入口可见=${nowPlayingLook.restoreVisible}（含文案=${nowPlayingLook.restoreHasLabel}）；` +
+      `aria-pressed 隐藏=${nowPlayingLook.pressedWhenHidden} → 显示=${nowPlayingLook.pressedWhenShown}；` +
+      `左列 overflow-y=${nowPlayingLook.leftOverflowY}、真的在滚=${nowPlayingLook.leftScrolls}；` +
+      `工具栏 opacity=${nowPlayingLook.toolbarOpacity}、背景=${nowPlayingLook.toolbarBg}；` +
+      `来源文字色=${nowPlayingLook.sourceColor}；封面层=${String(nowPlayingLook.artBg).slice(0, 40)}…；` +
+      `占位专辑名「${nowPlayingLook.albumText}」可见=${nowPlayingLook.albumVisible}`)
+
+  win.setBounds(lookPreviousBounds)
+  await sleep(500)
+
+
 
 
 

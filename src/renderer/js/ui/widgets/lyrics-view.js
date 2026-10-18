@@ -71,6 +71,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
       class: 'btn btn--icon-sm',
       type: 'button',
       title: '歌词显示设置',
+      'aria-label': '歌词显示设置',
       onClick: () => openDisplayPopover(adjustButton)
     }, icon('sliders', { className: 'icon icon--stroke' }))
 
@@ -78,6 +79,7 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
       class: 'btn btn--icon-sm',
       type: 'button',
       title: '重新载入歌词',
+      'aria-label': '重新载入歌词',
       onClick: () => player.reloadLyrics()
     }, icon('refresh', { className: 'icon icon--stroke' }))
 

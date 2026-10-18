@@ -209,11 +209,14 @@ html[data-platform="darwin"] .now-playing__topbar {
   min-height: 0;
 }
 
-.now-playing__body.is-lyrics-hidden {
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-}
-
+/*
+   * 歌词隐藏时的布局。
+   *
+   * 原来是把 grid 压成单列、左列限宽 460px 居中 —— 在 1463 宽或更宽的窗口里，
+   * 结果就是"整个页面缩成中间一条窄柱、两侧大片空白"，看起来像坏了。
+   * 宽窗口下**保留两列**：左列正常宽度，右列放一个"歌词已隐藏"的恢复按钮；
+   * 窄窗口才退回单列（那时本来也放不下两列）。
+   */
 .now-playing__body.is-lyrics-hidden .now-playing__lyrics {
   display: none;
 }
@@ -222,7 +225,92 @@ html[data-platform="darwin"] .now-playing__topbar {
   max-width: 460px;
 }
 
+@media (min-width: 1001px) {
+  .now-playing__body.is-lyrics-hidden {
+    grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+    justify-items: stretch;
+  }
+
+  .now-playing__body.is-lyrics-hidden .now-playing__left {
+    max-width: none;
+  }
+
+  /* 右列的"歌词已隐藏"空态：垂直居中，和左列同高 */
+  .now-playing__body.is-lyrics-hidden .now-playing__right {
+    display: grid;
+    place-items: center;
+    align-content: center;
+  }
+
+  .now-playing__body.is-lyrics-hidden .now-playing__tabs,
+  .now-playing__body.is-lyrics-hidden .now-playing__panel-host {
+    display: none;
+  }
+}
+
+/* 歌词隐藏时的恢复入口（只在 is-lyrics-hidden 时显示） */
+.lyrics-show-again {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+}
+
+.now-playing__body.is-lyrics-hidden .lyrics-show-again {
+  display: flex;
+}
+
+.lyrics-show-again__hint {
+  font-size: var(--text-footnote);
+  color: var(--label-3);
+  max-width: 30ch;
+}
+
 /* ---------------- 左：封面与控件 ---------------- */
+
+/*
+ * 高度自适应：默认窗口 780 高、最小 620 高都不能溢出。
+ * 优先"缩尺寸"而不是"出滚动条"。
+ */
+@media (max-height: 820px) {
+  .now-playing__art {
+    width: min(28vh, 280px);
+  }
+
+  .now-playing__left {
+    gap: 18px;
+  }
+}
+
+@media (max-height: 760px) {
+  .now-playing__left {
+    overflow-y: auto;
+    /* 细滚动条：Firefox / Chromium 各一套写法 */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--label-3) 45%, transparent) transparent;
+    padding-right: 2px;
+  }
+
+  .now-playing__left::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .now-playing__left::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .now-playing__left::-webkit-scrollbar-thumb {
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--label-3) 40%, transparent);
+  }
+
+  .now-playing__left:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--label-3) 65%, transparent);
+  }
+}
+
 
 .now-playing__left {
   display: flex;
@@ -236,7 +324,12 @@ html[data-platform="darwin"] .now-playing__topbar {
    * 这不是"窗口太矮"的问题，是布局对溢出没有定义行为。
    */
   justify-content: safe center;
-  overflow-y: auto;
+  /*
+   * 默认**不**开滚动条：靠下面的高度自适应把内容缩进可视区。
+   * 只有窗口矮到真的装不下（<760px）才允许滚动，并且用细滚动条 ——
+   * 之前一上来就 overflow-y:auto，1463 宽的正常窗口右侧就挂了一条浅灰原生竖线。
+   */
+  overflow-y: hidden;
   overflow-x: hidden;
   gap: 26px;
   min-width: 0;
@@ -249,7 +342,13 @@ html[data-platform="darwin"] .now-playing__topbar {
   aspect-ratio: 1 / 1;
   border-radius: var(--radius-xl);
   overflow: hidden;
-  background: var(--fill-quaternary);
+  /*
+   * 无封面时别只剩一块死灰：一层用主题色从左上角晕开的径向渐变（很淡），
+   * 底子仍是 --fill-quaternary —— 换主题、换专辑颜色时它也会跟着变。
+   */
+  background:
+    radial-gradient(circle at 30% 25%, var(--tint-soft), transparent 72%),
+    var(--fill-quaternary);
   box-shadow: var(--shadow-artwork);
   display: grid;
   place-items: center;
@@ -264,9 +363,29 @@ html[data-platform="darwin"] .now-playing__topbar {
   display: block;
 }
 
+/* 无封面时 84px 的图标在 360px 方块里显得空，缩到 48–56 */
 .now-playing__art .icon {
-  width: 84px;
-  height: 84px;
+  width: 52px;
+  height: 52px;
+}
+
+/* 无封面时在方块底部写专辑名（有封面时由 JS 隐藏），省略号截断 */
+.now-playing__art-album {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  text-align: center;
+  font-size: var(--text-caption);
+  color: var(--label-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.now-playing__art.has-cover .now-playing__art-album {
+  display: none;
 }
 
 .now-playing__art.is-flipping {
@@ -652,6 +771,13 @@ html[data-platform="darwin"] .now-playing__topbar {
 }
 
 /* 歌词操作条（偏移 / 字号） */
+/*
+ * 歌词右上角的工具组。
+ *
+ * 原来是 opacity:0、只有 .lyrics-region:hover 才出现 —— 结果"平时完全看不见，
+ * 但确实能点"，用户会以为那一片是空的。现在默认 .55，悬停/键盘聚焦到 1，
+ * 并整体套一个半透明胶囊：亮封面上也能读清。
+ */
 .lyrics-toolbar {
   position: absolute;
   right: 0;
@@ -660,8 +786,25 @@ html[data-platform="darwin"] .now-playing__topbar {
   display: flex;
   align-items: center;
   gap: 6px;
-  opacity: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--fill-floating);
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  opacity: 0.55;
   transition: opacity var(--dur) var(--ease-ios);
+}
+
+.lyrics-region:hover .lyrics-toolbar,
+.lyrics-toolbar:hover,
+.lyrics-toolbar:focus-within {
+  opacity: 1;
+}
+
+/* 命中区至少 28×28（图标本身 16，靠 padding 撑） */
+.lyrics-toolbar .btn--icon-sm {
+  min-width: 28px;
+  min-height: 28px;
 }
 
 .lyrics-region:hover .lyrics-toolbar {
@@ -675,7 +818,8 @@ html[data-platform="darwin"] .now-playing__topbar {
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: var(--text-caption);
-  color: var(--label-4);
+  /* --label-4 太淡（几乎看不见），提到三级文字 */
+  color: var(--label-3);
   padding-right: 4px;
 }
 

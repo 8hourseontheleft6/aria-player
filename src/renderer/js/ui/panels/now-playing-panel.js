@@ -310,6 +310,10 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
 
   const tools = h('div', { class: 'now-playing__tools' }, modeSegmented, rateButton, lyricsStateButton)
 
+  /* 无封面时方块底部写专辑名（有封面时 .has-cover 会把它藏起来） */
+  const artAlbum = h('div', { class: 'now-playing__art-album', text: '' })
+  if (art.element && art.element.appendChild) art.element.appendChild(artAlbum)
+
   const left = h('div', { class: 'now-playing__left' },
     art.element, info, progressBlock, controls, tools)
 
@@ -317,7 +321,20 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
   const lyricsView = createLyricsView({ className: 'lyrics-region', store, bus, player })
   const tabs = h('div', { class: 'now-playing__tabs' })
   const panelHost = h('div', { class: 'now-playing__panel-host' })
-  const right = h('div', { class: 'now-playing__right' }, tabs, panelHost)
+  /*
+   * 歌词隐藏时右列不是空着：给一个"显示歌词"的恢复入口。
+   * 这样宽窗口下两列的骨架还在，不会缩成中间一条窄柱（用户截图里的"看起来坏了"）。
+   */
+  const showLyricsAgain = h('div', { class: 'lyrics-show-again' },
+    h('div', { class: 'lyrics-show-again__hint', text: '歌词已隐藏' }),
+    h('button', {
+      class: 'btn btn--primary',
+      type: 'button',
+      onClick: () => actions.toggleLyrics()
+    }, icon('lyrics', { className: 'icon icon--stroke' }), '显示歌词')
+  )
+
+  const right = h('div', { class: 'now-playing__right' }, tabs, panelHost, showLyricsAgain)
 
   let activePanelId = 'lyrics'
   let panelDisposer = null
@@ -473,6 +490,13 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
     artistNode.textContent = track.artist
     albumNode.textContent = `${track.album}${track.year ? ` · ${track.year}` : ''}`
     art.setTrack(track)
+    /*
+     * 无封面占位里补一句专辑名：只显示名字太素了。
+     * has-cover 由"有没有封面来源"决定，避免占位文字盖在真封面上。
+     */
+    const hasCover = Boolean(track.artworkEmbedded || track.artworkFile)
+    if (art.element && art.element.classList) art.element.classList.toggle('has-cover', hasCover)
+    artAlbum.textContent = hasCover ? '' : (track.album || '')
     syncCoverHint()
     progress.setRange(0, track.duration || 1)
     progress.setValue(0)
@@ -504,6 +528,11 @@ export function createNowPlayingPanel ({ store, bus, player, engine, artwork, ho
     body.classList.toggle('is-lyrics-hidden', !visible)
     lyricsToggle.classList.toggle('is-active', visible)
     lyricsStateButton.classList.toggle('is-active', visible)
+    /* 开关要有"当前开/关"的状态，读屏软件也读得到 */
+    lyricsToggle.setAttribute('aria-pressed', String(visible))
+    lyricsStateButton.setAttribute('aria-pressed', String(visible))
+    const stateText = lyricsStateButton.querySelector('span')
+    if (stateText) stateText.textContent = visible ? '歌词' : '显示歌词'
     if (visible) requestAnimationFrame(() => lyricsView.alignToActive({ animated: false }))
   })
 
