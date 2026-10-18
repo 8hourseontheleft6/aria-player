@@ -388,9 +388,9 @@ function registerIpc (ctx) {
      * 其它异常照旧抛出去 —— 不要用一个大 try/catch 把所有错误都吞成"没有这个能力"，
      * 那会把真正的 bug 藏起来。
      */
-    ipcMain.handle(channel, (event, payload) => {
+    ipcMain.handle(channel, async (event, ...args) => {
       try {
-        return handler(event, payload)
+        return await handler(event, ...args)
       } catch (error) {
         if (/服务未注册/.test(String(error && error.message))) {
           console.warn(`[ipc] ${channel}：本档位没有这个能力（${error.message}）`)
