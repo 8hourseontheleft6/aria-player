@@ -91,6 +91,9 @@ contextBridge.exposeInMainWorld('aria', {
       inspect: (file) => ipcRenderer.invoke('diagnostics:inspect', file)
     },
     /* 自动更新（electron-updater）；状态变化走 updater:progress */
+    /* 设置导出/导入（主进程负责文件对话框与校验） */
+    exportSettings: (options) => ipcRenderer.invoke('settings:export', options),
+    importSettings: (options) => ipcRenderer.invoke('settings:import', options),
     updater: {
       state: () => ipcRenderer.invoke('updater:state'),
       check: () => ipcRenderer.invoke('updater:check'),

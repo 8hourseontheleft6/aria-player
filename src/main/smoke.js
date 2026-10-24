@@ -6983,6 +6983,46 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
+    /* ---------- 设置导出 / 导入 ---------- */
+    const transferDir = process.env.ARIA_USER_DATA || require('node:os').tmpdir()
+    const transferFile = require('node:path').join(transferDir, 'settings-export-probe.json')
+    const transferBad = require('node:path').join(transferDir, 'settings-bad-probe.json')
+    require('node:fs').writeFileSync(transferBad, '{ this is not json', 'utf8')
+    const transferReading = await evaluate(win, `
+      const before = await window.aria.settings.get()
+      const exported = await window.aria.app.exportSettings({ includeKey: false, path: ${JSON.stringify(transferFile)} })
+      const imported = await window.aria.app.importSettings({ path: ${JSON.stringify(transferFile)} })
+      const afterImport = await window.aria.settings.get()
+      const bad = await window.aria.app.importSettings({ path: ${JSON.stringify(transferBad)} })
+      const afterBad = await window.aria.settings.get()
+      return {
+        exported: Boolean(exported && exported.ok),
+        includesKey: exported ? exported.includesKey : null,
+        imported: Boolean(imported && imported.ok),
+        from: imported ? imported.from : '',
+        changed: imported ? (imported.changed || []).length : -1,
+        badCode: bad ? bad.code : null,
+        sameAfterImport: JSON.stringify(before) === JSON.stringify(afterImport),
+        sameAfterBad: JSON.stringify(afterImport) === JSON.stringify(afterBad)
+      }
+    `)
+    try { require('node:fs').rmSync(transferFile, { force: true }); require('node:fs').rmSync(transferBad, { force: true }) } catch {}
+
+    record('设置导出 / 导入：往返一致，坏文件被拒且原设置不变', (() => {
+      const reading = transferReading || {}
+      const ok = reading.exported === true &&
+        reading.includesKey === false &&
+        reading.imported === true &&
+        reading.sameAfterImport === true &&
+        reading.badCode === 'bad-json' &&
+        reading.sameAfterBad === true
+      return {
+        ok,
+        detail: `导出=${reading.exported}（含密钥=${reading.includesKey}）；导入=${reading.imported}（来源 ${reading.from}，变更 ${reading.changed} 项）；` +
+          `导入后设置一致=${reading.sameAfterImport}；坏 JSON→${reading.badCode}；坏文件后设置仍一致=${reading.sameAfterBad}`
+      }
+    })())
+
     /* ---------- 无缝播放（预加载下一首）---------- */
     const gaplessReading = await evaluate(win, `
       const { actions, store, player, engine, bus } = window.__aria

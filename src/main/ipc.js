@@ -259,6 +259,61 @@ function registerIpc (ctx) {
 
     /* ---------- 其它 ---------- */
     /* ---------- 诊断 ---------- */
+    /* ---------- 设置的导出 / 导入 ---------- */
+    'settings:export': async (_event, options) => {
+      const transfer = require('./services/settings-transfer')
+      const payload = transfer.buildExport(settings.get(), {
+        includeKey: Boolean(options && options.includeKey),
+        appVersion: app.getVersion()
+      })
+      const text = JSON.stringify(payload, null, 2)
+      /* 自动化：直接写到传进来的路径；正常：弹保存框 */
+      let target = options && typeof options.path === 'string' ? options.path : ''
+      if (!process.env.ARIA_USER_DATA) {
+        const picked = await dialog.showSaveDialog({
+          title: '导出设置',
+          defaultPath: `aria-settings-${app.getVersion()}.json`,
+          filters: [{ name: 'JSON', extensions: ['json'] }]
+        })
+        if (picked.canceled || !picked.filePath) return { ok: false, code: 'canceled' }
+        target = picked.filePath
+      }
+      if (!target) return { ok: false, code: 'bad-path' }
+      fs.writeFileSync(target, text, 'utf8')
+      return { ok: true, path: target, includesKey: payload.includesKey, bytes: text.length }
+    },
+    'settings:import': async (_event, options) => {
+      const transfer = require('./services/settings-transfer')
+      let source = options && typeof options.path === 'string' ? options.path : ''
+      if (!process.env.ARIA_USER_DATA) {
+        const picked = await dialog.showOpenDialog({
+          title: '导入设置',
+          properties: ['openFile'],
+          filters: [{ name: 'JSON', extensions: ['json'] }]
+        })
+        if (picked.canceled || !picked.filePaths || !picked.filePaths.length) return { ok: false, code: 'canceled' }
+        source = picked.filePaths[0]
+      }
+      if (!source) return { ok: false, code: 'bad-path' }
+      let text = ''
+      try {
+        text = fs.readFileSync(source, 'utf8')
+      } catch (error) {
+        return { ok: false, code: 'unreadable', message: String(error && error.message) }
+      }
+      /*
+       * 关键：先校验，**只有 ok 才动设置**。坏文件连 set 都不调用，
+       * 现有设置一个字节都不变（自检里有一条专门盯这个）。
+       */
+      const parsed = transfer.parseImport(text)
+      if (!parsed.ok) return parsed
+      const next = transfer.keepExistingKey(parsed.settings, settings.get())
+      const summary = transfer.summarise(parsed, settings.get())
+      settings.set(next)
+      await settings.flush()
+      return { ok: true, ...summary, path: source }
+    },
+
     /* ---------- 续播位置 ---------- */
     'resume:get': (_event, filePath) => (ctx.has('resume') ? ctx.get('resume').get(String(filePath || '')) : 0),
     'resume:set': (_event, payload) => (ctx.has('resume')

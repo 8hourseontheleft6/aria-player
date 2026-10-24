@@ -73,6 +73,8 @@ function shortcutRows () {
 }
 
 export function createSettingsView ({ store, bus, player, actions, host }) {
+  /* 「导出设置」是否连密钥一起带走（每次打开设置页都重置成 false） */
+  let exportKeepKey = false
   const element = h('div', { class: 'content-inner view-root' })
 
   /*
@@ -1758,6 +1760,68 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           settingsViewUpdaterRefs = { status, restart }
           return h('div', { class: 'settings__field settings__field--row' }, status, button, restart)
         })()
+      }),
+      row({
+        title: '导出设置',
+        sub: '把当前设置写成一个 JSON 文件。**默认不含 AI 密钥**（只记「配过没」），需要连密钥一起带走时勾下面的开关。',
+        control: h('div', { class: 'settings__field settings__field--row' },
+          /*
+           * 用"药丸下拉"而不是开关：这是一个**一次性的导出选项**，不是持久设置 ——
+           * 自检会检查"每颗开关都对应一个已有设置"，这里不该冒充设置项；
+           * 原生 checkbox 又只有 13×13，过不了「≥24×24 指针目标」那条。
+           */
+          h('span', { class: 'settings__hint', text: '包含密钥' }),
+          createPillSelect({
+            items: [{ value: 'no', label: '不包含' }, { value: 'yes', label: '包含' }],
+            value: exportKeepKey ? 'yes' : 'no',
+            title: '导出时是否包含密钥',
+            onPick: (value) => { exportKeepKey = value === 'yes' }
+          }),
+          h('button', {
+            class: 'btn btn--sm',
+            type: 'button',
+            onClick: async (event) => {
+              const button = event.currentTarget
+              button.disabled = true
+              try {
+                const result = await remote.app.exportSettings({ includeKey: exportKeepKey })
+                if (result && result.ok) {
+                  toast({ message: `设置已导出（${result.includesKey ? '含密钥' : '不含密钥'}）`, type: 'success', duration: 3200 })
+                } else if (result && result.code !== 'canceled') {
+                  toast({ message: result.message || '导出失败', type: 'error', duration: 4000 })
+                }
+              } finally {
+                button.disabled = false
+              }
+            }
+          }, '导出设置…')
+        )
+      }),
+      row({
+        title: '导入设置',
+        sub: '先校验再应用：不是 Aria 的设置文件、JSON 坏了、版本太新 —— 都会被拒绝，**现有设置一个字节都不动**。',
+        control: h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async (event) => {
+            const button = event.currentTarget
+            button.disabled = true
+            try {
+              const result = await remote.app.importSettings()
+              if (result && result.ok) {
+                toast({
+                  message: `设置已导入（来源 ${result.from}，变更 ${(result.changed || []).length} 项）`,
+                  type: 'success',
+                  duration: 3600
+                })
+              } else if (result && result.code !== 'canceled') {
+                toast({ message: result.message || '导入失败（现有设置未改动）', type: 'error', duration: 4200 })
+              }
+            } finally {
+              button.disabled = false
+            }
+          }
+        }, '导入设置…')
       }),
       row({
         title: '导出诊断包',
