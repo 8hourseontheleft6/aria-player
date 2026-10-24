@@ -1,13 +1,29 @@
 # 发版流程 / Releasing
 
-## 找安装包 / 清理旧产物
+## 找安装包 / 清理旧产物 / 归档旧版本
 
-每打一次包，`release*/` 里就多一对 exe；几十个版本之后很难找。两个命令解决：
+每打一次包，`release*/` 里就多一对 exe；几十个版本之后很难找。四个命令解决：
 
 ```bash
-npm run artifacts     # 只列当前版本（package.json 的 version）那六个，带体积与 SHA256
-npm run clean:dist    # 删掉旧版本的发行文件 + win-unpacked/.icon-ico（当前版本原样保留）
+npm run artifacts              # 只列当前版本（package.json 的 version）那六个，带体积与 SHA256
+npm run artifacts -- --all     # 再加上历史归档（release*/_archive/<版本>/）
+npm run clean:dist             # 旧版本**归档**到 release*/_archive/<版本>/，并清掉 win-unpacked/.icon-ico
+npm run clean:dist -- --purge  # 真要删（不归档）
+npm run clean:dist -- --keep-unpacked   # 要直接跑打包产物时保留 win-unpacked
+npm run fetch-release 0.1.0    # 把 GitHub Releases 上的某个旧版本拉回本地归档（用 API 的 digest 校验）
 ```
+
+**归档布局**（三个产品各一个目录，`clean:dist` 与 `fetch-release` 都往这里放）：
+
+```
+release/_archive/<版本>/          ← Aria-Setup / Aria-portable
+release-player/_archive/<版本>/   ← Aria-Player-Setup / -portable
+release-unified/_archive/<版本>/  ← Aria-Unified-Setup / -portable
+```
+
+`clean:dist` **默认是归档不是删除** —— 0.1.1 发布时手一抖把 beta 系列的本地安装包删掉过一次，
+所以默认行为改成"先留着，要删得显式写 `--purge`"。`fetch-release` 可以随时把发布过的版本
+从 GitHub 拉回来（已归档且校验通过的文件会跳过）。
 
 （`release*/` 全部在 .gitignore 里，发布走 GitHub Releases，不进仓库。）
 
