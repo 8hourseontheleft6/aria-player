@@ -74,6 +74,24 @@ npm run perf:baseline     # 5 项全测，约 2.5 分钟；读数写到 .tmp/per
 **处置**：产品代码回滚（`library.js` 恢复、pool/worker 文件删除），只保留测量代码
 （扫描段现在会采样主进程 CPU 与扫描期间的 UI 响应，方便以后重测）。
 
+## P1-2 的落点（已调研，未实施）
+
+现状链路：主进程 `library.getArtwork(trackId)` → 首次提取时缩到 480px、转 JPEG 落 `userData/artwork-cache/<id>.jpg`
+→ 渲染层 `artwork.resolveUrl(track)` 拿到 blob（内嵌图）或 `media://` URL（同名封面文件），
+再统一塞进 `urlCache`（上限 120，只按曲目 key 存，**不分档**）。
+
+要改的地方（按收益排序）：
+1. **主进程加 size 参数**（收益最大）：`getArtwork(trackId, { size })` —— `size <= 240` 时另存
+   `thumb-<id>.jpg`（从 480 那张再缩），渲染层列表/墙只取 thumb、正在播放/专辑详情取 full。
+   `nativeImage.resize` 已经在用了，不引入新依赖。
+2. **渲染层两档缓存**：把 `urlCache` 拆成 `thumbCache`（上限 80）与 `fullCache`（上限 10），
+   都用 Map 的插入序做 LRU；`releaseTier('thumb'|'full')` 主动 revoke，
+   `releaseMemory()` 保留（两档一起放）。
+3. **调用点**（共 9 处）：`track-list.js` / `media-wall.js` / `queue-panel.js` 用 thumb；
+   `now-playing-panel.js` / `track-info-panel.js` / `player-controller.js`（配色）用 full。
+   注意 `resolveCoverColor` 不能直接用 thumb —— 取色要原图，否则平均色会偏。
+4. 验收：媒体墙 renderer RSS 215.7MB → ≤180MB；列表/墙滚动无闪烁；正在播放页清晰度不变。
+
 ## P1 计划与验收口径
 
 | 项 | 主指标 | 目标 |
