@@ -1985,6 +1985,18 @@ async function main () {
           playlist.sync(list, { keepId: track.id })
         }
       }
+
+    /*
+     * 恢复上次的队列顺序（含拖动过的顺序）。只留库里还在的曲目 ——
+     * 文件被删掉之后不该留下一条点不开的行。队列顺序是"用户的排序"，优先于视图默认列表。
+     */
+    const savedQueue = Array.isArray(settings.queue)
+      ? settings.queue.filter((id) => store.get().library.byId.has(id))
+      : []
+    if (savedQueue.length) {
+      playlist.sync(savedQueue, { keepId: store.get().playback.trackId || null })
+      bus.emit(EVENTS.QUEUE_CHANGED, savedQueue)
+    }
     }
 
     /*

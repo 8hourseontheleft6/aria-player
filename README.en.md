@@ -79,6 +79,15 @@ Settings → About → **Export diagnostics** produces a zip with `info.json` (v
 a redacted `settings.json`, the last 200 log lines, the last self-check result, and a short README.
 It never contains audio, lyrics, artwork, keys, or full user paths.
 
+## Reordering the queue
+
+Open the play queue and **drag a row up or down**:
+
+- it swaps once you cross the midpoint (5 px threshold, same feel as the sidebar drag);
+- the **current track never jumps** — after the reorder the cursor is pointed back at the same song;
+- on drop the order is written to settings (`queue`) and restored on the next launch; tracks that no
+  longer exist are skipped.
+
 ## Track context menu
 
 Right-click any track:

@@ -69,6 +69,8 @@ const DEFAULTS = {
   replayGain: 'off',
   /** 记住每首歌的播放位置（续播）；关掉后连读写都不做 */
   resumePlayback: true,
+  /** 播放队列（id 列表）；拖动排序后写回这里，启动时恢复 */
+  queue: [],
   // 自动均衡时是否用「声音特征分析」辅助判断风格（本地解码，不联网）
   styleAnalysis: true,
   /*

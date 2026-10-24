@@ -63,6 +63,26 @@ export function createPlaylist ({ random = Math.random } = {}) {
   }
 
   return {
+    /**
+     * 按给定顺序重排队列。
+     *
+     * 只允许"同一批 id 换个顺序"：长度与集合都必须一致，否则原样返回（拖到一半的数据不动队列）。
+     * 重排后把游标对回**同一首** —— 拖动不该让当前曲目换成别的歌。
+     */
+    reorderQueue (ids) {
+      if (!Array.isArray(ids) || ids.length !== queue.length) return this
+      const before = new Set(queue)
+      if (!ids.every((id) => before.has(id))) return this
+      const anchor = currentId()
+      queue.length = 0
+      queue.push(...ids)
+      /* 重建 order，并把游标定位到 anchor 那一首（shuffle 开时顺序是随机的，按 order 找） */
+      rebuildOrder(anchor)
+      const at = anchor ? order.indexOf(queue.indexOf(anchor)) : -1
+      if (at >= 0) cursor = at
+      return this
+    },
+
     /** 用新的曲目列表替换队列；keepId 指定的曲目会尽力保留在当前位置 */
     sync (ids, { keepId = null } = {}) {
       const anchor = keepId || currentId()

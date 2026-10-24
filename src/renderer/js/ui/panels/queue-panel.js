@@ -53,6 +53,86 @@ export function createQueuePanel ({ store, bus, player, artwork, actions }) {
     paintCount(player.playlist.queue)
   })
 
+  /*
+   * 队列拖动排序。
+   *
+   * 骨架抄侧栏（那里已经有 pointerdown → 阈值 5px → 指针移动重排 → 松手落盘）：
+   *  · 拖动中只动 DOM（insertBefore），不给被拖的行加 transform —— 队列每行一样高，
+   *    指针一过中线就换位，简单可靠；
+   *  · 松手后把 DOM 顺序读成 id 列表交给 player.reorderQueue()，由它保证
+   *    「当前曲目不变」并把顺序写进设置。
+   */
+  const DRAG_THRESHOLD = 5
+  let drag = null
+  let suppressClick = false
+
+  function rows () {
+    return [...body.querySelectorAll('.queue-item')]
+  }
+
+  function reorderRows (pointerY, node) {
+    const others = rows().filter((item) => item !== node)
+    let index = others.findIndex((item) => {
+      const rect = item.getBoundingClientRect()
+      return pointerY < rect.top + rect.height / 2
+    })
+    if (index === -1) index = others.length
+    const next = others[index]
+    if (next) body.insertBefore(node, next)
+    else body.appendChild(node)
+  }
+
+  function onPointerMove (event) {
+    if (!drag || event.pointerId !== drag.pointerId) return
+    const dy = event.clientY - drag.startY
+    if (!drag.active) {
+      if (Math.abs(dy) < DRAG_THRESHOLD) return
+      drag.active = true
+      drag.node.classList.add('is-dragging')
+      body.classList.add('is-reordering')
+    }
+    event.preventDefault()
+    reorderRows(event.clientY, drag.node)
+  }
+
+  function endDrag (event) {
+    if (!drag || (event && event.pointerId !== drag.pointerId)) return
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', endDrag)
+    window.removeEventListener('pointercancel', endDrag)
+    const { node, active } = drag
+    drag = null
+    node.classList.remove('is-dragging')
+    body.classList.remove('is-reordering')
+    if (!active) return
+    suppressClick = true
+    setTimeout(() => { suppressClick = false }, 0)
+    const ids = rows().map((item) => item.dataset.queueId).filter(Boolean)
+    if (ids.length) {
+      player.reorderQueue(ids)
+      bus.emit(EVENTS.TOAST, { message: '队列顺序已保存', type: 'success', duration: 1600 })
+    }
+  }
+
+  function onPointerDown (event) {
+    if (event.button !== 0 || drag) return
+    const node = event.target.closest('.queue-item')
+    if (!node || !node.dataset.queueId) return
+    drag = { node, pointerId: event.pointerId, startY: event.clientY, active: false }
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', endDrag)
+    window.addEventListener('pointercancel', endDrag)
+  }
+
+  body.addEventListener('pointerdown', onPointerDown)
+  body.addEventListener('click', (event) => {
+    /* 拖动之后紧跟的那一次 click 不该被当成「跳到这首歌」 */
+    if (!suppressClick) return
+    event.stopPropagation()
+    event.preventDefault()
+    suppressClick = false
+  }, true)
+
   function render () {
     const state = store.get()
     const playlist = player.playlist
@@ -90,6 +170,7 @@ export function createQueuePanel ({ store, bus, player, artwork, actions }) {
       const row = h('button', {
         class: `queue-item${isCurrent ? ' is-current' : ''}`,
         type: 'button',
+        dataset: { queueId: track.id },
         onClick: () => {
           player.jumpToQueuePosition(position)
           actions.closeQueueOnNarrow()

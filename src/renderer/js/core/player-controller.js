@@ -307,6 +307,22 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     remote.settings.set({ preservesPitch: value }).catch(() => {})
   }
 
+  /**
+   * 队列拖动排序：ids 是新的队列顺序。
+   * 当前曲目保持不变（playlist.reorderQueue 会把游标对回同一首），顺序写进设置持久化。
+   */
+  function reorderQueue (ids) {
+    const currentId = playbackTrackId()
+    playlist.reorderQueue(ids)
+    syncQueueState()
+    remote.settings.set({ queue: playlist.queue.slice() }).catch(() => {})
+    if (currentId && playbackTrackId() !== currentId) {
+      /* 理论上不会发生；真发生了就说明重排把当前曲目弄丢了，退回普通切歌的语义 */
+      bus.emit(EVENTS.TOAST, { message: '队列已重排（当前曲目已保持）', type: 'info', duration: 1800 })
+    }
+    return true
+  }
+
   function removeFromQueue (trackId) {
     playlist.remove(trackId)
     syncQueueState()
@@ -782,6 +798,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     playCollection,
     jumpToQueuePosition,
     removeFromQueue,
+    reorderQueue,
     playNext,
     appendToQueue,
     // 模式

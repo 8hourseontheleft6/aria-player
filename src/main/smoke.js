@@ -6983,6 +6983,59 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
+    /* ---------- 队列拖动排序 ---------- */
+    const queueReading = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      const ids = store.get().library.tracks.slice(0, 4).map((track) => track.id)
+      if (ids.length < 3) return { skipped: true }
+      player.playCollection(ids, ids[0])
+      await settle(700)
+      actions.toggleQueue(true)
+      await settle(600)
+      const rows = [...document.querySelectorAll('.queue-panel .queue-item')]
+      if (rows.length < 3) return { skipped: true }
+      const before = player.playlist.queue.slice()
+      const currentBefore = store.get().playback.trackId
+      const last = rows[rows.length - 1]
+      const first = rows[0]
+      const startY = last.getBoundingClientRect().top + 6
+      const targetY = first.getBoundingClientRect().top + 2
+      const pointer = { bubbles: true, button: 0, pointerId: 77 }
+      last.dispatchEvent(new PointerEvent('pointerdown', Object.assign({}, pointer, { clientY: startY })))
+      window.dispatchEvent(new PointerEvent('pointermove', Object.assign({}, pointer, { clientY: targetY })))
+      await settle(120)
+      window.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, pointer, { clientY: targetY })))
+      await settle(700)
+      const after = player.playlist.queue.slice()
+      const currentAfter = store.get().playback.trackId
+      const persisted = (await window.aria.settings.get()).queue || []
+      const domOrder = [...document.querySelectorAll('.queue-panel .queue-item')].map((row) => row.dataset.queueId)
+      actions.toggleQueue(false)
+      await settle(300)
+      return { skipped: false, before, after, currentBefore, currentAfter, persisted, domOrder }
+    `)
+
+    record('队列拖动排序：顺序真的变、当前曲目不错位、顺序写进设置', (() => {
+      const reading = queueReading || {}
+      if (reading.skipped) return { ok: false, detail: '队列里曲目太少，跳过' }
+      const before = reading.before || []
+      const after = reading.after || []
+      const movedToFront = before.length === after.length &&
+        after[0] === before[before.length - 1] &&
+        before.slice(0, -1).every((id, index) => after[index + 1] === id)
+      const ok = movedToFront &&
+        reading.currentBefore === reading.currentAfter &&
+        reading.persisted.join('|') === after.join('|') &&
+        (reading.domOrder || []).join('|') === after.join('|')
+      return {
+        ok,
+        detail: `队列从 [${before.length} 首] → 末位移到首位=${movedToFront}；` +
+          `当前曲目不变=${reading.currentBefore === reading.currentAfter}；` +
+          `落盘一致=${reading.persisted.join('|') === after.join('|')}；DOM 与队列一致=${(reading.domOrder || []).join('|') === after.join('|')}`
+      }
+    })())
+
     /* ---------- 右键菜单：定位 / 复制路径 ---------- */
     const menuReading = await evaluate(win, `
       const { store } = window.__aria
