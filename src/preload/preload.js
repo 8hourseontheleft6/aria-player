@@ -181,6 +181,7 @@ contextBridge.exposeInMainWorld('aria', {
     artworkStats: () => ipcRenderer.invoke('library:artwork-stats'),
     clearArtworkCache: () => ipcRenderer.invoke('library:clear-artwork-cache'),
     reveal: (filePath) => ipcRenderer.invoke('library:reveal', filePath),
+    markPlayed: (id) => ipcRenderer.invoke('library:mark-played', id),
     handleDrop: (paths, options) => ipcRenderer.invoke('library:handle-drop', paths, options),
     searchLyrics: (input) => ipcRenderer.invoke('library:search-lyrics', input),
     lyricsIndex: () => ipcRenderer.invoke('library:lyrics-index'),

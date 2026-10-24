@@ -109,6 +109,7 @@ function registerIpc (ctx) {
       stats: library.getStats()
     }),
     'library:tracks': () => library.getTracks(),
+    'library:mark-played': (_event, id) => (ctx.has('library') ? ctx.get('library').markPlayed(String(id || '')) : { ok: false }),
     'library:scan': (_event, options) => library.scan(options || {}),
     'library:add-folder': (_event, dir) => library.addFolder(dir),
     'library:remove-folder': (_event, dir) => library.removeFolder(dir),

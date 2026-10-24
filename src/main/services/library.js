@@ -10,7 +10,7 @@ const { readMetadata, readEmbeddedArtwork } = require('./metadata')
 const { decodeTextBuffer } = require('../util/text')
 const { writeJsonAtomic } = require('../util/atomic-json')
 
-const CACHE_VERSION = 4 /* 4：曲目多了 ReplayGain 字段 */
+const CACHE_VERSION = 5 /* 5：曲目多了 firstSeen / lastPlayed（最近添加 / 最近播放） */
 const SCAN_CONCURRENCY = 6
 const ARTWORK_CACHE_LIMIT = 64
 /** 封面落盘缓存的边长：媒体墙最大格子 2×220px，480 足够且文件小得多 */
@@ -238,6 +238,13 @@ function createLibraryService (ctx) {
             }
 
             track.lyricsPath = await resolveLyricsPath(track)
+            /*
+             * 「最近添加 / 最近播放」的两个时间戳：
+             *  · firstSeen 只记第一次见到它的时间（重扫、移动文件都不该重置）；
+             *  · lastPlayed 由渲染层播歌时写回（library:mark-played），这里只沿用旧值。
+             */
+            track.firstSeen = (cached && Number(cached.firstSeen)) || Date.now()
+            track.lastPlayed = (cached && Number(cached.lastPlayed)) || 0
             next.push(track)
           } catch (err) {
             failed++
@@ -723,6 +730,20 @@ function createLibraryService (ctx) {
     removeFolder,
     pickFolders,
     getAllowedRoots,
+    /**
+     * 记「刚播过」。写回缓存里的 lastPlayed，供「最近播放」排序。
+     * 同一首 10 秒内重复调用直接忽略（渲染层切歌/恢复时可能连着触发）。
+     */
+    markPlayed (id) {
+      const track = byId.get(id) || byPath.get(id)
+      if (!track) return { ok: false, code: 'not-found' }
+      const now = Date.now()
+      if (Number(track.lastPlayed) && now - Number(track.lastPlayed) < 10000) return { ok: true, skipped: true }
+      track.lastPlayed = now
+      if (!track.firstSeen) track.firstSeen = now
+      saveCache().catch(() => {})
+      return { ok: true, lastPlayed: now }
+    },
     getTracks: () => tracks,
     getTrackById: (id) => byId.get(id) || null,
     getTrackByPath: (p) => byPath.get(p) || null,

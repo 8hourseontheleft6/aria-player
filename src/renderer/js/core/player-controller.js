@@ -99,6 +99,8 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
 
     bus.emit(EVENTS.TRACK_CHANGED, { track, autoplay })
     remote.settings.set({ lastTrackPath: track.path }).catch(() => {})
+    /* 「最近播放」：把 lastPlayed 写回资料库缓存（主进程 10 秒内会去重） */
+    if (autoplay && track.id) remote.library.markPlayed(track.id).catch(() => {})
 
     // 封面配色 + 歌词并行加载
     applyArtworkTint(track)

@@ -46,6 +46,14 @@ export function compareTracks (sort) {
       case 'added':
         result = (a.mtimeMs || 0) - (b.mtimeMs || 0)
         break
+      case 'firstSeen':
+        /* 最近添加：第一次被扫描到的时间（没播过也有值） */
+        result = (a.firstSeen || 0) - (b.firstSeen || 0)
+        break
+      case 'lastPlayed':
+        /* 最近播放：最后播放时间；没播过的按 0 处理（排最前面再靠 direction 翻） */
+        result = (a.lastPlayed || 0) - (b.lastPlayed || 0)
+        break
       default:
         result = titles(a, b)
         break

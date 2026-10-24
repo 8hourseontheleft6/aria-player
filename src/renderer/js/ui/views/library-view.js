@@ -17,7 +17,9 @@ const SORT_OPTIONS = [
   { key: 'album', label: '专辑' },
   { key: 'duration', label: '时长' },
   { key: 'year', label: '年份' },
-  { key: 'added', label: '文件修改时间' }
+  { key: 'added', label: '文件修改时间' },
+  { key: 'firstSeen', label: '最近添加（新的在前）' },
+  { key: 'lastPlayed', label: '最近播放（新的在前）' }
 ]
 
 export function createLibraryView ({ store, bus, player, artwork, actions, trackListOptions }) {

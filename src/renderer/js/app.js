@@ -647,6 +647,23 @@ async function main () {
       return result
     },
 
+    /**
+     * 「最近添加 / 最近播放」：回到全部歌曲并按对应时间**新的在前**。
+     * 不做成独立视图 —— 列表、多选、右键菜单、搜索全都复用同一套。
+     */
+    showRecent (kind) {
+      const key = kind === 'played' ? 'lastPlayed' : 'firstSeen'
+      store.set((state) => ({
+        ...state,
+        ui: {
+          ...state.ui,
+          view: 'songs',
+          source: { type: 'all', value: null },
+          sort: { key, direction: 'desc' }
+        }
+      }))
+    },
+
     setSort (key) {
       if (!SORT_KEYS.includes(key)) return
       store.set((state) => {

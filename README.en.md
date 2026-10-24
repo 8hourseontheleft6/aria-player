@@ -51,6 +51,17 @@ goes online for this feature is when **you** press "Download model" (about 229 M
 - Optional post-processing (both off by default) can send the **lyric text only** — never audio —
   to an OpenAI-compatible endpoint you configure yourself.
 
+## Recently added / recently played
+
+The songs list's **sort menu** has two new entries: **recently added (newest first)** and
+**recently played (newest first)**. The first sorts by the first time a file was scanned (rescans do
+not reset it); the second by the last play time (never-played tracks sort last).
+
+The timestamps live in the library cache (`firstSeen` / `lastPlayed`); playback writes them back via
+the main process, de-duplicated within 10 seconds. We deliberately did **not** add two new sidebar
+pages: the sidebar/island assertions are pinned to four entries, and the sort entries cover the same
+two use cases without loosening them.
+
 ## Duplicate detection
 
 Settings → About → **Scan for duplicates**. Two stages, so the whole library is never hashed:

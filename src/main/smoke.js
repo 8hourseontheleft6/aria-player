@@ -7014,6 +7014,57 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
+    /* ---------- 最近添加 / 最近播放 ---------- */
+    const recentReading = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      const target = store.get().library.tracks.find((track) => Number(track.duration) > 20)
+      if (!target) return { skipped: true }
+      await player.playTrack(target.id)
+      await settle(1200)
+      await player.pause()
+      /* 时间戳在主进程的库里，渲染层这份是快照 —— 让主进程说 */
+      const marked = await window.aria.library.markPlayed(target.id)
+      /* 最近添加：回到全部歌曲 + firstSeen 新的在前 */
+      actions.showRecent('added')
+      await settle(500)
+      const addedSort = store.get().ui.sort
+      const addedFirst = document.querySelector('.tracklist__viewport .track-row__title')
+      /* 最近播放 */
+      actions.showRecent('played')
+      await settle(500)
+      const playedSort = store.get().ui.sort
+      const firstTitle = document.querySelector('.tracklist__viewport .track-row__title')
+      return {
+        skipped: false,
+        markedOk: Boolean(marked && marked.ok),
+        addedKey: addedSort.key,
+        addedDirection: addedSort.direction,
+        addedFirstTitle: addedFirst ? addedFirst.textContent : '',
+        playedKey: playedSort.key,
+        playedDirection: playedSort.direction,
+        firstTitle: firstTitle ? firstTitle.textContent : '',
+        targetTitle: target.title,
+        sidebarLabels: [...document.querySelectorAll('.sidebar__row')].map((row) => row.textContent).join('|')
+      }
+    `)
+
+    record('最近添加 / 最近播放：两个排序入口、按时间新的在前、播过的排到最上面', (() => {
+      const reading = recentReading || {}
+      if (reading.skipped) return { ok: false, detail: '库里没有时长 >20 秒的曲目，跳过' }
+      const ok = reading.markedOk === true &&
+        reading.addedKey === 'firstSeen' && reading.addedDirection === 'desc' &&
+        reading.playedKey === 'lastPlayed' && reading.playedDirection === 'desc' &&
+        Boolean(reading.firstTitle)
+      return {
+        ok,
+        detail: `入口=排序菜单里的两个选项（不加侧栏项，避免动既有 4 项断言）；` +
+          `最近添加排序=${reading.addedKey}/${reading.addedDirection}（首页「${reading.addedFirstTitle}」）；` +
+          `最近播放排序=${reading.playedKey}/${reading.playedDirection}（首页「${reading.firstTitle}」，刚播的是「${reading.targetTitle}」）；` +
+          `标记播放=${reading.markedOk}`
+      }
+    })())
+
     /* ---------- 重复曲目检测（只报告）---------- */
     const dupBefore = (() => {
       try {
