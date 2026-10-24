@@ -1159,6 +1159,41 @@ async function main () {
     if (view === 'albums' || view === 'artists') browseView.render()
   })
 
+  /*
+   * 离开媒体墙 5 秒就释放（最小化释放是另一条路径，见 background-release.js）。
+   *
+   * 一面墙是 457 格 / 3757 节点，切到歌曲页之后没人看，留着纯占内存。
+   * 回来时走墙自己的 refresh() 重建（它会因为 albumList 为空而重建），再把平移位置放回去。
+   * 正在播放、迷你歌词都不碰：它们不在墙的 DOM 里。
+   */
+  let wallIdleTimer = null
+  let wallIdleReleased = false
+  let wallIdlePan = null
+  store.select((state) => state.ui.view === 'wall', (onWall) => {
+    if (onWall) {
+      if (wallIdleTimer) {
+        clearTimeout(wallIdleTimer)
+        wallIdleTimer = null
+      }
+      if (wallIdleReleased) {
+        wallIdleReleased = false
+        mediaWall.refresh()
+        if (wallIdlePan) mediaWall.setPan(wallIdlePan)
+      }
+      return
+    }
+    if (wallIdleTimer || wallIdleReleased) return
+    wallIdleTimer = setTimeout(() => {
+      wallIdleTimer = null
+      /* 后台释放（最小化）已经动手的话就不要再拆一次 */
+      if (!mediaWall.tileCount) return
+      wallIdlePan = mediaWall.getPan()
+      const freed = mediaWall.release()
+      wallIdleReleased = true
+      bus.emit(EVENTS.TOAST, { message: `媒体墙已释放（${freed.tiles} 格 / ${freed.nodes} 节点）`, type: 'info', duration: 1600 })
+    }, 5000)
+  })
+
   store.select((state) => state.ui.sidebarVisible, (visible) => {
     dom.app.classList.toggle('is-sidebar-hidden', !visible)
   })

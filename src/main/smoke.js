@@ -7067,6 +7067,46 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
+    /* ---------- 媒体墙：离开视图 5 秒后释放 ---------- */
+    const wallIdleReading = await evaluate(win, `
+      const { actions, store } = window.__aria
+      const wall = window.__aria.views.mediaWall
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      actions.setView('wall')
+      await settle(1500)
+      const inWall = { tiles: wall.tileCount, nodes: document.querySelectorAll('.wall-viewport *').length }
+      /* 动一下平移，回来时要还原 */
+      wall.setPan({ x: -420, y: -260 })
+      await settle(300)
+      const panBefore = wall.getPan()
+      actions.setView('songs')
+      await settle(7000)
+      const away = { tiles: wall.tileCount, nodes: document.querySelectorAll('.wall-viewport *').length }
+      actions.setView('wall')
+      await settle(2000)
+      const back = { tiles: wall.tileCount, nodes: document.querySelectorAll('.wall-viewport *').length, pan: wall.getPan() }
+      actions.setPan ? null : null
+      return { inWall, panBefore, away, back }
+    `)
+
+    record('媒体墙：离开视图 5 秒后释放格子与节点，回来自动重建并还原平移', (() => {
+      const reading = wallIdleReading || {}
+      const inWall = reading.inWall || {}
+      const away = reading.away || {}
+      const back = reading.back || {}
+      const pan = reading.panBefore || {}
+      const restored = back.pan && Math.abs((back.pan.x || 0) - (pan.x || 0)) < 2 && Math.abs((back.pan.y || 0) - (pan.y || 0)) < 2
+      const ok = inWall.tiles > 100 &&
+        away.tiles === 0 && away.nodes <= 5 &&
+        back.tiles > 100 && back.nodes > 1000 &&
+        restored === true
+      return {
+        ok,
+        detail: `在墙 ${inWall.tiles} 格 / ${inWall.nodes} 节点 → 离开 7 秒后 ${away.tiles} 格 / ${away.nodes} 节点` +
+          ` → 回墙 ${back.tiles} 格 / ${back.nodes} 节点；平移 (${pan.x},${pan.y}) → (${back.pan ? back.pan.x : '?'},${back.pan ? back.pan.y : '?'})，还原=${restored}`
+      }
+    })())
+
     /* ---------- 重复曲目检测（只报告）---------- */
     const dupBefore = (() => {
       try {

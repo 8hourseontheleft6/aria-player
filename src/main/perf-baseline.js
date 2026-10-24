@@ -72,6 +72,17 @@ const FPS_PROBE = `
     worst: Math.round(sorted[sorted.length - 1] * 100) / 100
   }`
 
+/** 统一的"清一次 GC"：渲染层与主进程都清，然后再采样 */
+async function collectGarbage (win) {
+  try {
+    await evaluate(win, 'window.gc && window.gc(); return true')
+  } catch {}
+  try {
+    if (typeof global.gc === 'function') global.gc()
+  } catch {}
+  await sleep(400)
+}
+
 async function runPerfBaseline ({ win, ctx }) {
   const { app } = require('electron')
   const out = { at: new Date().toISOString(), version: app.getVersion() }
@@ -200,6 +211,36 @@ async function runPerfBaseline ({ win, ctx }) {
   out.scan = { coldMs, warmMs, files, uiLatencyMs, mainCpu, cpuSamples: cpuSamples.length, pool: poolStats }
   console.log(`5) 扫描：强制全量 ${coldMs}ms ／ 复用缓存 ${warmMs}ms，${files} 个文件；` +
     `扫描期间主进程 CPU 均值 ${mainCpu}%（${cpuSamples.length} 次采样）、UI 响应上限 ${uiLatencyMs}ms` + (poolStats ? `；worker 池 ${poolStats.size} 个` : ''))
+
+  /* ---------- 6. 离开媒体墙（P1-3）---------- */
+  await evaluate(win, `window.__aria.actions.setView('wall'); return true`)
+  await sleep(3000)
+  const wallProbe = `
+    const nodes = document.querySelectorAll('.wall-viewport *').length
+    const tiles = document.querySelectorAll('.wall-tile').length
+    const pan = window.__aria.views.mediaWall.getPan ? window.__aria.views.mediaWall.getPan() : null
+    return { nodes, tiles, pan }`
+  await collectGarbage(win)
+  const wallBefore = await evaluate(win, wallProbe)
+  await evaluate(win, `window.__aria.actions.setView('songs'); return true`)
+  await sleep(10000)
+  await collectGarbage(win)
+  const wallAway = await evaluate(win, wallProbe)
+  const awayMemory = memoryByType()
+  await evaluate(win, `window.__aria.actions.setView('wall'); return true`)
+  await sleep(2500)
+  await collectGarbage(win)
+  const wallBack = await evaluate(win, wallProbe)
+  out.wallIdle = {
+    before: { ...wallBefore, rendererMB: out.wall.byType.renderer ? out.wall.byType.renderer.rssMB : 0 },
+    away: { ...wallAway, rendererMB: awayMemory.renderer ? awayMemory.renderer.rssMB : 0 },
+    back: wallBack,
+    panRestored: Boolean(wallBefore.pan && wallBack.pan &&
+      wallBefore.pan.x === wallBack.pan.x && wallBefore.pan.y === wallBack.pan.y)
+  }
+  console.log(`6) 离开媒体墙：在墙 ${wallBefore.nodes} 节点（renderer ${out.wallIdle.before.rendererMB}MB）` +
+    ` → 去歌曲页 10s 后 ${wallAway.nodes} 节点（renderer ${out.wallIdle.away.rendererMB}MB）` +
+    ` → 回墙 ${wallBack.nodes} 节点，平移还原=${out.wallIdle.panRestored}`)
 
   /* 落一份 JSON，方便与改后对比 */
   const target = path.join(process.cwd(), '.tmp', `perf-baseline-${Date.now()}.json`)

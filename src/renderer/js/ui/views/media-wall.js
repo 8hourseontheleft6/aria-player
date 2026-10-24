@@ -1413,6 +1413,18 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     element,
     refresh,
     release,
+    /* 离开视图释放前记下平移位置，回来重建后还原（不保留 DOM） */
+    getPan: () => ({ x: pan.x, y: pan.y }),
+    setPan: ({ x = 0, y = 0 } = {}) => {
+      target.x = x
+      target.y = y
+      if (panFrame) {
+        cancelAnimationFrame(panFrame)
+        panFrame = null
+      }
+      flushPan(false)
+      return { x: pan.x, y: pan.y }
+    },
     focusFeatured,
     get density () { return density },
     get layout () { return layout },
