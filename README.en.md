@@ -19,6 +19,8 @@ A local music player for Windows and macOS with an iOS-flavoured interface. Elec
 | --- | --- |
 | ![Media wall](docs/screenshots/12-wall.png) | ![Dark library](docs/screenshots/08-library-dark.png) |
 
+> Current version: see `package.json` (latest release: **0.2.0-beta.3**); history in [CHANGELOG.md](CHANGELOG.md).
+
 ## Three products, one codebase
 
 Same source, three identities. The only difference is **which capabilities get mounted at launch**

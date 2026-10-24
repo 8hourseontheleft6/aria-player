@@ -6,7 +6,7 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
 
 ![tech](https://img.shields.io/badge/Electron-43-0a84ff) ![tech](https://img.shields.io/badge/渲染层-原生%20ESM-5e5ce6)
 
-> 版本见 `package.json`：开发中，尚未发布正式版本，接口与数据结构仍可能变动。
+> 当前版本见 `package.json`（最近发布：**0.2.0-beta.3**）；变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 三个产品
 
@@ -224,7 +224,7 @@ ollama pull qwen2.5:7b            # 或者任何你喜欢的模型
 
 ## 自动更新
 
-打好的包会在启动 20 秒后（不阻塞启动）去 GitHub Releases 查一次更新，设置 → 关于里有
+打好的包会在启动 20 秒后（不阻塞启动）去**仓库里的固定 feed**（`updates/<产品>/latest.yml`）查一次更新，设置 → 关于里有
 **「检查更新」**：发现新版本会自动下载并显示进度，下完按钮变成 **「重启安装」**。
 没有更新时明确显示「已是最新版本」；自动检查失败只写日志，手动检查失败才给一句
 「网络不可用，稍后再试」，不会弹窗轰炸。
