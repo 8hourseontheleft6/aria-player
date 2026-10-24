@@ -6983,6 +6983,45 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
+    /* ---------- 右键菜单：定位 / 复制路径 ---------- */
+    const menuReading = await evaluate(win, `
+      const { store } = window.__aria
+      const track = store.get().library.tracks.find((item) => item && item.path)
+      if (!track) return { skipped: true }
+      const real = await window.aria.library.reveal(track.path)
+      const missing = await window.aria.library.reveal('C:\\\\definitely-missing\\\\nope.mp3')
+      const badPath = await window.aria.library.reveal('')
+      const copied = await window.aria.files.copyPath(track.path)
+      const noPath = await window.aria.files.copyPath('')
+      return {
+        skipped: false,
+        realOk: Boolean(real && real.ok),
+        missingCode: missing ? missing.code : null,
+        badPathCode: badPath ? badPath.code : null,
+        copiedOk: Boolean(copied && copied.ok),
+        copiedText: copied ? copied.text : '',
+        expectedText: track.path,
+        noPathCode: noPath ? noPath.code : null
+      }
+    `)
+
+    record('右键菜单：本地文件能定位与复制路径，文件不存在/没有路径时给明确结果', (() => {
+      const reading = menuReading || {}
+      if (reading.skipped) return { ok: false, detail: '库里没有带本地路径的曲目，跳过' }
+      const ok = reading.realOk === true &&
+        reading.missingCode === 'missing' &&
+        reading.badPathCode === 'bad-path' &&
+        reading.copiedOk === true &&
+        reading.copiedText === reading.expectedText &&
+        reading.noPathCode === 'bad-path'
+      return {
+        ok,
+        detail: `定位已有的文件=${reading.realOk}；不存在的文件→${reading.missingCode}；空路径→${reading.badPathCode}；` +
+          `复制路径=${reading.copiedOk}（内容一致=${reading.copiedText === reading.expectedText}）；` +
+          `复制空路径→${reading.noPathCode}`
+      }
+    })())
+
     /* ---------- 自动更新：本地 feed 跑一遍「发现 → 下载 → 提示重启」 ---------- */
     const updaterReading = await (async () => {
       const http = require('node:http')

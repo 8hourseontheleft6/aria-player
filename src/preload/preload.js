@@ -256,6 +256,11 @@ contextBridge.exposeInMainWorld('aria', {
     onChanged: (handler) => on('theme:changed', handler)
   },
 
+  /* 本地文件的小工具：定位、复制路径（在线音源没有 path，用不到） */
+  files: {
+    copyPath: (filePath) => ipcRenderer.invoke('files:copy-path', filePath)
+  },
+
   shell: {
     openExternal: (url) => ipcRenderer.invoke('shell:open-external', url)
   },

@@ -764,7 +764,30 @@ async function main () {
 
     revealTrack (track) {
       if (!track) return
-      remote.library.reveal(track.path)
+      if (!track.path) {
+        toast({ message: '在线音源没有本地文件可定位', type: 'info', duration: 2600 })
+        return
+      }
+      remote.library.reveal(track.path).then((result) => {
+        if (result && result.ok === false) {
+          toast({ message: result.message || '文件不在了（可能被移动或删除）', type: 'error', duration: 3600 })
+        }
+      }).catch(() => {})
+    },
+
+    /** 复制本地文件路径（在线音源给一句说明，不复制假的路径） */
+    async copyTrackPath (track) {
+      if (!track) return
+      if (!track.path) {
+        toast({ message: '在线音源没有本地路径可复制', type: 'info', duration: 2600 })
+        return
+      }
+      const result = await remote.files.copyPath(track.path).catch(() => null)
+      toast({
+        message: result && result.ok ? '已复制文件路径' : '复制失败，剪贴板不可用',
+        type: result && result.ok ? 'success' : 'error',
+        duration: 2400
+      })
     },
 
     revealUserData () {

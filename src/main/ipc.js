@@ -1,6 +1,7 @@
 'use strict'
 
 const { ipcMain, BrowserWindow, app, globalShortcut, nativeTheme, shell, dialog } = require('electron')
+const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 const { publicSettings } = require('./services/settings')
@@ -131,8 +132,21 @@ function registerIpc (ctx) {
     'library:search-lyrics': (_event, input) => library.searchLyrics(input || {}),
     'library:lyrics-index': () => library.getLyricsIndexStats(),
     'library:reveal': (_event, filePath) => {
-      if (typeof filePath === 'string' && filePath) library.revealInFolder(filePath)
-      return true
+      const target = String(filePath || '')
+      if (!target) return { ok: false, code: 'bad-path' }
+      if (!fs.existsSync(target)) return { ok: false, code: 'missing', message: '文件不在了（可能被移动或删除）' }
+      /* 自动化里不真的弹资源管理器（会抢焦点） */
+      if (process.env.ARIA_USER_DATA) return { ok: true, quiet: true }
+      if (ctx.has('library')) ctx.get('library').revealInFolder(target)
+      else shell.showItemInFolder(target)
+      return { ok: true }
+    },
+    'files:copy-path': (_event, filePath) => {
+      const target = String(filePath || '')
+      if (!target) return { ok: false, code: 'bad-path' }
+      const { clipboard } = require('electron')
+      clipboard.writeText(target)
+      return { ok: true, text: target }
     },
 
     /* ---------- 歌词 ---------- */

@@ -63,9 +63,17 @@ export function createTrackMenu ({ store, bus, player, host, actions }) {
         }
       },
       {
+        /* 只有本地文件才有"所在文件夹"；在线音源的 path 为空 */
         label: '在文件夹中显示',
         icon: 'folder',
+        disabled: !track.path,
         onClick: () => actions.revealTrack(track)
+      },
+      {
+        label: '复制文件路径',
+        icon: 'external',
+        disabled: !track.path,
+        onClick: () => actions.copyTrackPath(track)
       },
       {
         label: '复制歌曲信息',

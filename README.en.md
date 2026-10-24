@@ -79,6 +79,17 @@ Settings → About → **Export diagnostics** produces a zip with `info.json` (v
 a redacted `settings.json`, the last 200 log lines, the last self-check result, and a short README.
 It never contains audio, lyrics, artwork, keys, or full user paths.
 
+## Track context menu
+
+Right-click any track:
+
+- **Show in folder** — reveals the file in Explorer/Finder (`shell.showItemInFolder`);
+- **Copy file path** — puts the absolute path on the clipboard.
+
+Both apply to **local files only**: online sources have no local path, so those two entries are
+disabled; if the file has been moved or deleted you get an explicit "the file is gone" message
+instead of a silent no-op.
+
 ## Resume positions
 
 On by default (Settings → Equaliser → **Remember playback position**). While playing, the position is
