@@ -17,20 +17,32 @@ const { app, shell } = require('electron')
 
 const STATES = ['idle', 'checking', 'not-available', 'available', 'downloading', 'downloaded', 'error']
 
-/**
- * 这个产品该用哪个更新通道。
+/*
+ * 更新源：**generic provider + 仓库里的固定 feed 目录**。
  *
- * 三个产品共用一个 GitHub 仓库：本体 latest.yml、player latest-player.yml、
- * unified latest-unified.yml。认 productName（打包后的 app.getName()），
- * 自动化里允许用 ARIA_PRODUCT 覆盖。
+ * 为什么不用 GitHub provider：electron-updater 的 `channel` 同时是「预发布通道」和
+ * 「latest-<channel>.yml 的后缀」。三个产品要各自的 yml 就得设 channel，可一设 channel，
+ * beta 版就匹配不上 releases.atom 里的 beta 条目（源码 GitHubProvider 51–85 行：
+ * shouldFetchVersion 与 isNextPreRelease 双双为 false → "No published versions on GitHub"）。
+ *
+ * 换成 generic 之后：每个产品一个固定目录，文件名统一是 latest.yml，没有任何二义性。
+ * feed 里的 url 是**绝对地址**（指向 GitHub Release 资产），所以安装包仍然只在
+ * Releases 上放一份，不用往仓库里塞二进制。
  */
-function channelOf () {
+const FEEDS = {
+  aria: 'https://raw.githubusercontent.com/8hourseontheleft6/aria-player/main/updates/aria',
+  player: 'https://raw.githubusercontent.com/8hourseontheleft6/aria-player/main/updates/player',
+  unified: 'https://raw.githubusercontent.com/8hourseontheleft6/aria-player/main/updates/unified'
+}
+
+/** 这个产品该用哪个 feed（认 productName；自动化里允许 ARIA_PRODUCT 覆盖） */
+function feedOf () {
   const forced = process.env.ARIA_PRODUCT
-  if (forced === 'player' || forced === 'unified') return forced
+  if (forced === 'player' || forced === 'unified') return FEEDS[forced]
   const name = String(app.getName() || '')
-  if (/player/i.test(name) && !/unified/i.test(name)) return 'player'
-  if (/unified/i.test(name)) return 'unified'
-  return 'latest'
+  if (/unified/i.test(name)) return FEEDS.unified
+  if (/player/i.test(name)) return FEEDS.player
+  return FEEDS.aria
 }
 
 /** 纯函数：状态 → 给人看的一句话（自检直接测它） */
@@ -115,12 +127,11 @@ function createUpdaterService (ctx) {
       /* 自检要在开发态验证整条链路 —— electron-updater 默认在 dev 下不工作 */
       if (forced) autoUpdater.forceDevUpdateConfig = true
       /*
-       * 三个产品共用一个 GitHub 仓库：本体用 latest.yml，
-       * player / unified 用 latest-player.yml / latest-unified.yml（electron-builder 的 channel）。
-       * 不设 channel 的话，player 会把本体的安装包当成自己的更新。
+       * 更新源：generic provider + 仓库里的固定 feed（见文件顶部的 FEEDS 说明）。
+       * 不用 GitHub provider 的 channel —— 那会同时改变"预发布过滤"和"yml 文件名"。
        */
-      autoUpdater.channel = channelOf()
-      log.info('更新通道', { channel: autoUpdater.channel })
+      autoUpdater.setFeedURL({ provider: 'generic', url: feedOf() })
+      log.info('更新源', { feed: feedOf() })
       autoUpdater.autoInstallOnAppQuit = true
       autoUpdater.logger = {
         info: (message) => log.info('[updater] ' + message),
@@ -250,4 +261,4 @@ function createUpdaterService (ctx) {
   }
 }
 
-module.exports = { createUpdaterService, describeState, reduceEvent, channelOf, STATES }
+module.exports = { createUpdaterService, describeState, reduceEvent, feedOf, FEEDS, STATES }

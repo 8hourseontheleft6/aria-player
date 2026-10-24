@@ -76,6 +76,35 @@ check('dist 脚本都带 --publish never（别让构建直接推 GitHub）',
 check('appId / productName 没改',
   pkg.name === 'aria-player' && fs.readFileSync(path.join(ROOT, 'electron-builder.yml'), 'utf8').includes('appId: com.aria.player'))
 
+/* ---------------- ④ 固定 feed（generic provider）---------------- */
+
+const updaterModule = require(path.join(ROOT, 'src/main/services/updater'))
+const FEEDS = updaterModule.FEEDS || {}
+check('三个产品各有一个固定 feed', Object.keys(FEEDS).join(',') === 'aria,player,unified',
+  Object.keys(FEEDS).join(','))
+check('feed 指向仓库里的 updates/<产品>',
+  Object.values(FEEDS).every((url) => /\/main\/updates\/(aria|player|unified)$/.test(url)),
+  Object.values(FEEDS).join(' / '))
+
+for (const product of ['aria', 'player', 'unified']) {
+  const file = path.join(ROOT, 'updates', product, 'latest.yml')
+  if (!fs.existsSync(file)) {
+    problems.push(`缺少 updates/${product}/latest.yml`)
+    continue
+  }
+  const text = fs.readFileSync(file, 'utf8')
+  const urls = [...text.matchAll(/url: (https:\/\/\S+)/g)].map((match) => match[1])
+  const hasSha = /sha512: \S+/.test(text)
+  const hasSize = /size: \d+/.test(text)
+  const version = /^version: (\S+)/m.exec(text)
+  check(`updates/${product}/latest.yml：版本行正确`, Boolean(version) && /^\d+\.\d+\.\d+/.test(version[1]),
+    version ? version[1] : '无')
+  check(`updates/${product}/latest.yml：下载地址是 GitHub Release 的绝对地址`,
+    urls.length > 0 && urls.every((url) => url.startsWith('https://github.com/8hourseontheleft6/aria-player/releases/download/')),
+    urls.join(','))
+  check(`updates/${product}/latest.yml：带 sha512 与 size`, hasSha && hasSize)
+}
+
 /* 主进程里确实挂了延迟检查与 IPC */
 const main = fs.readFileSync(path.join(ROOT, 'src/main/main.js'), 'utf8')
 check('启动后延迟检查（不阻塞）', /updater\.schedule\(/.test(main))

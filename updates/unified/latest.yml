@@ -1,0 +1,8 @@
+version: 0.2.0-beta.2
+files:
+  - url: https://github.com/8hourseontheleft6/aria-player/releases/download/v0.2.0-beta.2/Aria-Unified-Setup-0.2.0-beta.2.exe
+    sha512: X8ZwEBvFBZUzPzJv0zma7yIr7FWpOk7HDhdBKhnBoYhkTNhxv7bJis/6GI7fSuKFOvzcoeEpOBumCae8VCNMpA==
+    size: 112710846
+path: https://github.com/8hourseontheleft6/aria-player/releases/download/v0.2.0-beta.2/Aria-Unified-Setup-0.2.0-beta.2.exe
+sha512: X8ZwEBvFBZUzPzJv0zma7yIr7FWpOk7HDhdBKhnBoYhkTNhxv7bJis/6GI7fSuKFOvzcoeEpOBumCae8VCNMpA==
+releaseDate: '2026-10-24T06:08:48.294Z'
