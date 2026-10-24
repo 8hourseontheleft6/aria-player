@@ -1,4 +1,4 @@
-'use strict'
+﻿'use strict'
 
 /**
  * 自检（smoke test）：在真实 Electron 环境里跑一遍完整链路。
@@ -7011,6 +7011,47 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         ok,
         detail: `记录的秒数=${reading.saved}（期望 18–26）；切回来从 ${reading.resumed.toFixed ? reading.resumed.toFixed(1) : reading.resumed}s 开始（期望 ≥17）；` +
           `开关=${reading.enabled}；表里条数=${reading.count}`
+      }
+    })())
+
+    /* ---------- 重复曲目检测（只报告）---------- */
+    const dupBefore = (() => {
+      try {
+        const tracks = ctx.get('library').getTracks()
+        return { count: tracks.length, sizes: tracks.slice(0, 50).map((track) => track.size).join(',') }
+      } catch { return { count: -1, sizes: '' } }
+    })()
+    const dupReading = await evaluate(win, `
+      const report = await window.aria.app.duplicates.scan()
+      return {
+        ok: Boolean(report && report.ok),
+        scanned: report ? report.scanned : -1,
+        exact: report && report.exact ? report.exact.length : -1,
+        likely: report && report.likely ? report.likely.length : -1,
+        exactShape: report && report.exact && report.exact[0] ? Object.keys(report.exact[0]).sort().join(',') : '',
+        groupsHavePaths: report && report.exact ? report.exact.every((group) => group.tracks.every((track) => Boolean(track.path))) : false
+      }
+    `)
+    const dupAfter = (() => {
+      try {
+        const tracks = ctx.get('library').getTracks()
+        return { count: tracks.length, sizes: tracks.slice(0, 50).map((track) => track.size).join(',') }
+      } catch { return { count: -1, sizes: '' } }
+    })()
+
+    record('重复曲目检测：能扫出分组、只报告不改文件', (() => {
+      const reading = dupReading || {}
+      const ok = reading.ok === true &&
+        reading.scanned === dupBefore.count &&
+        reading.exact >= 0 && reading.likely >= 0 &&
+        reading.groupsHavePaths === true &&
+        dupAfter.count === dupBefore.count &&
+        dupAfter.sizes === dupBefore.sizes
+      return {
+        ok,
+        detail: `扫描=${reading.scanned} 首（库内 ${dupBefore.count}）；完全重复 ${reading.exact} 组、可能重复 ${reading.likely} 组；` +
+          `分组字段=[${reading.exactShape}]；每组都带路径=${reading.groupsHavePaths}；` +
+          `库未被改动=${dupAfter.count === dupBefore.count && dupAfter.sizes === dupBefore.sizes}`
       }
     })())
 

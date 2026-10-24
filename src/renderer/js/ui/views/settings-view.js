@@ -1705,6 +1705,52 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         h('div', {}, `配置文件目录：${info?.userData || '-'}`)
       ),
       row({
+        title: '检查重复曲目',
+        sub: '先按「文件大小 + 时长」初筛，再对可疑的算内容指纹。**只报告，不会删任何文件**；'
+          + '不同码率的同一首歌只标「可能重复」，不会当成完全重复。',
+        control: h('div', { class: 'settings__field' },
+          (() => {
+            const summary = h('div', { class: 'settings__hint', text: '' })
+            const list = h('div', { class: 'settings__hint' })
+            const button = h('button', {
+              class: 'btn btn--sm',
+              type: 'button',
+              onClick: async () => {
+                button.disabled = true
+                summary.textContent = '正在扫描…'
+                clear(list)
+                try {
+                  const report = await remote.duplicates.scan()
+                  if (!report || !report.ok) {
+                    summary.textContent = (report && report.message) || '扫描失败'
+                    return
+                  }
+                  summary.textContent = `扫描了 ${report.scanned} 首：完全重复 ${report.exact.length} 组、可能重复 ${report.likely.length} 组`
+                  for (const group of report.exact.slice(0, 3)) {
+                    list.appendChild(h('div', { class: 'settings__hint' },
+                      `完全重复 ${group.tracks.length} 份：${group.tracks[0].title || group.tracks[0].path}`,
+                      h('button', {
+                        class: 'btn btn--sm',
+                        type: 'button',
+                        onClick: () => actions.playTrack(group.tracks[0].id)
+                      }, '播放第一份')
+                    ))
+                  }
+                  for (const group of report.likely.slice(0, 3)) {
+                    list.appendChild(h('div', { class: 'settings__hint' },
+                      `可能重复：${group.tracks[0].title || ''}（${group.tracks.length} 份，不同码率）`
+                    ))
+                  }
+                } finally {
+                  button.disabled = false
+                }
+              }
+            }, '扫描重复…')
+            return [button, summary, list]
+          })()
+        )
+      }),
+      row({
         title: '当前版本',
         sub: '排查问题时先确认这一行。',
         control: h('span', { class: 'settings__hint', text: `Aria ${info?.version || '0.0.0-dev'}` })

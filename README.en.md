@@ -51,6 +51,20 @@ goes online for this feature is when **you** press "Download model" (about 229 M
 - Optional post-processing (both off by default) can send the **lyric text only** — never audio —
   to an OpenAI-compatible endpoint you configure yourself.
 
+## Duplicate detection
+
+Settings → About → **Scan for duplicates**. Two stages, so the whole library is never hashed:
+
+1. **Pre-filter** by file size + duration (±1 s) — identical files always share a bucket;
+2. **Compare** a content fingerprint inside each bucket (first 64 KB + last 64 KB + size, SHA1) —
+   equal fingerprints mean **exact duplicates**.
+
+A separate **likely duplicates** list covers same artist + title + duration but different sizes
+(different bitrate/source); those are never reported as exact duplicates.
+
+It **only reports** — no file is ever deleted — and every group carries its paths so you can play the
+first copy from the UI.
+
 ### Bundled VAD, on-demand model
 
 `silero_vad.onnx` (643,854 bytes, SHA256 `9e2449…1fd6`) ships **inside the installer** for

@@ -259,6 +259,14 @@ function registerIpc (ctx) {
 
     /* ---------- 其它 ---------- */
     /* ---------- 诊断 ---------- */
+    /* ---------- 重复曲目检测（只报告，绝不删文件）---------- */
+    'duplicates:scan': async () => {
+      if (!ctx.has('library')) return { ok: false, code: 'unavailable', message: '这个档位没有资料库' }
+      const duplicates = require('./services/duplicates')
+      const report = await duplicates.scan(ctx.get('library').getTracks())
+      return { ok: true, ...report }
+    },
+
     /* ---------- 设置的导出 / 导入 ---------- */
     'settings:export': async (_event, options) => {
       const transfer = require('./services/settings-transfer')
