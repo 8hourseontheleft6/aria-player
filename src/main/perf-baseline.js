@@ -152,39 +152,54 @@ async function runPerfBaseline ({ win, ctx }) {
     `帧间隔中位 ${wall.median}ms（≈${Math.round(1000 / wall.median)}fps，p95 ${wall.p95}ms）；` +
     `renderer ${out.wall.byType.renderer ? out.wall.byType.renderer.rssMB : '?'}MB`)
 
-  /* ---------- 5. 扫描（冷 / 热）---------- */
+  /* ---------- 5. 扫描（强制全量 / 复用缓存）---------- */
   const library = ctx.get('library')
-  const cacheFile = path.join(app.getPath('userData'), 'library-cache.json')
-  try {
-    fs.rmSync(cacheFile, { force: true })
-  } catch {
-    // 没缓存也算冷扫描
-  }
+  let poolStats = null
   let coldMs = 0
   let warmMs = 0
   let files = 0
-  const waitScanIdle = async () => {
-    for (let i = 0; i < 600; i++) {
-      const stats = library.getStats()
-      if (!stats.scanning) return
-      await sleep(200)
+  let uiLatencyMs = 0
+  let mainCpu = 0
+  const cpuSamples = []
+
+  const sampleWhile = async (promise) => {
+    let done = false
+    const started = Date.now()
+    promise.then(() => { done = true }, () => { done = true })
+    while (!done && Date.now() - started < 120000) {
+      const metrics = app.getAppMetrics().find((metric) => metric.type === 'Browser')
+      if (metrics) cpuSamples.push(metrics.cpu.percentCPUUsage || 0)
+      /* 扫描期间 UI 还活着吗：切视图 + 读下一帧的间隔 */
+      const latency = await evaluate(win, `
+        const t0 = performance.now()
+        window.__aria.actions.setView('albums')
+        window.__aria.actions.setQuery('blues')
+        await new Promise((r) => requestAnimationFrame(r))
+        window.__aria.actions.setView('songs')
+        window.__aria.actions.setQuery('')
+        await new Promise((r) => requestAnimationFrame(r))
+        return Math.round(performance.now() - t0)`)
+      if (Number.isFinite(latency)) uiLatencyMs = Math.max(uiLatencyMs, latency)
+      await sleep(120)
     }
+    mainCpu = cpuSamples.length ? Math.round((cpuSamples.reduce((a, v) => a + v, 0) / cpuSamples.length) * 10) / 10 : 0
   }
+
   try {
     const started = Date.now()
-    await library.scan({ reason: 'perf-cold' })
-    await waitScanIdle()
+    await sampleWhile(library.scan({ reason: 'perf-force', force: true }))
     coldMs = Date.now() - started
     const warmStart = Date.now()
     await library.scan({ reason: 'perf-warm' })
-    await waitScanIdle()
     warmMs = Date.now() - warmStart
     files = library.getStats().count
+    poolStats = library.metadataPoolStats ? library.metadataPoolStats() : null
   } catch (error) {
     console.log(`   扫描测量失败：${error.message}`)
   }
-  out.scan = { coldMs, warmMs, files }
-  console.log(`5) 扫描：冷 ${coldMs}ms ／ 热 ${warmMs}ms，${files} 个文件`)
+  out.scan = { coldMs, warmMs, files, uiLatencyMs, mainCpu, cpuSamples: cpuSamples.length, pool: poolStats }
+  console.log(`5) 扫描：强制全量 ${coldMs}ms ／ 复用缓存 ${warmMs}ms，${files} 个文件；` +
+    `扫描期间主进程 CPU 均值 ${mainCpu}%（${cpuSamples.length} 次采样）、UI 响应上限 ${uiLatencyMs}ms` + (poolStats ? `；worker 池 ${poolStats.size} 个` : ''))
 
   /* 落一份 JSON，方便与改后对比 */
   const target = path.join(process.cwd(), '.tmp', `perf-baseline-${Date.now()}.json`)
