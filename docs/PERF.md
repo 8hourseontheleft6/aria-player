@@ -99,6 +99,28 @@ npm run perf:baseline     # 5 项全测，约 2.5 分钟；读数写到 .tmp/per
 自检：本体新增一条「媒体墙：离开视图 5 秒后释放格子与节点，回来自动重建并还原平移」，
 读数写入提交信息与本节。
 
+## P1-2：封面缓存分档 —— 试过，**未达预期，已回滚**
+
+做过什么：主进程 `getArtwork(trackId, { size })`（`size ≤ 240` 走 `thumb-<id>.jpg`，从 full 再缩）、
+渲染层拆 `thumbCache`(80) / `fullCache`(10) + LRU + `releaseTier()`、9 个调用点分档
+（列表/墙/队列/artwork-node → thumb；正在播放/曲目信息/配色 → full）。
+
+结果：**读取链路没有生效**。
+
+| 指标 | 基线（P0）| 试做 P1-2 | 结论 |
+| --- | --- | --- | --- |
+| 媒体墙 10s · renderer RSS | 215.7 MB | **227.4 / 228.6 / 230.9 MB** | 反而更高 ✗ |
+| 磁盘上生成的 `thumb-*.jpg` | — | **0 张** | thumb 档根本没被调用 ✗ |
+| 媒体墙帧间隔中位 | 8.4 ms | 8.4 ms | 无变化 |
+
+诊断：自动化档案里**没有 `artwork-cache`**，把真实档案的 689 张 full 封面拷进去后依然 `thumb` 0 张
+—— 说明媒体墙的封面**不是**经 `library.getArtwork` 取的（很可能走 `artworkFile` 的 `media://`
+或在线 provider 扩展点）。在没搞清"墙的封面到底从哪来"之前，这套分档只是给缓存多存了一份 URL。
+
+**处置**：全部回滚（主进程/ipc/preload/渲染层/4 个调用点）。**下一步要做 P1-2，得先回答一个问题**：
+媒体墙的 `<img>` 是哪个函数填的、它走的哪条来源（`media://` / `library.artwork` / provider）——
+这一点没查清就动缓存分档，等于白改。
+
 ## P1-2 的落点（已调研，未实施）
 
 现状链路：主进程 `library.getArtwork(trackId)` → 首次提取时缩到 480px、转 JPEG 落 `userData/artwork-cache/<id>.jpg`
