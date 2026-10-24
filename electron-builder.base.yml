@@ -37,6 +37,14 @@ files:
   - '!src/main/perf.js'
   - '!src/main/visual-audit.js'
 
+# 更新源：GitHub Releases（electron-updater 读 latest.yml）。
+# 注意 npm run dist 都带 --publish never —— 发布走 Release API，别让 electron-builder 自己推。
+publish:
+  provider: github
+  owner: 8hourseontheleft6
+  repo: aria-player
+  releaseType: release
+
 directories:
   buildResources: build
 

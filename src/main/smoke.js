@@ -1075,7 +1075,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
    * aiSubtitles = 本机 AI 字幕（模型可选下载、识别在本机跑），player 档专属。
    * 登记在这里的意思是：以后再加服务，必须先证明它确实是这个档位要的。
    */
-  const expectedServices = ['ai', 'aiSubtitles', 'diagnostics', 'openedFiles', 'settings']
+  const expectedServices = ['ai', 'aiSubtitles', 'diagnostics', 'openedFiles', 'settings', 'updater']
   const services = ctx.list().slice().sort()
   record('主进程只挂了本档位的服务（表外的都没被 define）',
     services.join('|') === expectedServices.join('|'),
@@ -6937,6 +6937,86 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         ok: scrollbarEq.diagOk === true && all && leaks.key === false && leaks.userPath === false,
         detail: `导出=${scrollbarEq.diagOk}；条目=[${entries.join('、')}]；` +
           `含密钥=${leaks.key}；含用户路径=${leaks.userPath}；日志行数=${scrollbarEq.diagLogLines}`
+      }
+    })())
+
+    /* ---------- 自动更新：本地 feed 跑一遍「发现 → 下载 → 提示重启」 ---------- */
+    const updaterReading = await (async () => {
+      const http = require('node:http')
+      const crypto = require('node:crypto')
+      const payload = Buffer.alloc(64 * 1024, 7)
+      const sha512 = crypto.createHash('sha512').update(payload).digest('base64')
+      const latestYml =
+        'version: 9.9.9\n' +
+        'files:\n' +
+        '  - url: aria-9.9.9.exe\n' +
+        '    sha512: ' + sha512 + '\n' +
+        '    size: ' + payload.length + '\n' +
+        'path: aria-9.9.9.exe\n' +
+        'sha512: ' + sha512 + '\n' +
+        "releaseDate: '2026-01-01T00:00:00.000Z'\n"
+      const server = http.createServer((request, response) => {
+        if (String(request.url).endsWith('latest.yml')) {
+          response.setHeader('Content-Type', 'text/yaml')
+          response.end(latestYml)
+          return
+        }
+        response.setHeader('Content-Type', 'application/octet-stream')
+        response.end(payload)
+      })
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const feed = 'http://127.0.0.1:' + server.address().port + '/'
+      try {
+        const reading = await evaluate(win, `
+          const updater = window.aria.app.updater
+          const started = await updater.useFeed('${feed}')
+          if (!started || !started.ok) return { feedOk: false, started }
+          const seen = []
+          updater.onProgress((next) => { if (next && next.status) seen.push(next.status) })
+          const result = await updater.check()
+          let state = result && result.state ? result.state : null
+          /* 等下载完成（最多 20 秒） */
+          for (let i = 0; i < 100 && (!state || state.status !== 'downloaded'); i++) {
+            await new Promise((r) => setTimeout(r, 200))
+            const current = await updater.state()
+            state = current || state
+            if (state && state.status === 'error') break
+          }
+          const describe = state && state.describe ? state.describe : null
+          return {
+            feedOk: true,
+            checkOk: Boolean(result && result.ok),
+            seen,
+            finalStatus: state ? state.status : null,
+            finalVersion: state ? state.version : null,
+            action: describe ? describe.action : null,
+            text: describe ? describe.text : '',
+            current: state ? state.current : null,
+            message: result && result.message ? result.message : ''
+          }
+        `)
+        return reading
+      } catch (error) {
+        return { feedOk: true, thrown: String((error && error.message) || error) }
+      } finally {
+        server.close()
+      }
+    })()
+
+    record('自动更新：本地 feed 能走完「发现新版本 → 下载 → 提示重启」', (() => {
+      const reading = updaterReading || {}
+      const ok = reading.feedOk === true &&
+        reading.checkOk === true &&
+        reading.finalStatus === 'downloaded' &&
+        reading.action === 'restart' &&
+        /重启后安装/.test(String(reading.text || ''))
+      return {
+        ok,
+        detail: `feed=${reading.feedOk}；check=${reading.checkOk}；` +
+          `状态序列=[${(reading.seen || []).join('→')}]；最终=${reading.finalStatus}（${reading.finalVersion}）；` +
+          `动作=${reading.action}；文案「${reading.text}」` +
+          (reading.thrown ? `；异常=${reading.thrown}` : '') +
+          (reading.message ? `；message=${reading.message}` : '')
       }
     })())
 

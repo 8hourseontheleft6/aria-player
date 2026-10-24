@@ -27,6 +27,12 @@ release-unified/_archive/<版本>/  ← Aria-Unified-Setup / -portable
 
 （`release*/` 全部在 .gitignore 里，发布走 GitHub Releases，不进仓库。）
 
+## 发 Release 时必须带上 latest.yml
+
+electron-builder 配了 `publish: github`，每次打包会在 `release*/` 里生成 `latest.yml`。
+**上传附件时一并传它**（六个安装包 + `latest.yml`），否则 electron-updater 会报
+`Cannot find latest.yml`。0.1.0 / 0.1.1 是在配 publish 之前打的包，所以那两个 Release 里没有它。
+
 ## 仓库地址与署名（已填好）
 
 发布用的仓库地址已经写进 `package.json`，不需要再替换：

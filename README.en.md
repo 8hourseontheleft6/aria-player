@@ -51,6 +51,21 @@ goes online for this feature is when **you** press "Download model" (about 229 M
 - Optional post-processing (both off by default) can send the **lyric text only** — never audio —
   to an OpenAI-compatible endpoint you configure yourself.
 
+## Auto-update
+
+A packaged build checks GitHub Releases about 20 seconds after launch (never blocking startup).
+Settings → About has **Check for updates**: a new version is downloaded automatically with progress,
+and the button turns into **Restart and install** once it is ready. With no update it says
+"up to date"; failed *automatic* checks only go to the log, and a failed *manual* check reports one
+short sentence instead of a dialog storm.
+
+Publishing must include `latest.yml` (electron-builder writes it into `release*/`) — without it
+electron-updater fails with `Cannot find latest.yml` (which is exactly what 0.1.x ran into).
+
+> Unsigned builds **can** update (NSIS does not verify signatures), but the first launch is still
+> stopped by **SmartScreen**; on macOS **Gatekeeper** blocks unsigned/unnotarised builds until you
+> allow them in Privacy & Security.
+
 ## Crash logs and the diagnostics bundle
 
 The main process logs to `<userData>/logs/main.log` (rotating at 512 KB) and starts Electron's

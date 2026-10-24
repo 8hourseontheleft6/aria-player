@@ -9,6 +9,7 @@ const { publicSettings } = require('./services/settings')
 const EVENT_CHANNELS = [
   'settings:changed',
   'settings:save-error',
+  'updater:progress',
   'library:scan-progress',
   'library:watch-update',
   'library:watch-error',
@@ -244,6 +245,21 @@ function registerIpc (ctx) {
 
     /* ---------- 其它 ---------- */
     /* ---------- 诊断 ---------- */
+    /* ---------- 自动更新 ---------- */
+    'updater:state': () => (ctx.has('updater') ? ctx.get('updater').state() : { active: false, reason: '这个档位没有更新服务', status: 'idle' }),
+    'updater:check': () => (ctx.has('updater') ? ctx.get('updater').check({ manual: true }) : { ok: false, code: 'unavailable' }),
+    /* 只给自检用：把更新源指到本地 feed（自动化模式下才允许） */
+    'updater:use-feed': (_event, url) => {
+      if (!process.env.ARIA_USER_DATA) return { ok: false, code: 'guarded' }
+      if (!ctx.has('updater')) return { ok: false, code: 'unavailable' }
+      const service = ctx.get('updater')
+      service.forceForTests(true)
+      service.useFeed(String(url || ''))
+      return { ok: true }
+    },
+    'updater:download': () => (ctx.has('updater') ? ctx.get('updater').download() : { ok: false, code: 'unavailable' }),
+    'updater:install': () => (ctx.has('updater') ? ctx.get('updater').install() : { ok: false, code: 'unavailable' }),
+
     'diagnostics:inspect': async (_event, file) => {
       if (!ctx.has('diagnostics')) return { ok: false, code: 'unavailable' }
       return ctx.get('diagnostics').inspectBundle(String(file || ''))

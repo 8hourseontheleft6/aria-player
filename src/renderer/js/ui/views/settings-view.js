@@ -9,6 +9,21 @@ import { toast } from '../widgets/overlay.js'
 import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
 import { createPillSelect } from '../widgets/pill-menu.js'
 import { describeReplayGain, REPLAY_GAIN_LABELS, REPLAY_GAIN_MODES } from '../../core/replaygain.js'
+
+/*
+ * 更新状态的一块小缓存：设置页每渲染一次都会重建 DOM，而 updater:progress
+ * 是主进程持续推的 —— 只装一次监听，把最新状态写进"当前这一份" DOM。
+ */
+let settingsViewUpdaterWired = false
+let settingsViewUpdaterSink = null
+let settingsViewUpdaterRefs = null
+
+function applyUpdaterState (state, status, restart) {
+  if (!state || !status) return
+  const info = state.describe || { text: '', action: null }
+  status.textContent = String(info.text || '')
+  if (restart) restart.style.display = info.action === 'restart' ? '' : 'none'
+}
 import { visualizerChoices } from '../widgets/visualizer.js'
 
 const TINT_SOURCES = [
@@ -1675,6 +1690,58 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         title: '当前版本',
         sub: '排查问题时先确认这一行。',
         control: h('span', { class: 'settings__hint', text: `Aria ${info?.version || '0.0.0-dev'}` })
+      }),
+      row({
+        title: '检查更新',
+        sub: '从 GitHub Releases 读 latest.yml；发现新版本会自动下载，下完这里会变成「重启安装」。'
+          + '未签名的包也能更新，但首次运行仍会被 SmartScreen 拦一下。',
+        control: (() => {
+          const status = h('span', { class: 'settings__hint', text: '' })
+          const restart = h('button', {
+            class: 'btn btn--sm',
+            type: 'button',
+            style: { display: 'none' },
+            onClick: async () => {
+              const result = await remote.app.updater.install()
+              if (!result || !result.ok) toast({ message: '还没下载完，稍等一下', type: 'info' })
+            }
+          }, '重启安装')
+          const button = h('button', {
+            class: 'btn btn--sm',
+            type: 'button',
+            onClick: async () => {
+              button.disabled = true
+              status.textContent = '正在检查更新…'
+              try {
+                const result = await remote.app.updater.check()
+                const info = result && result.describe ? result.describe : null
+                status.textContent = info ? info.text : (result && result.message) || '检查失败，稍后再试'
+                if (result && result.ok && result.state) applyUpdaterState(result.state, status, restart)
+                if (!result || !result.ok) {
+                  toast({ message: (info && info.text) || '检查更新失败，稍后再试', type: 'info', duration: 4000 })
+                }
+              } finally {
+                button.disabled = false
+              }
+            }
+          }, '检查更新')
+          /* 第一次渲染时也读一次当前状态（可能启动时已经查过了） */
+          remote.app.updater.state().then((current) => {
+            if (current) applyUpdaterState(current, status, restart)
+          }).catch(() => {})
+          /* 进度只装一次监听（设置页每次渲染都会重建 DOM，重复装会叠加） */
+          if (!settingsViewUpdaterWired) {
+            settingsViewUpdaterWired = true
+            settingsViewUpdaterSink = (next) => {
+              if (settingsViewUpdaterRefs) applyUpdaterState(next, settingsViewUpdaterRefs.status, settingsViewUpdaterRefs.restart)
+            }
+            remote.app.updater.onProgress((next) => {
+              if (settingsViewUpdaterSink) settingsViewUpdaterSink(next)
+            })
+          }
+          settingsViewUpdaterRefs = { status, restart }
+          return h('div', { class: 'settings__field settings__field--row' }, status, button, restart)
+        })()
       }),
       row({
         title: '导出诊断包',

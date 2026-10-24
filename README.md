@@ -174,6 +174,28 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
 - 解码用的是浏览器自带的解码器（mp3 / m4a / flac / wav / ogg / opus / aac）；
   wma / aiff 这类解不开的格式会明确告诉你先转格式。
 
+## 自动更新
+
+打好的包会在启动 20 秒后（不阻塞启动）去 GitHub Releases 查一次更新，设置 → 关于里有
+**「检查更新」**：发现新版本会自动下载并显示进度，下完按钮变成 **「重启安装」**。
+没有更新时明确显示「已是最新版本」；自动检查失败只写日志，手动检查失败才给一句
+「网络不可用，稍后再试」，不会弹窗轰炸。
+
+更新源是 `electron-builder.base.yml` 里的：
+
+```yaml
+publish:
+  provider: github
+  owner: 8hourseontheleft6
+  repo: aria-player
+```
+
+**发版时必须把 `latest.yml` 一起传上去**（electron-builder 会生成在 `release*/` 里）——
+没有它，electron-updater 会报 `Cannot find latest.yml`（0.1.x 就踩过这个坑）。
+
+> 未签名的包**也能走更新流程**（NSIS 不校验签名），但首次运行仍会被 **SmartScreen** 拦一下；
+> macOS 会撞 **Gatekeeper**（未签名/未公证），需要在「隐私与安全性」里手动允许。
+
 ## 崩溃日志与诊断包
 
 主进程会把日志写进 `<userData>/logs/main.log`（超过 512KB 滚一份 `main.log.1`），

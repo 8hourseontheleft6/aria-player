@@ -20,6 +20,7 @@ const { createAiService } = require('./services/ai')
 const { createMusicSourcesService } = require('./services/music-sources')
 const { createTrayService } = require('./services/tray')
 const { createDiagnosticsService } = require('./services/diagnostics')
+const { createUpdaterService } = require('./services/updater')
 const { createWatcherService } = require('./services/watcher')
 const { createBackgroundService } = require('./services/background')
 const { createOpenedFilesService } = require('./services/opened-files')
@@ -70,6 +71,8 @@ const SERVICE_FACTORIES = {
   tray: createTrayService,
   // 诊断包（只依赖 settings，用来出脱敏后的设置）
   diagnostics: createDiagnosticsService,
+  // 自动更新（electron-updater + GitHub Releases）
+  updater: createUpdaterService,
   watcher: createWatcherService,
   background: createBackgroundService,
   openedFiles: createOpenedFilesService
@@ -356,6 +359,15 @@ async function bootstrap () {
   const win = createMainWindow(ctx, profile, product)
   const tray = optional('tray')
   if (tray) tray.sync()
+  /*
+   * 启动后 20 秒查一次更新 —— 延迟是为了不和首屏抢 IO，且开发态/未打包时自己会跳过。
+   * 失败静默（只写日志），绝不弹窗。
+   */
+  const updater = ctx.has('updater') ? ctx.get('updater') : null
+  if (updater) {
+    if (process.argv.includes('--force-update')) updater.forceForTests(true)
+    updater.schedule(20000)
+  }
 
   // 最小化 / 收进托盘后释放后台占用，回来时恢复（媒体墙、封面缓存、目录监听）
   const background = optional('background')

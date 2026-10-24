@@ -11,6 +11,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron')
 const EVENT_CHANNELS = new Set([
   'settings:changed',
   'settings:save-error',
+  'updater:progress',
   'library:scan-progress',
   'library:watch-update',
   'library:watch-error',
@@ -80,6 +81,15 @@ contextBridge.exposeInMainWorld('aria', {
     diagnostics: {
       export: () => ipcRenderer.invoke('diagnostics:export'),
       inspect: (file) => ipcRenderer.invoke('diagnostics:inspect', file)
+    },
+    /* 自动更新（electron-updater）；状态变化走 updater:progress */
+    updater: {
+      state: () => ipcRenderer.invoke('updater:state'),
+      check: () => ipcRenderer.invoke('updater:check'),
+      download: () => ipcRenderer.invoke('updater:download'),
+      install: () => ipcRenderer.invoke('updater:install'),
+      useFeed: (url) => ipcRenderer.invoke('updater:use-feed', url),
+      onProgress: (handler) => on('updater:progress', handler)
     },
     /** 最小化 / 收进托盘的释放与恢复通知（payload: { phase: 'release' | 'resume' }） */
     onBackgroundChange: (handler) => on('app:background', handler)
