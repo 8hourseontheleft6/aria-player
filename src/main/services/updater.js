@@ -17,6 +17,22 @@ const { app, shell } = require('electron')
 
 const STATES = ['idle', 'checking', 'not-available', 'available', 'downloading', 'downloaded', 'error']
 
+/**
+ * 这个产品该用哪个更新通道。
+ *
+ * 三个产品共用一个 GitHub 仓库：本体 latest.yml、player latest-player.yml、
+ * unified latest-unified.yml。认 productName（打包后的 app.getName()），
+ * 自动化里允许用 ARIA_PRODUCT 覆盖。
+ */
+function channelOf () {
+  const forced = process.env.ARIA_PRODUCT
+  if (forced === 'player' || forced === 'unified') return forced
+  const name = String(app.getName() || '')
+  if (/player/i.test(name) && !/unified/i.test(name)) return 'player'
+  if (/unified/i.test(name)) return 'unified'
+  return 'latest'
+}
+
 /** 纯函数：状态 → 给人看的一句话（自检直接测它） */
 function describeState (state) {
   const value = state || {}
@@ -98,6 +114,13 @@ function createUpdaterService (ctx) {
       autoUpdater.autoDownload = false
       /* 自检要在开发态验证整条链路 —— electron-updater 默认在 dev 下不工作 */
       if (forced) autoUpdater.forceDevUpdateConfig = true
+      /*
+       * 三个产品共用一个 GitHub 仓库：本体用 latest.yml，
+       * player / unified 用 latest-player.yml / latest-unified.yml（electron-builder 的 channel）。
+       * 不设 channel 的话，player 会把本体的安装包当成自己的更新。
+       */
+      autoUpdater.channel = channelOf()
+      log.info('更新通道', { channel: autoUpdater.channel })
       autoUpdater.autoInstallOnAppQuit = true
       autoUpdater.logger = {
         info: (message) => log.info('[updater] ' + message),
@@ -227,4 +250,4 @@ function createUpdaterService (ctx) {
   }
 }
 
-module.exports = { createUpdaterService, describeState, reduceEvent, STATES }
+module.exports = { createUpdaterService, describeState, reduceEvent, channelOf, STATES }

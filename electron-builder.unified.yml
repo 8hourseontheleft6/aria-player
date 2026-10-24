@@ -22,6 +22,15 @@ extraMetadata:
   main: src/main/main-unified.js
   productName: Aria Unified
 
+# 更新源与本体同一个 GitHub 仓库，但用独立 channel 区分：
+# 三个产品共用一个 release，latest.yml 只有一份，不加 channel 会互相装错产品。
+publish:
+  provider: github
+  owner: 8hourseontheleft6
+  repo: aria-player
+  channel: unified
+  releaseType: release
+
 directories:
   output: release-unified
 

@@ -258,6 +258,9 @@ process.on("unhandledRejection", (reason) => {
   log.error("未处理的 Promise 拒绝", { message: String(reason && reason.message ? reason.message : reason), stack: String(reason && reason.stack).slice(0, 4000) })
 })
 
+/* 启动就落一行：日志文件不该等到第一个事件才出现 */
+log.info("启动", { product: product.id, profile: profile.id, version: app.getVersion(), packaged: app.isPackaged })
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
