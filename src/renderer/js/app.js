@@ -2052,6 +2052,9 @@ async function main () {
   })
 
   /* 调试与二次开发入口：开发者工具控制台里可以直接用 window.__aria */
+  /* P0 基线用：首屏可交互的时刻（相对 timeOrigin），换算成 epoch 后与主进程的 ready 相减 */
+  window.__ariaBootMarks = { interactive: performance.now(), timeOrigin: performance.timeOrigin }
+
   window.__aria = {
     bus, store, player, engine, playlist, host, artwork, actions, EVENTS, prewarmer,
     // 主进程桥（自检要直接调 ai:test 这类只有主进程能发的请求）

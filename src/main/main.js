@@ -313,7 +313,9 @@ const audioPathsFrom = audioPathsFromProfile
  * 想扩展主进程能力，就在下面 ctx.define(...) 加一行，然后在 ipc 里暴露。
  */
 async function bootstrap () {
-  await app.whenReady()
+  globalThis.__ariaBoot = { readyAt: 0, readyToShowAt: 0 }
+await app.whenReady()
+globalThis.__ariaBoot.readyAt = Date.now()
 
   /*
    * 只在 Windows 上调：`app.setAppUserModelId` 是 Windows 专属 API
@@ -384,7 +386,8 @@ async function bootstrap () {
   const showWindow = () => {
     if (win.isDestroyed()) return
     if (win.isMinimized()) win.restore()
-    win.show()
+    globalThis.__ariaBoot.readyToShowAt = Date.now()
+  win.show()
     win.focus()
   }
 
@@ -573,6 +576,17 @@ async function bootstrap () {
   }
 
   // 帧率诊断模式：分档测量 rAF 间隔（npm run perf）
+  if (process.argv.includes('--perf-baseline')) {
+    const { runPerfBaseline } = require('./perf-baseline')
+    runPerfBaseline({ win, ctx }).then(() => {
+      console.log('\n=== 基线测量结束 ===')
+      require('electron').app.exit(0)
+    }).catch((error) => {
+      console.error('基线测量失败：', error)
+      require('electron').app.exit(1)
+    })
+    return
+  }
   if (process.argv.includes('--perf')) {
     const { runPerf } = require('./perf')
     win.webContents.once('did-finish-load', () => {

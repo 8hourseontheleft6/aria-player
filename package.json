@@ -46,7 +46,8 @@
     "dist:unified:mac": "electron-builder --config electron-builder.unified.yml --mac --publish never",
     "artifacts": "node scripts/artifacts.mjs",
     "clean:dist": "node scripts/clean-dist.mjs",
-    "fetch-release": "node scripts/fetch-release.mjs"
+    "fetch-release": "node scripts/fetch-release.mjs",
+    "perf:baseline": "electron . --perf-baseline"
   },
   "dependencies": {
     "buffer": "6.0.3",
