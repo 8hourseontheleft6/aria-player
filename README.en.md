@@ -51,6 +51,25 @@ goes online for this feature is when **you** press "Download model" (about 229 M
 - Optional post-processing (both off by default) can send the **lyric text only** — never audio —
   to an OpenAI-compatible endpoint you configure yourself.
 
+### Bundled VAD, on-demand model
+
+`silero_vad.onnx` (643,854 bytes, SHA256 `9e2449…1fd6`) ships **inside the installer** for
+Aria Player / Aria Unified, so "VAD ready" survives deleting the model directory. SenseVoice
+(~229 MB) is still downloaded on demand, same sources and SHA256 as before.
+
+### Fully local correction/translation with Ollama
+
+The AI correction/translation features speak OpenAI-compatible `/chat/completions`, so a local
+Ollama works:
+
+```bash
+ollama serve
+ollama pull qwen2.5:7b
+```
+
+Settings → External model: interface `http://127.0.0.1:11434/v1`, model `qwen2.5:7b`,
+key empty. Recognition, correction and translation then all stay on your machine.
+
 ## Auto-update
 
 A packaged build checks GitHub Releases about 20 seconds after launch (never blocking startup).

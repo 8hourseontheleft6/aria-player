@@ -1189,6 +1189,37 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       idleCancel: idleCancel.cancelled,
       clearedEntries: cleared.entries
     }`)
+  /* ---------- AI 字幕：内置 VAD（删掉模型目录也还在）---------- */
+  record('内置 VAD：删掉模型目录后仍然"VAD 就绪"，模型下载流程不变', (async () => {
+    const ai = ctx.get('aiSubtitles')
+    const before = await ai.status()
+    /* 把模型目录整个挪走再查一次 —— VAD 应该不受影响 */
+    const models = before.modelsDir
+    const backup = models + '.smoke-backup'
+    const fsSync = require('node:fs')
+    let moved = false
+    try {
+      if (fsSync.existsSync(models)) {
+        fsSync.renameSync(models, backup)
+        moved = true
+      }
+    } catch {
+      // 挪不动就跳过（自检不该因此失败）
+    }
+    const after = await ai.status()
+    if (moved) {
+      try { fsSync.renameSync(backup, models) } catch {}
+    }
+    const ok = after.vadBundled === true && after.vadReady === true &&
+      (moved ? after.state === 'not-downloaded' : true)
+    return {
+      ok,
+      detail: `内置=${after.vadBundled}；删目录后 VAD 就绪=${after.vadReady}；` +
+        `模型状态（删目录后）=${after.state}（期望 not-downloaded）；挪动目录=${moved}；` +
+        `模型总大小=${after.modelBytesText}`
+    }
+  })())
+
   record('AI 字幕：转写链路（分块 PCM → worker → 合并 → LRC → 缓存命中）',
     transcribeChain.missing !== true &&
     (transcribeChain.firstOk === true

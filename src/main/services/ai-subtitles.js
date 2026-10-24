@@ -313,6 +313,9 @@ function createAiSubtitlesService (ctx) {
       progress: job ? progressPayload() : null,
       error: job ? job.error : null,
       modelsDir: modelDir(),
+      /* VAD 是**随包内置**的：删掉模型目录它也还在（自检专门验这一条） */
+      vadReady: vadReady(),
+      vadBundled: Boolean(bundledVadPath()),
       cache: await cacheInfo()
     }
   }
@@ -427,12 +430,48 @@ function createAiSubtitlesService (ctx) {
     return await cacheInfo()
   }
 
+  /**
+   * 内置的 silero_vad.onnx（随安装包分发，只有 0.6MB）。
+   *
+   * 为什么内置它：VAD 只负责切语音段，体积小、许可明确；而 SenseVoice 那 229MB 仍然按需下载。
+   * 这样用户"删掉模型目录"之后，VAD 仍然可用（界面显示"VAD 就绪"）。
+   *
+   * 优先级：解包后的 assets（打包态）→ 源码里的 assets（开发态）→ 下载到 userData 的那份。
+   */
+  function bundledVadPath () {
+    const unpacked = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'src', 'main', 'assets', 'silero_vad.onnx')
+    const dev = path.join(__dirname, '..', 'assets', 'silero_vad.onnx')
+    for (const candidate of [unpacked, dev]) {
+      try {
+        if (candidate && fs.existsSync(candidate)) return candidate
+      } catch {
+        // 忽略
+      }
+    }
+    return ''
+  }
+
+  /** VAD 的路径：内置优先，没有才退回下载的那份 */
+  function vadPath () {
+    return bundledVadPath() || modelPath(MODEL_FILES[2])
+  }
+
+  /** 诊断/设置页用：VAD 是不是就绪（内置也算） */
+  function vadReady () {
+    const file = vadPath()
+    try {
+      return Boolean(file) && fs.existsSync(file)
+    } catch {
+      return false
+    }
+  }
+
   /** 阶段 3 用：三个文件的实际路径 */
   function paths () {
     return {
       model: modelPath(MODEL_FILES[0]),
       tokens: modelPath(MODEL_FILES[1]),
-      vad: modelPath(MODEL_FILES[2]),
+      vad: vadPath(),
       cacheDir: cacheDir()
     }
   }
@@ -537,7 +576,7 @@ function createAiSubtitlesService (ctx) {
     if (worker) return { ok: false, code: 'busy' }
 
     transcribeCancelled = false
-    const paths = { model: modelPath(MODEL_FILES[0]), tokens: modelPath(MODEL_FILES[1]), vad: modelPath(MODEL_FILES[2]) }
+    const paths = { model: modelPath(MODEL_FILES[0]), tokens: modelPath(MODEL_FILES[1]), vad: vadPath() }
     const samplesBase64 = Buffer.concat(audio.chunks.filter(Boolean)).toString('base64')
     const seconds = audioSeconds()
     resetAudio()

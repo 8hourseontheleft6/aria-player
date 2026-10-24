@@ -14,6 +14,8 @@ files:
   # 只排除 player 专属的 ASR worker —— 0.1.1 起 src/main/workers/ 里还有
   # music-source-worker.js（本体跑第三方音源要用），不能整目录排掉。
   - '!src/main/workers/asr-worker.js'
+  # VAD 只给 player / Unified（它们跑 AI 字幕），本体不需要这 0.6MB
+  - '!src/main/assets/**'
 
 appId: com.aria.player
 productName: Aria
