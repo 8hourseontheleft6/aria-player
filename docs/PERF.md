@@ -117,7 +117,19 @@ npm run perf:baseline     # 5 项全测，约 2.5 分钟；读数写到 .tmp/per
 —— 说明媒体墙的封面**不是**经 `library.getArtwork` 取的（很可能走 `artworkFile` 的 `media://`
 或在线 provider 扩展点）。在没搞清"墙的封面到底从哪来"之前，这套分档只是给缓存多存了一份 URL。
 
-**处置**：全部回滚（主进程/ipc/preload/渲染层/4 个调用点）。**下一步要做 P1-2，得先回答一个问题**：
+**第二轮的发现（补记）**：把主进程那套接回来、并且找到墙真正的取图路径之后，仍然 `thumb` **0 张**：
+
+· 媒体墙的格子是 `lazy.observe(art, album.artworkTrack, null)`（`media-wall.js:917`），
+  实际取图在 `ui/widgets/artwork-node.js` 的 `createLazyArtwork().paint()` —— 它调的是
+  `artwork.resolveUrl(track)`（默认 full）。给这条管线加了 `tier`（默认 thumb）后，
+  媒体墙 renderer RSS 仍然 **224.2 / 226.2 MB**（基线 215.7 ✗），`thumb-*.jpg` 依旧 **0 张**。
+· 所以还有一条更上游的分支没排掉：`paint()` 里 `useOpened`（`caps.library !== true` 时改走
+  `opened.artwork(path)`）与 `artworkFile` 的 `media://` 路径都不带尺寸参数。
+  在这两种情况下，分档注定不生效 —— 必须先把"当前档案下 `caps.library` 是什么、这批墙格子的
+  封面来自哪条分支"打点确认。
+
+**处置**：两轮尝试全部回滚（主进程/ipc/preload/渲染层/调用点），产品代码回到 P1-3 之后的状态。
+**下一步要做 P1-2，得先回答一个问题**：
 媒体墙的 `<img>` 是哪个函数填的、它走的哪条来源（`media://` / `library.artwork` / provider）——
 这一点没查清就动缓存分档，等于白改。
 
