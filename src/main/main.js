@@ -4,6 +4,7 @@ const path = require('node:path')
 const fs = require('node:fs')
 const { app, BrowserWindow, session } = require('electron')
 
+const log = require('./util/log')
 const { createContext } = require('./registry')
 const { registerSchemes, registerProtocols } = require('./protocols')
 const {
@@ -18,6 +19,7 @@ const { createOnlineService } = require('./services/online')
 const { createAiService } = require('./services/ai')
 const { createMusicSourcesService } = require('./services/music-sources')
 const { createTrayService } = require('./services/tray')
+const { createDiagnosticsService } = require('./services/diagnostics')
 const { createWatcherService } = require('./services/watcher')
 const { createBackgroundService } = require('./services/background')
 const { createOpenedFilesService } = require('./services/opened-files')
@@ -66,6 +68,8 @@ const SERVICE_FACTORIES = {
   ai: createAiService,
   musicSources: createMusicSourcesService,
   tray: createTrayService,
+  // 诊断包（只依赖 settings，用来出脱敏后的设置）
+  diagnostics: createDiagnosticsService,
   watcher: createWatcherService,
   background: createBackgroundService,
   openedFiles: createOpenedFilesService
@@ -221,6 +225,35 @@ if (!automationFlag && !process.env.ARIA_USER_DATA) {
 
 // 自定义协议必须在 app ready 之前声明
 registerSchemes()
+
+/*
+ * 日志 + 崩溃转储。
+ *
+ * 必须放在 userData 定下来之后（日志落到各自目录），但在 requestSingleInstanceLock 之前 ——
+ * 连"起不来"这件事也要有日志可看。crashReporter 只把 dump 写进 userData/crashes，
+ * 不传任何远端（我们没有崩溃收集服务）。
+ */
+log.init(app.getPath("userData"))
+app.setPath("crashDumps", path.join(app.getPath("userData"), "crashes"))
+try {
+  require("electron").crashReporter.start({
+    productName: product.productName,
+    companyName: "Aria",
+    submitURL: "",
+    uploadToServer: false,
+    compress: true
+  })
+} catch (error) {
+  log.warn("crashReporter 启动失败", { message: String(error && error.message) })
+}
+
+/* 未捕获异常 / 未处理的 Promise：写日志，不弹窗轰炸，也不让进程静默消失 */
+process.on("uncaughtException", (error) => {
+  log.error("未捕获异常", { message: String(error && error.message), stack: String(error && error.stack).slice(0, 4000) })
+})
+process.on("unhandledRejection", (reason) => {
+  log.error("未处理的 Promise 拒绝", { message: String(reason && reason.message ? reason.message : reason), stack: String(reason && reason.stack).slice(0, 4000) })
+})
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()

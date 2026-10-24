@@ -77,6 +77,10 @@ contextBridge.exposeInMainWorld('aria', {
 
   app: {
     info: () => ipcRenderer.invoke('app:info'),
+    diagnostics: {
+      export: () => ipcRenderer.invoke('diagnostics:export'),
+      inspect: (file) => ipcRenderer.invoke('diagnostics:inspect', file)
+    },
     /** 最小化 / 收进托盘的释放与恢复通知（payload: { phase: 'release' | 'resume' }） */
     onBackgroundChange: (handler) => on('app:background', handler)
   },

@@ -1672,6 +1672,34 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         h('div', {}, `配置文件目录：${info?.userData || '-'}`)
       ),
       row({
+        title: '当前版本',
+        sub: '排查问题时先确认这一行。',
+        control: h('span', { class: 'settings__hint', text: `Aria ${info?.version || '0.0.0-dev'}` })
+      }),
+      row({
+        title: '导出诊断包',
+        sub: '一个 zip：版本与平台、最近 200 行日志（已脱敏）、脱敏后的设置、最近一次自检结果。'
+          + '**不含**音频、歌词、封面、密钥与完整的用户名路径。',
+        control: h('button', {
+          class: 'btn btn--sm',
+          type: 'button',
+          onClick: async (event) => {
+            const button = event.currentTarget
+            button.disabled = true
+            try {
+              const result = await remote.diagnostics.export()
+              if (result && result.ok) {
+                toast({ message: '诊断包已导出，已在资源管理器中打开所在位置', type: 'success', duration: 4000 })
+              } else {
+                toast({ message: `导出失败：${result?.message || '未知错误'}`, type: 'error', duration: 5000 })
+              }
+            } finally {
+              button.disabled = false
+            }
+          }
+        }, '导出诊断包…')
+      }),
+      row({
         title: '打开配置目录说明',
         sub: 'settings.json 保存设置，library-cache.json 保存元数据缓存，删除后者会触发一次完整重扫',
         control: h('button', {

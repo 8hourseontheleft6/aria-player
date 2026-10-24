@@ -243,6 +243,16 @@ function registerIpc (ctx) {
     },
 
     /* ---------- 其它 ---------- */
+    /* ---------- 诊断 ---------- */
+    'diagnostics:inspect': async (_event, file) => {
+      if (!ctx.has('diagnostics')) return { ok: false, code: 'unavailable' }
+      return ctx.get('diagnostics').inspectBundle(String(file || ''))
+    },
+    'diagnostics:export': async () => {
+      if (!ctx.has('diagnostics')) return { ok: false, code: 'unavailable', message: '这个档位没有诊断包服务' }
+      return ctx.get('diagnostics').exportBundle()
+    },
+
     'app:info': () => ({
       name: app.getName(),
       version: app.getVersion(),

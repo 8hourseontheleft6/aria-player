@@ -1075,7 +1075,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
    * aiSubtitles = 本机 AI 字幕（模型可选下载、识别在本机跑），player 档专属。
    * 登记在这里的意思是：以后再加服务，必须先证明它确实是这个档位要的。
    */
-  const expectedServices = ['ai', 'aiSubtitles', 'openedFiles', 'settings']
+  const expectedServices = ['ai', 'aiSubtitles', 'diagnostics', 'openedFiles', 'settings']
   const services = ctx.list().slice().sort()
   record('主进程只挂了本档位的服务（表外的都没被 define）',
     services.join('|') === expectedServices.join('|'),
@@ -2196,6 +2196,27 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
      */
     const bad = checks.filter((check) => !check.ok)
     console.log('\n=== 自检结束' + tail + '：' + (checks.length - bad.length) + '/' + checks.length + ' 通过 ===\n')
+    /*
+     * 把结果落一份到 userData/selfcheck.json —— 「导出诊断包」会带上它，
+     * 用户报问题时能直接看到他那一版的自检跑成什么样。
+     */
+    try {
+      const { app } = require('electron')
+      const fsSync = require('node:fs')
+      const pathMod = require('node:path')
+      const suite = process.env.ARIA_PRODUCT === 'unified'
+        ? 'unified'
+        : (process.argv.includes('--profile=player') ? 'player' : 'full')
+      fsSync.writeFileSync(pathMod.join(app.getPath('userData'), 'selfcheck.json'), JSON.stringify({
+        suite,
+        passed: checks.length - bad.length,
+        total: checks.length,
+        failed: bad.map((check) => check.name),
+        at: new Date().toISOString()
+      }, null, 2))
+    } catch {
+      // 写不进去不影响自检本身
+    }
     if (bad.length) {
       console.log('未通过：')
       for (const check of bad) console.log(`  · ${check.name}${check.detail ? ` — ${check.detail}` : ''}`)
@@ -6846,6 +6867,12 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       rgState.library.byId.delete(rgId)
       if (rgPreviousMode) await window.aria.settings.set({ replayGain: rgPreviousMode })
 
+      /* 诊断包：导出 → 主进程读回来核条目与泄漏 */
+      const diagExport = await window.aria.app.diagnostics.export()
+      const diagInspect = diagExport && diagExport.ok
+        ? await window.aria.app.diagnostics.inspect(diagExport.path)
+        : null
+
       return {
         hasKnob: Boolean(knob),
         collapsedWidth,
@@ -6876,6 +6903,10 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         rgAlbumDb: rgAlbum.db,
         rgAlbumGain: rgAlbum.gain,
         rgOffAgainActive: rgOffAgain.active,
+        diagOk: Boolean(diagExport && diagExport.ok),
+        diagEntries: diagInspect && diagInspect.ok ? diagInspect.entries : [],
+        diagLeaks: diagInspect && diagInspect.ok ? diagInspect.leaks : null,
+        diagLogLines: diagInspect && diagInspect.ok ? diagInspect.logLines : 0,
         presetOptions,
         playingState,
         time,
@@ -6895,6 +6926,19 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `首字母 ${scrollbarEq.firstLetter} → 滚滚轮三次后 ${scrollbarEq.afterWheelLetter}，` +
       `列表从 ${scrollbarEq.beforeScroll} 平滑到 ${scrollbarEq.afterScroll}，顶部那一行是「${scrollbarEq.rowTitle}」（停在分组起始=${scrollbarEq.landedOnMark}）；` +
       `左键下拖 60px → 字母变 ${scrollbarEq.dragLetter}（拖动中 is-dragging=${scrollbarEq.draggingClass}）`)
+
+    /* ---------- 诊断包 ---------- */
+    record('诊断包：导出成功、五个条目齐全、不含密钥与用户路径', (() => {
+      const entries = scrollbarEq.diagEntries || []
+      const leaks = scrollbarEq.diagLeaks || { key: true, userPath: true }
+      const all = ['info.json', 'settings.json', 'logs/main.log', 'selfcheck.json', 'README.txt']
+        .every((name) => entries.includes(name))
+      return {
+        ok: scrollbarEq.diagOk === true && all && leaks.key === false && leaks.userPath === false,
+        detail: `导出=${scrollbarEq.diagOk}；条目=[${entries.join('、')}]；` +
+          `含密钥=${leaks.key}；含用户路径=${leaks.userPath}；日志行数=${scrollbarEq.diagLogLines}`
+      }
+    })())
 
     /* ---------- ReplayGain：响度归一化 ---------- */
     record('ReplayGain：单曲/专辑增益落到引擎，关闭时旁路', (() => {

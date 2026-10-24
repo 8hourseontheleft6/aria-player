@@ -51,6 +51,19 @@ goes online for this feature is when **you** press "Download model" (about 229 M
 - Optional post-processing (both off by default) can send the **lyric text only** — never audio —
   to an OpenAI-compatible endpoint you configure yourself.
 
+## Crash logs and the diagnostics bundle
+
+The main process logs to `<userData>/logs/main.log` (rotating at 512 KB) and starts Electron's
+crashReporter, whose dumps stay in `<userData>/crashes` — **nothing is uploaded anywhere**. Uncaught
+exceptions and unhandled rejections are logged instead of popping dialogs.
+
+Log lines are redacted **as they are written**: API keys (`sk-…`, `Bearer …`, `api_key=…`),
+credentials inside URLs, and user-home paths (`C:\Users\<name>`, `/home/<name>`, `/Users/<name>`).
+
+Settings → About → **Export diagnostics** produces a zip with `info.json` (versions, OS, arch),
+a redacted `settings.json`, the last 200 log lines, the last self-check result, and a short README.
+It never contains audio, lyrics, artwork, keys, or full user paths.
+
 ## Volume normalisation (ReplayGain)
 
 Some albums are mastered loud, some quiet. "Settings → Equaliser → Volume normalisation" reads the

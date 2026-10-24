@@ -33,14 +33,14 @@ const { PROFILES } = require(path.join(root, 'src', 'main', 'profile.js'))
 
 /** 棘轮：改这里必须是有意的review，不是顺手 */
 const FULL_SERVICES = [
-  'settings', 'library', 'lyrics', 'online', 'ai', 'musicSources', 'tray', 'watcher', 'background'
+  'settings', 'library', 'lyrics', 'online', 'ai', 'musicSources', 'tray', 'watcher', 'background', 'diagnostics'
 ]
 const FULL_PLUGINS = ['trackInfoPanel', 'quickActions', 'onlineMedia']
 /**
  * player 档位允许的服务：设置 + 「打开的文件」+ 本机 AI 字幕（模型可选下载、识别在本机跑）。
  * 加名字要在这里登记 —— 这是刻意的棘轮：不登记就说明是「顺手挂上去的」，那种要拦。
  */
-const PLAYER_SERVICES_ALLOWED = ['settings', 'openedFiles', 'aiSubtitles', 'ai']
+const PLAYER_SERVICES_ALLOWED = ['settings', 'openedFiles', 'aiSubtitles', 'ai', 'diagnostics']
 
 const problems = []
 

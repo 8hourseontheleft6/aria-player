@@ -174,6 +174,27 @@ iOS 设计风格的本地音乐播放器，Electron 套壳，零构建步骤（�
 - 解码用的是浏览器自带的解码器（mp3 / m4a / flac / wav / ogg / opus / aac）；
   wma / aiff 这类解不开的格式会明确告诉你先转格式。
 
+## 崩溃日志与诊断包
+
+主进程会把日志写进 `<userData>/logs/main.log`（超过 512KB 滚一份 `main.log.1`），
+同时开着 Electron 的 crashReporter（dump 只落在 `<userData>/crashes`，**不往任何服务器上传**）。
+未捕获的异常与未处理的 Promise 拒绝都会进日志，不会弹窗轰炸。
+
+日志在**写入时**就脱敏：外部模型的 key（`sk-…`、`Bearer …`、`api_key=…`）、URL 里的
+`user:pass@`、以及 `C:\Users\<名字>` / `/home/<名字>` / `/Users/<名字>` 这类路径。
+
+设置 → 关于 → **导出诊断包** 会生成一个 zip：
+
+| 条目 | 内容 |
+| --- | --- |
+| `info.json` | 版本、Electron/Chromium/Node、OS、架构、locale、启动时间 |
+| `settings.json` | 脱敏后的设置（**不含** AI key，只有 `hasKey`）|
+| `logs/main.log` | 最近 200 行日志（已脱敏）|
+| `selfcheck.json` | 最近一次自检的结果（跑过才有）|
+| `README.txt` | 这个包是什么 |
+
+**不含**音频、歌词、封面、密钥、完整的用户名路径。导完会直接在资源管理器里定位到文件。
+
 ## 音量归一化（ReplayGain）
 
 有些专辑压得响、有些压得轻，连着听就得一直拧音量。开启「设置 → 均衡器 → 音量归一化」后会读曲目里的
