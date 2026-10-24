@@ -85,6 +85,18 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
       error: null
     })
 
+    /* gapless：当前曲目开播后就把下一首预热好（关掉时顺手清掉） */
+    if (store.get().settings.gapless === true) {
+      const position = playlist.positionOf(playbackTrackId())
+      const nextId = position >= 0 ? playlist.idAt(position + 1) : null
+      const nextTrack = nextId ? getTrack(nextId) : null
+      const nextUrl = nextTrack ? trackMediaUrl(nextTrack) : ''
+      if (nextUrl) engine.preload(nextUrl)
+      else engine.clearPreload()
+    } else {
+      engine.clearPreload()
+    }
+
     bus.emit(EVENTS.TRACK_CHANGED, { track, autoplay })
     remote.settings.set({ lastTrackPath: track.path }).catch(() => {})
 

@@ -79,6 +79,18 @@ Settings → About → **Export diagnostics** produces a zip with `info.json` (v
 a redacted `settings.json`, the last 200 log lines, the last self-check result, and a short README.
 It never contains audio, lyrics, artwork, keys, or full user paths.
 
+## Gapless playback (preloading the next track)
+
+Settings → Equaliser → **Gapless (preload next track)**, off by default. When on, the bytes of the
+next track are preloaded into a hidden `Audio` element as soon as the current one starts; switching
+then reads from cache, so playback starts sooner and the seam is smaller. Turning it off means
+nothing is preloaded and the playback path is exactly as before.
+
+**Honest scope**: this is "preload + fast handoff", **not sample-accurate gapless**. True gapless
+means decoding both tracks into WebAudio `AudioBuffer`s and scheduling them, which would bypass the
+current `<audio>` pipeline (equaliser, visualiser, rate all hang off it) — that is a separate refactor.
+If preloading fails we simply fall back to a normal track switch.
+
 ## Reordering the queue
 
 Open the play queue and **drag a row up or down**:

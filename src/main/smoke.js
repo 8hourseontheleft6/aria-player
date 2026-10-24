@@ -6983,6 +6983,75 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
+    /* ---------- 无缝播放（预加载下一首）---------- */
+    const gaplessReading = await evaluate(win, `
+      const { actions, store, player, engine, bus } = window.__aria
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      const ids = store.get().library.tracks.map((track) => track.id).slice(0, 2)
+      if (ids.length < 2) return { skipped: true }
+
+      async function handoffGap () {
+        const first = store.get().library.byId.get(ids[0])
+        await player.playTrack(ids[0])
+        await settle(900)
+        const duration = Number(store.get().playback.duration) || 0
+        if (duration < 5) return { gap: -1, played: false }
+        /* 快进到离结束 1.2 秒，让它自己走完 */
+        player.seek(duration - 1.2)
+        let endedAt = 0
+        let startedAt = 0
+        const offEnded = bus.on('audio:ended', () => { endedAt = performance.now() })
+        const offPlay = bus.on('engine:state', (stateName) => {
+          if (stateName === 'playing' && endedAt && !startedAt) startedAt = performance.now()
+        })
+        for (let i = 0; i < 60 && !(endedAt && startedAt); i++) await settle(120)
+        offEnded()
+        offPlay()
+        return {
+          gap: endedAt && startedAt ? Math.round(startedAt - endedAt) : -1,
+          played: player.getTrackId ? player.getTrackId() === ids[1] : null,
+          nowId: store.get().playback.trackId
+        }
+      }
+
+      actions.setSetting({ gapless: false })
+      await settle(200)
+      const offPreload = engine.preloadSnapshot()
+      const off = await handoffGap()
+
+      actions.setSetting({ gapless: true })
+      await settle(200)
+      await player.playTrack(ids[0])
+      await settle(900)
+      const onPreload = engine.preloadSnapshot()
+      const on = await handoffGap()
+      actions.setSetting({ gapless: false })
+      await settle(200)
+      const cleared = engine.preloadSnapshot()
+      return { skipped: false, off, on, offPreload, onPreload, cleared, ids, nextUrlExpected: onPreload.url !== '' }
+    `)
+
+    record('无缝播放：开时下一首会被预加载，换歌不掉链子；关时完全不预热', (() => {
+      const reading = gaplessReading || {}
+      if (reading.skipped) return { ok: false, detail: '库里曲目不足两首，跳过' }
+      const on = reading.on || {}
+      const off = reading.off || {}
+      const offPreload = reading.offPreload || {}
+      const onPreload = reading.onPreload || {}
+      const cleared = reading.cleared || {}
+      const ok = offPreload.url === '' &&
+        onPreload.url !== '' &&
+        cleared.url === '' &&
+        on.nowId === reading.ids[1] &&
+        off.nowId === reading.ids[1]
+      return {
+        ok,
+        detail: `关时预加载=「${offPreload.url}」（应为空）；开时预加载=「${String(onPreload.url).slice(0, 60)}…」（readyState=${onPreload.readyState}）；` +
+          `关掉后已清空=${cleared.url === ''}；换歌后当前曲目=第二首（开=${on.nowId === reading.ids[1]}、关=${off.nowId === reading.ids[1]}）；` +
+          `实测缝隙：开=${on.gap}ms、关=${off.gap}ms`
+      }
+    })())
+
     /* ---------- 队列拖动排序 ---------- */
     const queueReading = await evaluate(win, `
       const { actions, store, player } = window.__aria

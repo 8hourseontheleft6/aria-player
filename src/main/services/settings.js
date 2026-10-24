@@ -71,6 +71,8 @@ const DEFAULTS = {
   resumePlayback: true,
   /** 播放队列（id 列表）；拖动排序后写回这里，启动时恢复 */
   queue: [],
+  /** 无缝衔接：当前曲目快结束时预加载下一首（默认关；关掉时行为与以前完全一致） */
+  gapless: false,
   // 自动均衡时是否用「声音特征分析」辅助判断风格（本地解码，不联网）
   styleAnalysis: true,
   /*

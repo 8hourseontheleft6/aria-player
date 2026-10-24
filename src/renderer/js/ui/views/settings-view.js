@@ -821,6 +821,13 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           (value) => actions.setEqualizer({ auto: value }))
       }),
       row({
+        title: '无缝播放（预加载下一首）',
+        sub: '当前曲目开播后就把下一首的字节预读进来，换歌时起播更快、缝更小。默认关闭；'
+          + '关掉时播放路径与以前完全一致。注意：这是"预加载 + 快速接手"，'
+          + '不是采样级的 gapless（那需要把两首都解码到 WebAudio 里排程，会绕开现在的 <audio> 链路）。',
+        control: switchControl(settings.gapless === true, (value) => actions.setSetting({ gapless: value }))
+      }),
+      row({
         title: '记住每首歌的播放位置',
         sub: '暂停、切歌、退出之后再打开，从上次听到的地方继续（最多记 500 首，播完自动清掉）。'
           + '关掉后完全不读写这份记录。',

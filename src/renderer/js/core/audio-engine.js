@@ -48,6 +48,55 @@ export function createAudioEngine ({ bus }) {
   audio.addEventListener('play', () => bus.emit('engine:state', 'playing'))
   audio.addEventListener('pause', () => bus.emit('engine:state', 'paused'))
 
+  /*
+   * 预加载下一首（gapless 用）。
+   *
+   * 只做一件事：用一个**独立的隐藏 Audio** 把下一首的字节先读进缓存里。
+   * 不接管播放路径、不进 WebAudio 图、也不影响均衡器 —— 当前曲目的播放还是原来那条链。
+   * 真正换歌时仍走 load()，只是这次读的是本地缓存，起播快得多。
+   */
+  let preloadAudio = null
+  let preloadUrl = ''
+
+  function preload (url) {
+    if (!url || url === preloadUrl) return false
+    preloadUrl = url
+    try {
+      if (!preloadAudio) {
+        preloadAudio = new Audio()
+        preloadAudio.preload = 'auto'
+        preloadAudio.muted = true
+        preloadAudio.volume = 0
+      }
+      preloadAudio.src = url
+      preloadAudio.load()
+      return true
+    } catch {
+      preloadUrl = ''
+      return false
+    }
+  }
+
+  /** 预加载状态（自检用）：url 为空表示没有预热任何东西 */
+  function preloadSnapshot () {
+    return {
+      url: preloadUrl,
+      readyState: preloadAudio ? preloadAudio.readyState : -1,
+      have: preloadAudio ? preloadAudio.buffered.length > 0 : false
+    }
+  }
+
+  function clearPreload () {
+    preloadUrl = ''
+    if (!preloadAudio) return
+    try {
+      preloadAudio.removeAttribute('src')
+      preloadAudio.load()
+    } catch {
+      // 忽略
+    }
+  }
+
   function load (url) {
     if (!url) return
     if (currentUrl === url) return
@@ -360,6 +409,9 @@ export function createAudioEngine ({ bus }) {
     outputDevice,
     setEqualizer,
     equalizerSnapshot,
+    preload,
+    clearPreload,
+    preloadSnapshot,
     setReplayGain,
     replayGainSnapshot,
     setRate,
