@@ -6819,6 +6819,33 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       actions.setView('songs')
       await settle(400)
 
+      /*
+       * ③b ReplayGain：塞一首带标签的合成曲目，验证增益真的落到引擎上。
+       *  track → -6dB（0.5012）；album → +3dB（1.4125）；off → 1。
+       * 跑完把设置、曲目、byId 都还原。
+       */
+      const rgState = store.get()
+      const rgId = 'rg-smoke-track'
+      const rgOriginalId = rgState.playback.trackId
+      const rgPreviousMode = rgState.settings.replayGain
+      rgState.library.byId.set(rgId, { id: rgId, gainTrack: -6, gainAlbum: 3, gainPeak: 0.988 })
+      store.set((state) => ({ ...state, playback: { ...state.playback, trackId: rgId } }))
+      await settle(80)
+      actions.setReplayGain('off')
+      const rgOff = engine.replayGainSnapshot()
+      actions.setReplayGain('track')
+      await settle(80)
+      const rgTrack = engine.replayGainSnapshot()
+      actions.setReplayGain('album')
+      await settle(80)
+      const rgAlbum = engine.replayGainSnapshot()
+      actions.setReplayGain('off')
+      await settle(80)
+      const rgOffAgain = engine.replayGainSnapshot()
+      store.set((state) => ({ ...state, playback: { ...state.playback, trackId: rgOriginalId } }))
+      rgState.library.byId.delete(rgId)
+      if (rgPreviousMode) await window.aria.settings.set({ replayGain: rgPreviousMode })
+
       return {
         hasKnob: Boolean(knob),
         collapsedWidth,
@@ -6842,6 +6869,13 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         matched,
         hasSwitchRow,
         hasAutoRow,
+        rgOffActive: rgOff.active,
+        rgOffGain: rgOff.gain,
+        rgTrackDb: rgTrack.db,
+        rgTrackGain: rgTrack.gain,
+        rgAlbumDb: rgAlbum.db,
+        rgAlbumGain: rgAlbum.gain,
+        rgOffAgainActive: rgOffAgain.active,
         presetOptions,
         playingState,
         time,
@@ -6861,6 +6895,26 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `首字母 ${scrollbarEq.firstLetter} → 滚滚轮三次后 ${scrollbarEq.afterWheelLetter}，` +
       `列表从 ${scrollbarEq.beforeScroll} 平滑到 ${scrollbarEq.afterScroll}，顶部那一行是「${scrollbarEq.rowTitle}」（停在分组起始=${scrollbarEq.landedOnMark}）；` +
       `左键下拖 60px → 字母变 ${scrollbarEq.dragLetter}（拖动中 is-dragging=${scrollbarEq.draggingClass}）`)
+
+    /* ---------- ReplayGain：响度归一化 ---------- */
+    record('ReplayGain：单曲/专辑增益落到引擎，关闭时旁路', (() => {
+      const trackGain = scrollbarEq.rgTrackGain
+      const albumGain = scrollbarEq.rgAlbumGain
+      const ok = scrollbarEq.rgOffActive === false &&
+        Math.abs(scrollbarEq.rgOffGain - 1) < 1e-6 &&
+        scrollbarEq.rgTrackDb === -6 &&
+        Math.abs(trackGain - 0.5011872) < 1e-3 &&
+        scrollbarEq.rgAlbumDb === 3 &&
+        Math.abs(albumGain - 1.4125375) < 1e-3 &&
+        scrollbarEq.rgOffAgainActive === false
+      return {
+        ok,
+        detail: `关：active=${scrollbarEq.rgOffActive}、gain=${scrollbarEq.rgOffGain}；` +
+          `单曲：db=${scrollbarEq.rgTrackDb}、gain=${Number(trackGain).toFixed(4)}（期望 -6 / 0.5012）；` +
+          `专辑：db=${scrollbarEq.rgAlbumDb}、gain=${Number(albumGain).toFixed(4)}（期望 3 / 1.4125）；` +
+          `再关掉：active=${scrollbarEq.rgOffAgainActive}`
+      }
+    })())
 
     record('声音均衡器：预设可切、按流派自动匹配、开着也能正常出声',
       scrollbarEq.flatPreset === 'off' &&

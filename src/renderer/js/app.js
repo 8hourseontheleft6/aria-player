@@ -15,6 +15,7 @@ import { createStore, initialState } from './core/store.js'
 import { remote, isElectron } from './core/remote.js'
 import { normalizeForSearch, isMacOS, describeUnreadable } from './core/format.js'
 import { createAudioEngine } from './core/audio-engine.js'
+import { resolveReplayGainDb } from './core/replaygain.js'
 import { matchPreset, matchByMetadata, PRESETS } from './core/equalizer-presets.js'
 import { analyzeTrack, cachedAnalysis, analyzeBuffer, classifyStyle } from './core/style-analyzer.js'
 import { classifyWithAi, cachedAiStyle, parseAnswer } from './core/ai-style.js'
@@ -962,6 +963,30 @@ async function main () {
     },
 
     /**
+     * 设置响度归一化模式。
+     *
+     * @param {'off'|'track'|'album'} mode
+     * @returns {{ db: number, gain: number, active: boolean }}
+     */
+    setReplayGain (mode) {
+      const next = mode === 'track' || mode === 'album' ? mode : 'off'
+      store.set((state) => ({ ...state, settings: { ...state.settings, replayGain: next } }))
+      remote.settings.set({ replayGain: next }).catch(() => {})
+      return actions.applyReplayGain()
+    },
+
+    /**
+     * 响度归一化（ReplayGain）。
+     * 设置改成 'off' 时把增益放回 1 并**不建图**，播放路径与没开这个功能时一致。
+     */
+    applyReplayGain () {
+      const state = store.get()
+      const mode = state.settings.replayGain
+      const track = state.library.byId.get(state.playback.trackId) || null
+      return engine.setReplayGain(resolveReplayGainDb(mode, track))
+    },
+
+    /**
      * 把当前设置落到引擎上。
      * 自动模式下按「正在播放的那首歌」挑预设：标签优先、音频分析兜底
      * （分析是异步的，算完会自己再调一次这里）。
@@ -1154,6 +1179,8 @@ async function main () {
     engine.setPreservesPitch(settings.preservesPitch)
     // 均衡器设置变了就落到引擎（自动模式下按当前曲目挑预设）
     actions.applyEqualizer()
+    // 响度归一化同理（关掉时这里只是把增益放回 1，不会建图）
+    actions.applyReplayGain()
     /*
      * 主题色来源（封面 / 稳定配色）变了：立刻重新取色。
      * 不重新取的话要等下一首歌才生效 —— 用户会以为这个开关坏了。
@@ -1176,9 +1203,13 @@ async function main () {
    * 所以记一笔「待应用」，等真的播起来（用户手势已经发生）再落地。
    */
   store.select((state) => state.playback.status === 'playing', (playing) => {
-    if (!playing || !pendingEqualizer) return
-    pendingEqualizer = false
-    actions.applyEqualizer()
+    if (!playing) return
+    if (pendingEqualizer) {
+      pendingEqualizer = false
+      actions.applyEqualizer()
+    }
+    // 归一化只在需要真加增益时才建图，所以每首歌播起来都补一次
+    actions.applyReplayGain()
   })
 
   /* ------------------------------------------------------------------ */

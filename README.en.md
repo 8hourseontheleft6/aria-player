@@ -51,6 +51,19 @@ goes online for this feature is when **you** press "Download model" (about 229 M
 - Optional post-processing (both off by default) can send the **lyric text only** — never audio —
   to an OpenAI-compatible endpoint you configure yourself.
 
+## Volume normalisation (ReplayGain)
+
+Some albums are mastered loud, some quiet. "Settings → Equaliser → Volume normalisation" reads the
+ReplayGain tags (`REPLAYGAIN_TRACK_GAIN` / `REPLAYGAIN_ALBUM_GAIN` / `REPLAYGAIN_TRACK_PEAK`) and
+applies a per-track GainNode so everything sits at a similar level:
+
+- **Off** (default): fully bypassed — no audio graph is created, the playback path is identical to before.
+- **Track**: each track's own gain.
+- **Album**: prefer the album gain, fall back to the track gain.
+
+It never touches your own volume slider. Untagged tracks play at 0 dB, and absurd tag values
+(beyond ±24 dB) are treated as 0 dB.
+
 ## Install / build / self-check
 
 ```bash

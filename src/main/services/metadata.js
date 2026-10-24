@@ -62,6 +62,22 @@ function normalizeTrack (filePath, stat, parsed) {
   const year = Number(common.year) || 0
   const genre = firstString(common.genre)
 
+  /*
+   * ReplayGain：music-metadata 把 TXXX / Vorbis 的 REPLAYGAIN_* 统一解析成
+   * { dB, ratio }。这里只留需要的三个数，缺失就是 null（渲染层按 0dB 处理）。
+   */
+  const gainDb = (value) => {
+    const db = Number(value && value.dB)
+    return Number.isFinite(db) ? Math.round(db * 100) / 100 : null
+  }
+  const peakOf = (value) => {
+    const ratio = Number(value && value.ratio)
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : null
+  }
+  const gainTrack = gainDb(common.replaygain_track_gain)
+  const gainAlbum = gainDb(common.replaygain_album_gain)
+  const gainPeak = peakOf(common.replaygain_track_peak) || peakOf(common.replaygain_album_peak)
+
   return {
     id,
     path: filePath,
@@ -83,6 +99,10 @@ function normalizeTrack (filePath, stat, parsed) {
     bitrate: Math.round(Number(format.bitrate) || 0),
     sampleRate: Number(format.sampleRate) || 0,
     lossless: Boolean(format.lossless),
+    // ReplayGain（dB；album 是整张专辑的增益，peak 只在有标签时才有）
+    gainTrack,
+    gainAlbum,
+    gainPeak,
     artworkEmbedded: false,
     artworkFile: null
   }

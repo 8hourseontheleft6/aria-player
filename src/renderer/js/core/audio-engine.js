@@ -27,6 +27,11 @@ export function createAudioEngine ({ bus }) {
   let currentUrl = null
   let pendingPlay = null
   let tap = null
+  /*
+   * ReplayGain：只在真需要时（设置不是 off 且 dB 不为 0）才把音频图建出来。
+   * 关掉时绝不建图 —— 播放路径保持原生，和没这个功能时完全一致。
+   */
+  let replayGainDb = 0
 
   const EVENTS = [
     'loadstart', 'loadedmetadata', 'durationchange', 'timeupdate', 'progress',
@@ -207,7 +212,15 @@ export function createAudioEngine ({ bus }) {
      * 用户没开均衡器、插件也没要可视化时，一个节点都不建，播放路径保持原生。
      */
     const equalizer = createEqualizer(context)
-    source.connect(equalizer.input)
+    /*
+     * ReplayGain 的增益节点串在 source 与均衡器之间：
+     *   source → replayGainNode → equalizer.input → ... → destination
+     * 这样它调整的是「这首歌的响度」，不是用户自己的音量滑杆（那个还在 audio.volume 上）。
+     */
+    const replayGainNode = context.createGain()
+    replayGainNode.gain.value = linearGain(replayGainDb)
+    source.connect(replayGainNode)
+    replayGainNode.connect(equalizer.input)
     equalizer.output.connect(context.destination)
 
     const extraNodes = new Set()
@@ -215,6 +228,7 @@ export function createAudioEngine ({ bus }) {
       context,
       source,
       equalizer,
+      replayGainNode,
       /** 把节点串到输出上，返回断开函数 */
       connect (node) {
         source.connect(node)
@@ -270,6 +284,46 @@ export function createAudioEngine ({ bus }) {
     return active?.context?.state === 'suspended'
   }
 
+  /** dB → 线性增益（0dB 与极小值都按 1 处理，避免浮点噪音） */
+  function linearGain (db) {
+    const value = Number(db)
+    if (!Number.isFinite(value) || Math.abs(value) < 0.01) return 1
+    return Math.pow(10, value / 20)
+  }
+
+  /**
+   * 设置响度归一化的增益。
+   *
+   * @param {number} db 目标增益（0 表示不处理）
+   * @returns {{ db: number, gain: number, active: boolean }}
+   *
+   * 注意 0dB 的行为：**不建图**。这样「关掉归一化」与「从没开过」在音频路径上完全一致。
+   */
+  function setReplayGain (db) {
+    const value = Number(db)
+    replayGainDb = Number.isFinite(value) ? value : 0
+    if (Math.abs(replayGainDb) < 0.01) {
+      if (tap?.replayGainNode) tap.replayGainNode.gain.value = 1
+      return { db: 0, gain: 1, active: false }
+    }
+    const active = getTap()
+    if (active?.replayGainNode) {
+      active.replayGainNode.gain.value = linearGain(replayGainDb)
+      if (context_state_suspended(active)) active.resume()
+    }
+    return { db: replayGainDb, gain: linearGain(replayGainDb), active: Boolean(active?.replayGainNode) }
+  }
+
+  /** 当前生效的 ReplayGain（没建过图时 active=false） */
+  function replayGainSnapshot () {
+    const node = tap?.replayGainNode
+    return {
+      db: replayGainDb,
+      gain: node ? node.gain.value : linearGain(replayGainDb),
+      active: Boolean(node) && Math.abs(replayGainDb) >= 0.01
+    }
+  }
+
   /** 均衡器当前参数（没建过图时返回 null） */
   function equalizerSnapshot () {
     return tap?.equalizer ? tap.equalizer.snapshot() : null
@@ -306,6 +360,8 @@ export function createAudioEngine ({ bus }) {
     outputDevice,
     setEqualizer,
     equalizerSnapshot,
+    setReplayGain,
+    replayGainSnapshot,
     setRate,
     setPreservesPitch,
     lastError,

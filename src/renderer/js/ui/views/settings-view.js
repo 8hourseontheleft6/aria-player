@@ -8,6 +8,7 @@ import { createSlider } from '../widgets/slider.js'
 import { toast } from '../widgets/overlay.js'
 import { presetOptions, PRESETS } from '../../core/equalizer-presets.js'
 import { createPillSelect } from '../widgets/pill-menu.js'
+import { describeReplayGain, REPLAY_GAIN_LABELS, REPLAY_GAIN_MODES } from '../../core/replaygain.js'
 import { visualizerChoices } from '../widgets/visualizer.js'
 
 const TINT_SOURCES = [
@@ -803,6 +804,36 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
         sub: '判断顺序：外部模型（如果开了）→ 声音特征 → 流派标签。识别不出来就用你手动选的那一组。',
         control: switchControl(settings.equalizer?.auto !== false,
           (value) => actions.setEqualizer({ auto: value }))
+      }),
+      row({
+        title: '音量归一化',
+        sub: '按曲目里的 ReplayGain 标签统一响度，不改变你自己的音量设置。'
+          + '「单曲」用每首歌的增益，「专辑」优先用整张专辑的增益（没有就退回单曲）。'
+          + '关闭时完全旁路，播放路径与没开这个功能时一致。',
+        control: createPillSelect({
+          items: REPLAY_GAIN_MODES.map((value) => ({ value, label: REPLAY_GAIN_LABELS[value] })),
+          value: settings.replayGain || 'off',
+          title: '音量归一化',
+          onPick: (value) => actions.setReplayGain(value)
+        })
+      }),
+      row({
+        title: '当前曲目的增益',
+        sub: '没有 ReplayGain 标签的曲目按 0dB 处理。',
+        control: h('span', {
+          class: 'settings__hint',
+          text: (() => {
+            const state = store.get()
+            const track = state.library.byId.get(state.playback.trackId) || null
+            const info = describeReplayGain(
+              state.settings.replayGain || 'off',
+              track ? { gainTrack: track.gainTrack, gainAlbum: track.gainAlbum } : null
+            )
+            if (info.source === 'off') return '关（不处理）'
+            if (info.source === 'none') return '这首歌没有 ReplayGain 标签 → 0dB'
+            return `${info.db > 0 ? '+' : ''}${info.db.toFixed(2)} dB（${info.source === 'track-fallback' ? '专辑模式，回退到单曲' : info.source === 'album' ? '专辑标签' : '单曲标签'}）`
+          })()
+        })
       }),
       row({
         title: '均衡器预设',

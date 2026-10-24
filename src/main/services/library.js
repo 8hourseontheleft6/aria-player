@@ -10,7 +10,7 @@ const { readMetadata, readEmbeddedArtwork } = require('./metadata')
 const { decodeTextBuffer } = require('../util/text')
 const { writeJsonAtomic } = require('../util/atomic-json')
 
-const CACHE_VERSION = 3
+const CACHE_VERSION = 4 /* 4：曲目多了 ReplayGain 字段 */
 const SCAN_CONCURRENCY = 6
 const ARTWORK_CACHE_LIMIT = 64
 /** 封面落盘缓存的边长：媒体墙最大格子 2×220px，480 足够且文件小得多 */

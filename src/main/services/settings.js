@@ -65,6 +65,8 @@ const DEFAULTS = {
   audioOutputDevice: '',
   // 声音均衡器：enabled 总开关；auto 按流派自动挑预设；preset 关掉自动后用手动选的
   equalizer: { enabled: false, auto: true, preset: 'flat' },
+  /** 响度归一化：'off' 关 / 'track' 单曲 / 'album' 专辑（默认关，关时完全旁路） */
+  replayGain: 'off',
   // 自动均衡时是否用「声音特征分析」辅助判断风格（本地解码，不联网）
   styleAnalysis: true,
   /*
