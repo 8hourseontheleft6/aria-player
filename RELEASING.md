@@ -1,5 +1,16 @@
 # 发版流程 / Releasing
 
+## 找安装包 / 清理旧产物
+
+每打一次包，`release*/` 里就多一对 exe；几十个版本之后很难找。两个命令解决：
+
+```bash
+npm run artifacts     # 只列当前版本（package.json 的 version）那六个，带体积与 SHA256
+npm run clean:dist    # 删掉旧版本的发行文件 + win-unpacked/.icon-ico（当前版本原样保留）
+```
+
+（`release*/` 全部在 .gitignore 里，发布走 GitHub Releases，不进仓库。）
+
 ## 仓库地址与署名（已填好）
 
 发布用的仓库地址已经写进 `package.json`，不需要再替换：

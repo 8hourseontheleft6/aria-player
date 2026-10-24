@@ -43,7 +43,9 @@
     "dist:player:mac": "electron-builder --config electron-builder.player.yml --mac --publish never",
     "dist:unified": "electron-builder --config electron-builder.unified.yml --win --x64",
     "dist:unified:portable": "electron-builder --config electron-builder.unified.yml --win portable --x64",
-    "dist:unified:mac": "electron-builder --config electron-builder.unified.yml --mac --publish never"
+    "dist:unified:mac": "electron-builder --config electron-builder.unified.yml --mac --publish never",
+    "artifacts": "node scripts/artifacts.mjs",
+    "clean:dist": "node scripts/clean-dist.mjs"
   },
   "dependencies": {
     "buffer": "6.0.3",
