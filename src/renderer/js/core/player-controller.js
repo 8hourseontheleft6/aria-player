@@ -661,7 +661,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
       resumeTick = now
       const track = getTrack(playbackTrackId())
       if (!track || !track.path) return
-      const seconds = getTime()
+      const seconds = engine.getTime()
       if (!(seconds > 0)) return
       remote.resume.set({ path: track.path, seconds, duration: Number(store.get().playback.duration) || 0 }).catch(() => {})
     }
@@ -669,7 +669,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
     disposers.push(bus.on('audio:pause', () => {
       const track = getTrack(playbackTrackId())
       if (!track || !track.path || store.get().settings.resumePlayback === false) return
-      const seconds = getTime()
+      const seconds = engine.getTime()
       if (seconds > 0) {
         remote.resume.set({ path: track.path, seconds, duration: Number(store.get().playback.duration) || 0 }).catch(() => {})
       }

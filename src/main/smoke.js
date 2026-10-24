@@ -6982,6 +6982,8 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       if (!other) return { skipped: true }
       actions.setView('songs')
       await settle(300)
+      /* 续播前先清掉这一首的旧记录：否则会读到上一轮跑留下的值（假阳性） */
+      await window.aria.resume.clear(target.path)
       await player.playTrack(target.id)
       await settle(1200)
       player.seek(20)
