@@ -1997,6 +1997,7 @@ async function main () {
     }))
 
     applySettings(settings)
+    markBoot('settingsReady')
 
     player.init()
     player.setMode(settings.playbackMode)
@@ -2025,6 +2026,7 @@ async function main () {
     }
 
     const tracks = await loadLibrary()
+    markBoot('libraryReady')
 
     // 恢复上次播放的曲目（只加载不播放，避免一启动就出声）
     if (settings.lastTrackPath) {
@@ -2076,19 +2078,59 @@ async function main () {
 
     // 资料库就绪后开始后台预热封面（会在界面忙时自动让路）
     if (tracks.length) prewarmer.start()
+
+    /* 首屏真的可用：资料库就绪后的下一帧 + 主视图容器确实可见（有高度、在文档里） */
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const view = store.get().ui.view
+    const host = view === 'wall' ? mediaWall.element
+      : view === 'settings' ? settingsView.element
+        : view === 'songs' ? libraryView.element
+          : browseView.element
+    const visible = Boolean(host && host.isConnected && host.getClientRects().length && host.clientHeight > 0)
+    if (visible) markBoot('firstUsableViewport', { firstUsableViewportView: view })
   }
 
   bindKeyboard()
   bindSystemCommands()
 
-  boot().catch((err) => {
+  /*
+   * 启动打点（只写内存，不影响行为；给 npm run perf:baseline 用）。
+   *
+   * 为什么不再用一个 "interactive"：
+   * 旧打点是在 boot() 刚被调起、还在等 app.info / settings 的时候写的，
+   * 那时窗口里只有一个空壳 —— 219ms 是「shell 构建完成」，不是「首屏可用」。
+   * 所以拆成五段，并把旧字段保留成 shellBuilt 的别名（兼容已有读数与脚本）。
+   *
+   *   shellBuilt          视图/事件/键盘都挂好，boot 还没拿到任何数据
+   *   settingsReady       app.info + settings 已应用（主题、音量、视图、快捷键都生效）
+   *   libraryReady        资料库曲目已进 store
+   *   firstUsableViewport 资料库就绪后的下一帧，且当前主视图真的可见
+   *   sourcesReady        音源脚本加载完成（主进程发事件；慢音源会明显晚于上面几段）
+   */
+  const bootMarks = { timeOrigin: performance.timeOrigin }
+  function markBoot (name, extra) {
+    if (bootMarks[name] !== undefined) return
+    bootMarks[name] = Math.round(performance.now() * 10) / 10
+    if (extra) Object.assign(bootMarks, extra)
+  }
+  window.__ariaBootMarks = bootMarks
+
+  /* 音源就绪：主进程发一次（慢音源时这一项会明显晚于前四段） */
+  if (remote.sources && typeof remote.sources.onReady === "function") {
+    remote.sources.onReady((payload) => markBoot("sourcesReady", { sourcesReadyCount: (payload && payload.count) || 0 }))
+  }
+
+  const bootTask = boot()
+  markBoot("shellBuilt")
+  /* 兼容：旧名字 interactive 现在等于 shellBuilt（语义见上面注释） */
+  bootMarks.interactive = bootMarks.shellBuilt
+
+  bootTask.catch((err) => {
     console.error('[app] 启动失败', err)
     toast({ message: `启动失败：${err.message}`, type: 'error', duration: 8000 })
   })
 
   /* 调试与二次开发入口：开发者工具控制台里可以直接用 window.__aria */
-  /* P0 基线用：首屏可交互的时刻（相对 timeOrigin），换算成 epoch 后与主进程的 ready 相减 */
-  window.__ariaBootMarks = { interactive: performance.now(), timeOrigin: performance.timeOrigin }
 
   window.__aria = {
     bus, store, player, engine, playlist, host, artwork, actions, EVENTS, prewarmer,

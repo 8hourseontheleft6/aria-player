@@ -53,11 +53,46 @@ npm run perf:baseline     # 5 项全测，约 2.5 分钟；读数写到 .tmp/per
 - **媒体墙**：`setView('wall')` 后等 10 秒，再取节点数与 3 秒 rAF 采样的中位间隔。
 - **扫描**：`library.scan()` 会先 resolve 一个摘要，所以测量要再等 `getStats().scanning === false`。
 
+## 一、启动打点修正：旧的 219ms 只是 shell
+
+**问题**：旧 `interactive` 是在 `boot()` 刚被调起、还在 `await remote.app.info()` / `settings.get()` 的时候写的 ——
+那时窗口里只有一个空壳（视图容器、事件、键盘都挂上了，但没数据）。所以它**不能**叫「首屏可交互」。
+
+**改法**（`src/renderer/js/app.js`）：拆成五段打点，旧字段保留成 `shellBuilt` 的别名（兼容已有读数）：
+
+| 阶段 | 打点时机 |
+| --- | --- |
+| `shellBuilt` | 视图/事件/键盘挂好、`boot()` 还没拿到任何数据 |
+| `settingsReady` | `app.info` + `settings` 已应用（主题、音量、视图、快捷键生效）|
+| `libraryReady` | 资料库曲目已进 store |
+| `firstUsableViewport` | 资料库就绪后的**下一帧**，且当前主视图容器确实可见（有高度、在文档里）|
+| `sourcesReady` | 音源脚本加载完成（主进程发 `sources:ready`，发一次）|
+
+`npm run perf:baseline` 现在逐段报告（`readyAt` 为 0 点），并把旧 `interactive` 单独标成「语义是 shellBuilt」。
+
+**实测（3 次，每次都是全新进程，810 首）**：
+
+| 阶段 | 第 1 次 | 第 2 次 | 第 3 次 | 中位数 |
+| --- | --- | --- | --- | --- |
+| shellBuilt | 213 ms | 221 ms | 240 ms | **221 ms** |
+| settingsReady | 365 ms | 394 ms | 402 ms | **394 ms** |
+| libraryReady | 494 ms | 519 ms | 527 ms | **519 ms** |
+| **firstUsableViewport** | **897 ms** | **916 ms** | **895 ms** | **897 ms** |
+| sourcesReady | 329 ms | 340 ms | 406 ms | **340 ms** |
+| （旧）interactive | 213 ms | 221 ms | 240 ms | 221 ms |
+
+**结论**：旧口径 219ms 比真实的「首屏可用」**低了约 4 倍**。真正要优化的目标是 **897ms** —— 其中
+`libraryReady → firstUsableViewport` 占了约 **380ms**（等资料库 + 两帧 + 首屏列表渲染），
+`shellBuilt → settingsReady` 占约 **170ms**（两次 IPC 往返 + 设置应用）。
+
+sourcesReady 在这台机器上比 libraryReady 还早（本地只装了内置音源、无外部慢脚本），
+所以「音源拖慢启动」的收益只会在**装了慢音源**的用户身上出现 —— 这直接引出第三部分的临时慢音源验收。
+
 ## 收口：P0 表的「改后」列（2026-10-24，含续播修复 + P1-3）
 
 | 项目 | 改前（基线）| 改后 | 目标 | 结论 |
 | --- | --- | --- | --- | --- |
-| 首屏可交互 | 224 ms | **219 ms** | ≤220 | ✓ 达标（噪声级，但没变差）|
+| 首屏可交互（**旧口径 = shellBuilt**）| 224 ms | **219 ms** | ≤220 | ⚠️ 口径不对，见下文「一、启动打点修正」|
 | 冷缓存 ready→资料库就绪 | 1164 ms | **1128 ms** | ≤900 | ✗ 未达（P1-1 已证明搬 worker 更慢）|
 | 强制全量扫描（同进程）| 1810 / 2152 ms | **1322 ms** | 不劣化 | ✓ 没劣化（区间噪声）|
 | 扫描期间主进程 CPU 均值 | 5.2 / 10.1 % | **10.1 %** | 不劣化 | = 与基线同量级 |

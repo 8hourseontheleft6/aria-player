@@ -347,12 +347,27 @@ globalThis.__ariaBoot.readyAt = Date.now()
   applyTheme(ctx, settings.get().theme)
 
   // 音源脚本在启动时装一次（目录不存在就建好，方便用户直接往里丢脚本）
+  /*
+   * 「音源就绪」：只用于启动打点与设置页提示，发一次就够。
+   * 窗口可能还没建/还没加载完，所以既在就绪时广播，也在 did-finish-load 时补发一次。
+   */
+  let sourcesReadyPayload = null
+  function notifySourcesReady (reason) {
+    if (sourcesReadyPayload) return
+    sourcesReadyPayload = { count: musicSources ? musicSources.list().length : 0, reason }
+    for (const target of BrowserWindow.getAllWindows()) {
+      if (!target.isDestroyed()) target.webContents.send('sources:ready', sourcesReadyPayload)
+    }
+  }
+
   const musicSources = optional('musicSources')
   if (musicSources) {
     try {
       await musicSources.init()
+      notifySourcesReady('startup')
     } catch (err) {
       console.warn('[sources] 初始化失败', err)
+      notifySourcesReady('failed')
     }
   }
 
@@ -365,6 +380,11 @@ globalThis.__ariaBoot.readyAt = Date.now()
   registerIpc(ctx)
 
   const win = createMainWindow(ctx, profile, product)
+  if (sourcesReadyPayload) {
+    win.webContents.once('did-finish-load', () => {
+      if (!win.isDestroyed()) win.webContents.send('sources:ready', sourcesReadyPayload)
+    })
+  }
   const tray = optional('tray')
   if (tray) tray.sync()
   /*

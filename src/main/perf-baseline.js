@@ -4,7 +4,8 @@
  * P0 基线测量（`npm run perf:baseline`）。
  *
  * 只测量、不改产品行为：
- *  1. 冷启动：app ready → ready-to-show → 渲染层首屏可交互
+ *  1. 冷启动：app ready → ready-to-show → 五段打点（shellBuilt / settingsReady / libraryReady /
+ *     firstUsableViewport / sourcesReady）
  *  2. 空闲 RSS：静置 60 秒后按进程分列
  *  3. 播放中：播 30 秒后的 RSS/CPU（示波器开、关各一次）
  *  4. 媒体墙：打开 10 秒后的 RSS、节点数、帧率
@@ -90,24 +91,61 @@ async function runPerfBaseline ({ win, ctx }) {
   console.log('\n=== P0 基线 ===\n')
   console.log(`版本 ${out.version}  平台 ${process.platform}/${process.arch}  Electron ${process.versions.electron}`)
 
-  /* ---------- 1. 冷启动 ---------- */
+  /* ---------- 1. 冷启动（五段）---------- */
   await new Promise((resolve) => {
     if (win.webContents.isLoading() === false) return resolve()
     win.webContents.once('did-finish-load', resolve)
   })
   const boot = globalThis.__ariaBoot || {}
-  const pageBoot = await evaluate(win, `
-    const marks = window.__ariaBootMarks || null
-    return marks ? { interactive: marks.interactive, timeOrigin: marks.timeOrigin } : null`)
-  const interactiveEpoch = pageBoot && pageBoot.timeOrigin ? pageBoot.timeOrigin + pageBoot.interactive : 0
+  const STAGES = ['shellBuilt', 'settingsReady', 'libraryReady', 'firstUsableViewport', 'sourcesReady']
+
+  /* 音源可能很慢（用户装了慢脚本时以 10 秒计），所以最多等 15 秒再读数 */
+  const readMarks = () => evaluate(win, `
+    const marks = window.__ariaBootMarks
+    if (!marks) return null
+    const copy = {}
+    for (const key of ${JSON.stringify(STAGES)}) if (marks[key] !== undefined) copy[key] = marks[key]
+    copy.interactive = marks.interactive
+    copy.timeOrigin = marks.timeOrigin
+    copy.sourcesReadyCount = marks.sourcesReadyCount
+    copy.firstUsableViewportView = marks.firstUsableViewportView
+    return copy`)
+  let pageBoot = await readMarks()
+  const deadline = Date.now() + 15000
+  /*
+   * 等最后一段出现再读数：firstUsableViewport 才是真正的「首屏可用」。
+   * sourcesReady 可能比它更早（本地没装慢音源时），不能拿它当收尾条件。
+   */
+  while (Date.now() < deadline && pageBoot && pageBoot.firstUsableViewport === undefined) {
+    await sleep(300)
+    pageBoot = await readMarks()
+  }
+  if (!pageBoot) pageBoot = { timeOrigin: 0 }
+
+  const toMs = (mark) => (mark != null && pageBoot.timeOrigin && boot.readyAt
+    ? Math.round(pageBoot.timeOrigin + mark - boot.readyAt)
+    : null)
+  const stages = {}
+  for (const name of STAGES) stages[name] = toMs(pageBoot[name])
+
   out.coldStart = {
     readyAt: boot.readyAt || 0,
     readyToShowAt: boot.readyToShowAt || 0,
-    interactiveEpoch,
     readyToShowMs: boot.readyAt && boot.readyToShowAt ? boot.readyToShowAt - boot.readyAt : 0,
-    interactiveMs: boot.readyAt && interactiveEpoch ? Math.round(interactiveEpoch - boot.readyAt) : 0
+    stages,
+    legacyInteractiveMs: toMs(pageBoot.interactive),
+    sourcesReadyCount: pageBoot.sourcesReadyCount || 0,
+    firstUsableViewportView: pageBoot.firstUsableViewportView || null
   }
-  console.log(`1) 冷启动：ready→ready-to-show ${out.coldStart.readyToShowMs}ms；ready→首屏可交互 ${out.coldStart.interactiveMs}ms`)
+  const st = out.coldStart.stages
+  const fmt = (value) => (value == null ? '—' : `${value}ms`)
+  console.log(`1) 冷启动：ready→ready-to-show ${out.coldStart.readyToShowMs}ms`)
+  console.log(`   shellBuilt          ${fmt(st.shellBuilt)}`)
+  console.log(`   settingsReady       ${fmt(st.settingsReady)}`)
+  console.log(`   libraryReady        ${fmt(st.libraryReady)}`)
+  console.log(`   firstUsableViewport ${fmt(st.firstUsableViewport)}${out.coldStart.firstUsableViewportView ? `（视图 ${out.coldStart.firstUsableViewportView}）` : ''}`)
+  console.log(`   sourcesReady        ${fmt(st.sourcesReady)}（${out.coldStart.sourcesReadyCount} 个音源）`)
+  console.log(`   [旧] interactive     ${fmt(out.coldStart.legacyInteractiveMs)} —— 语义是 shellBuilt，别再当"可交互"`)
 
   /* 等资料库就绪再往下测 */
   for (let i = 0; i < 120; i++) {

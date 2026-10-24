@@ -27,6 +27,8 @@ const EVENT_CHANNELS = new Set([
   'ai-subtitles:transcribe-done',
   // 在线音源下载进度（主进程按 uid 推送）
   'sources:download-progress',
+  // 音源脚本加载完成（启动打点用，发一次）
+  'sources:ready',
   // 最小化 / 收进托盘时通知渲染层释放后台占用，回来时通知恢复
   'app:background'
 ])
@@ -213,6 +215,8 @@ contextBridge.exposeInMainWorld('aria', {
 
   /* 在线音源：脚本由用户自己放进 <userData>/music-sources，这里只做管理 / 搜索 / 解析 */
   sources: {
+    /* 音源脚本加载完成（启动打点与设置页提示用） */
+    onReady: (handler) => on('sources:ready', handler),
     list: () => ipcRenderer.invoke('sources:list'),
     reload: () => ipcRenderer.invoke('sources:reload'),
     stats: () => ipcRenderer.invoke('sources:stats'),
