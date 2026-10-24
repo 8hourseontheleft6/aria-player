@@ -1,8 +1,8 @@
 version: 0.2.0-beta.2
 files:
   - url: https://github.com/8hourseontheleft6/aria-player/releases/download/v0.2.0-beta.2/Aria-Setup-0.2.0-beta.2.exe
-    sha512: MQFRFrrE6OUPetT61PBsGRwI8T4RsP1JRhPSI62ZSBsMjmitzjC3EXkgRRe/MI9kLF8Nnd5OeYDEZ5MC5QWPWg==
-    size: 106773900
+    sha512: LahwGjRO9Cjo2ny/mguLp7zvAtMJ1D1/QmNYczvSuqQAHYA8dVND4ph9bUFNfnw4b2QYwcMVGOUwz95Bu7F/tQ==
+    size: 106774368
 path: https://github.com/8hourseontheleft6/aria-player/releases/download/v0.2.0-beta.2/Aria-Setup-0.2.0-beta.2.exe
-sha512: MQFRFrrE6OUPetT61PBsGRwI8T4RsP1JRhPSI62ZSBsMjmitzjC3EXkgRRe/MI9kLF8Nnd5OeYDEZ5MC5QWPWg==
-releaseDate: '2026-10-24T06:08:47.914Z'
+sha512: LahwGjRO9Cjo2ny/mguLp7zvAtMJ1D1/QmNYczvSuqQAHYA8dVND4ph9bUFNfnw4b2QYwcMVGOUwz95Bu7F/tQ==
+releaseDate: '2026-10-24T06:14:17.626Z'
