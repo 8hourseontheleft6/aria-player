@@ -95,6 +95,22 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
 
     if (autoplay) {
       const ok = await engine.play()
+      /*
+       * 续播：这一首上次听到哪儿了？engine.play() 之后再 seek —— 之前 seek 时
+       * 时长还没解析出来，跳不准（浏览器会把 seek 夹到 0）。
+       */
+      if (ok && store.get().settings.resumePlayback !== false && track.path) {
+        try {
+          const saved = await remote.resume.get(track.path)
+          const duration = Number(store.get().playback.duration) || 0
+          if (saved >= 5 && (!duration || saved < duration - 10)) {
+            engine.seek(saved)
+            bus.emit(EVENTS.TOAST, { message: `从上次的位置 ${Math.floor(saved / 60)}:${String(Math.floor(saved % 60)).padStart(2, '0')} 继续`, type: 'info', duration: 2200 })
+          }
+        } catch {
+          // 续播失败不影响播放
+        }
+      }
       if (!ok && !engine.paused) {
         syncPlaybackState({ status: 'error', error: engine.lastError()?.message || '播放失败' })
       }
@@ -606,7 +622,33 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
       if (store.get().playback.status === 'playing') syncPlaybackState({ status: 'buffering' })
     }))
 
+    /* 续播：暂停/切歌/退出前都可能没机会写，所以播放中每 5 秒记一次 */
+    let resumeTick = 0
+    function rememberPosition () {
+      if (store.get().settings.resumePlayback === false) return
+      const now = Date.now()
+      if (now - resumeTick < 5000) return
+      resumeTick = now
+      const track = getTrack(playbackTrackId())
+      if (!track || !track.path) return
+      const seconds = getTime()
+      if (!(seconds > 0)) return
+      remote.resume.set({ path: track.path, seconds, duration: Number(store.get().playback.duration) || 0 }).catch(() => {})
+    }
+    disposers.push(bus.on('audio:timeupdate', rememberPosition))
+    disposers.push(bus.on('audio:pause', () => {
+      const track = getTrack(playbackTrackId())
+      if (!track || !track.path || store.get().settings.resumePlayback === false) return
+      const seconds = getTime()
+      if (seconds > 0) {
+        remote.resume.set({ path: track.path, seconds, duration: Number(store.get().playback.duration) || 0 }).catch(() => {})
+      }
+    }))
+
     disposers.push(bus.on('audio:ended', () => {
+      /* 播完了就不该"续播"了 —— 下次从头开始 */
+      const finished = getTrack(playbackTrackId())
+      if (finished && finished.path) remote.resume.clear(finished.path).catch(() => {})
       executeAction(mode().onEnded(modeContext()))
     }))
 

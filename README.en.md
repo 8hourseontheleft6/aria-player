@@ -79,6 +79,17 @@ Settings → About → **Export diagnostics** produces a zip with `info.json` (v
 a redacted `settings.json`, the last 200 log lines, the last self-check result, and a short README.
 It never contains audio, lyrics, artwork, keys, or full user paths.
 
+## Resume positions
+
+On by default (Settings → Equaliser → **Remember playback position**). While playing, the position is
+saved every 5 seconds; less than 5 seconds in is not worth saving, and being within 10 seconds of the
+end counts as "finished" and is not saved either. **On end the entry is deleted**, so the next play
+starts from zero.
+
+- Stored in `<userData>/resume.json`, capped at **500 tracks** (oldest dropped first).
+- Coming back to a track resumes where you left off (with a short "resuming at m:ss" toast).
+- Turning the switch off stops all reads and writes of that file.
+
 ## Volume normalisation (ReplayGain)
 
 Some albums are mastered loud, some quiet. "Settings → Equaliser → Volume normalisation" reads the

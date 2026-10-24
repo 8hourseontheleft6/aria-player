@@ -821,6 +821,15 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           (value) => actions.setEqualizer({ auto: value }))
       }),
       row({
+        title: '记住每首歌的播放位置',
+        sub: '暂停、切歌、退出之后再打开，从上次听到的地方继续（最多记 500 首，播完自动清掉）。'
+          + '关掉后完全不读写这份记录。',
+        control: switchControl(settings.resumePlayback !== false, (value) => {
+          actions.setSetting({ resumePlayback: value })
+          toast({ message: value ? '已开启续播' : '已关闭续播（不再记录播放位置）', type: 'info', duration: 2200 })
+        })
+      }),
+      row({
         title: '音量归一化',
         sub: '按曲目里的 ReplayGain 标签统一响度，不改变你自己的音量设置。'
           + '「单曲」用每首歌的增益，「专辑」优先用整张专辑的增益（没有就退回单曲）。'

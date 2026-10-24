@@ -67,6 +67,8 @@ const DEFAULTS = {
   equalizer: { enabled: false, auto: true, preset: 'flat' },
   /** 响度归一化：'off' 关 / 'track' 单曲 / 'album' 专辑（默认关，关时完全旁路） */
   replayGain: 'off',
+  /** 记住每首歌的播放位置（续播）；关掉后连读写都不做 */
+  resumePlayback: true,
   // 自动均衡时是否用「声音特征分析」辅助判断风格（本地解码，不联网）
   styleAnalysis: true,
   /*

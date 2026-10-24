@@ -1075,7 +1075,7 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
    * aiSubtitles = 本机 AI 字幕（模型可选下载、识别在本机跑），player 档专属。
    * 登记在这里的意思是：以后再加服务，必须先证明它确实是这个档位要的。
    */
-  const expectedServices = ['ai', 'aiSubtitles', 'diagnostics', 'openedFiles', 'settings', 'updater']
+  const expectedServices = ['ai', 'aiSubtitles', 'diagnostics', 'openedFiles', 'resume', 'settings', 'updater']
   const services = ctx.list().slice().sort()
   record('主进程只挂了本档位的服务（表外的都没被 define）',
     services.join('|') === expectedServices.join('|'),
@@ -6937,6 +6937,49 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         ok: scrollbarEq.diagOk === true && all && leaks.key === false && leaks.userPath === false,
         detail: `导出=${scrollbarEq.diagOk}；条目=[${entries.join('、')}]；` +
           `含密钥=${leaks.key}；含用户路径=${leaks.userPath}；日志行数=${scrollbarEq.diagLogLines}`
+      }
+    })())
+
+    /* ---------- 续播：听 20 秒 → 切走 → 切回来应该接着放 ---------- */
+    const resumeReading = await evaluate(win, `
+      const { actions, store, player } = window.__aria
+      const settle = async (ms = 400) => { await new Promise((r) => setTimeout(r, ms)) }
+      const tracks = store.get().library.tracks.filter((track) => Number(track.duration) > 60)
+      if (!tracks.length) return { skipped: true }
+      const target = tracks[0]
+      const other = (store.get().library.tracks.find((track) => track.id !== target.id && Number(track.duration) > 30)) || null
+      if (!other) return { skipped: true }
+      actions.setView('songs')
+      await settle(300)
+      await player.playTrack(target.id)
+      await settle(1200)
+      player.seek(20)
+      await settle(900)
+      await player.pause()
+      await settle(700)
+      const saved = await window.aria.resume.get(target.path)
+      /* 切到别的歌，再切回来 */
+      await player.playTrack(other.id)
+      await settle(700)
+      await player.playTrack(target.id)
+      await settle(1600)
+      const resumed = player.getTime()
+      await player.pause()
+      const info = await window.aria.resume.info()
+      await window.aria.resume.clear(target.path)
+      return { skipped: false, path: target.path, saved, resumed, enabled: info.enabled, count: info.count }
+    `)
+
+    record('续播：听到一半切走再切回来会接着放，播完的记录会被清掉', (() => {
+      const reading = resumeReading || {}
+      if (reading.skipped) return { ok: false, detail: '库里没有时长 >60 秒的曲目，跳过（自动化档案太小）' }
+      const ok = reading.enabled === true &&
+        reading.saved >= 18 && reading.saved <= 26 &&
+        reading.resumed >= 17 && reading.resumed <= 30
+      return {
+        ok,
+        detail: `记录的秒数=${reading.saved}（期望 18–26）；切回来从 ${reading.resumed.toFixed ? reading.resumed.toFixed(1) : reading.resumed}s 开始（期望 ≥17）；` +
+          `开关=${reading.enabled}；表里条数=${reading.count}`
       }
     })())
 

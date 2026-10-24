@@ -21,6 +21,7 @@ const { createMusicSourcesService } = require('./services/music-sources')
 const { createTrayService } = require('./services/tray')
 const { createDiagnosticsService } = require('./services/diagnostics')
 const { createUpdaterService } = require('./services/updater')
+const { createResumeService } = require('./services/resume')
 const { createWatcherService } = require('./services/watcher')
 const { createBackgroundService } = require('./services/background')
 const { createOpenedFilesService } = require('./services/opened-files')
@@ -73,6 +74,8 @@ const SERVICE_FACTORIES = {
   diagnostics: createDiagnosticsService,
   // 自动更新（electron-updater + GitHub Releases）
   updater: createUpdaterService,
+  // 每首歌的播放位置（续播）
+  resume: createResumeService,
   watcher: createWatcherService,
   background: createBackgroundService,
   openedFiles: createOpenedFilesService

@@ -76,6 +76,14 @@ contextBridge.exposeInMainWorld('aria', {
   // 档位只读：渲染层据此决定注册哪些插件、侧栏放哪几项
   profile,
 
+  /* 续播位置（播放器用；关掉设置后主进程直接返回 0） */
+  resume: {
+    get: (filePath) => ipcRenderer.invoke('resume:get', filePath),
+    set: (payload) => ipcRenderer.invoke('resume:set', payload),
+    clear: (filePath) => ipcRenderer.invoke('resume:clear', filePath),
+    info: () => ipcRenderer.invoke('resume:info')
+  },
+
   app: {
     info: () => ipcRenderer.invoke('app:info'),
     diagnostics: {

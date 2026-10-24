@@ -245,6 +245,16 @@ function registerIpc (ctx) {
 
     /* ---------- 其它 ---------- */
     /* ---------- 诊断 ---------- */
+    /* ---------- 续播位置 ---------- */
+    'resume:get': (_event, filePath) => (ctx.has('resume') ? ctx.get('resume').get(String(filePath || '')) : 0),
+    'resume:set': (_event, payload) => (ctx.has('resume')
+      ? ctx.get('resume').set(String(payload && payload.path || ''), payload && payload.seconds, payload && payload.duration)
+      : { ok: false, code: 'unavailable' }),
+    'resume:clear': (_event, filePath) => (ctx.has('resume')
+      ? ctx.get('resume').clear(String(filePath || ''))
+      : { ok: false, code: 'unavailable' }),
+    'resume:info': () => (ctx.has('resume') ? ctx.get('resume').info() : { enabled: false, count: 0 }),
+
     /* ---------- 自动更新 ---------- */
     'updater:state': () => (ctx.has('updater') ? ctx.get('updater').state() : { active: false, reason: '这个档位没有更新服务', status: 'idle' }),
     'updater:check': () => (ctx.has('updater') ? ctx.get('updater').check({ manual: true }) : { ok: false, code: 'unavailable' }),
