@@ -229,17 +229,20 @@ ollama pull qwen2.5:7b            # 或者任何你喜欢的模型
 没有更新时明确显示「已是最新版本」；自动检查失败只写日志，手动检查失败才给一句
 「网络不可用，稍后再试」，不会弹窗轰炸。
 
-更新源是 `electron-builder.base.yml` 里的：
+更新源是仓库里的**固定 feed**（generic provider）：
 
-```yaml
-publish:
-  provider: github
-  owner: 8hourseontheleft6
-  repo: aria-player
+```
+https://raw.githubusercontent.com/8hourseontheleft6/aria-player/main/updates/<产品>/latest.yml
 ```
 
-**发版时必须把 `latest.yml` 一起传上去**（electron-builder 会生成在 `release*/` 里）——
-没有它，electron-updater 会报 `Cannot find latest.yml`（0.1.x 就踩过这个坑）。
+- 三个产品各一个目录：`updates/aria` / `updates/player` / `updates/unified`；
+- yml 里的 `url` 是**绝对地址**，指向 GitHub Release 上的安装包 —— 安装包仍然只在 Releases 放一份；
+- **为什么不用 GitHub provider**：electron-updater 的 `channel` 同时是"预发布通道"和
+  `latest-<channel>.yml` 的后缀。三个产品要各自的 yml 就得设 channel，可一设 channel，
+  beta 版就匹配不上 `releases.atom` 里的 beta 条目（源码 `GitHubProvider` 51–85 行：
+  `shouldFetchVersion` 与 `isNextPreRelease` 双双为 false）→ 报 `No published versions on GitHub`。
+  换成固定 feed 后没有这个二义性。
+- 发新版时：把 `updates/<产品>/latest.yml` 里的 version / url / sha512 / size 一并更新（有自检盯着）。
 
 > 未签名的包**也能走更新流程**（NSIS 不校验签名），但首次运行仍会被 **SmartScreen** 拦一下；
 > macOS 会撞 **Gatekeeper**（未签名/未公证），需要在「隐私与安全性」里手动允许。

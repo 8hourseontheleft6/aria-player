@@ -103,8 +103,20 @@ and the button turns into **Restart and install** once it is ready. With no upda
 "up to date"; failed *automatic* checks only go to the log, and a failed *manual* check reports one
 short sentence instead of a dialog storm.
 
-Publishing must include `latest.yml` (electron-builder writes it into `release*/`) — without it
-electron-updater fails with `Cannot find latest.yml` (which is exactly what 0.1.x ran into).
+The update source is a **fixed feed in the repo** (generic provider):
+
+```
+https://raw.githubusercontent.com/8hourseontheleft6/aria-player/main/updates/<product>/latest.yml
+```
+
+Three product directories (`updates/aria`, `updates/player`, `updates/unified`); the `url` inside is
+absolute and points at the installer on the GitHub Release, so the binary still lives only in Releases.
+
+We deliberately do **not** use the GitHub provider: electron-updater's `channel` doubles as the
+prerelease channel *and* the `latest-<channel>.yml` suffix. Per-product yml files require a channel,
+and setting one makes a beta build miss the beta entries in `releases.atom` (source:
+`GitHubProvider` lines 51–85 — `shouldFetchVersion` and `isNextPreRelease` both go false), producing
+`No published versions on GitHub`. A fixed feed has no such ambiguity.
 
 > Unsigned builds **can** update (NSIS does not verify signatures), but the first launch is still
 > stopped by **SmartScreen**; on macOS **Gatekeeper** blocks unsigned/unnotarised builds until you
