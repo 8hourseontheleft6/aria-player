@@ -187,17 +187,26 @@ class 为准，仍然跨列 1）；同时该断言仍在检查旧的 `order` 机
 结果本体 **215/228**，且出现**性能回归**（这是关键）：平移 400 次平均 **25ms/次**、拖动时帧间隔 8.2→**51ms**。
 原因清楚：`syncWindow()` 在**每一帧平移**里都做 O(全部专辑) 的扫描 + 判断，还会在拖动途中反复挂载/卸载。
 
-**下一步的正确做法**：
-1. 窗口计算按**行区间**做（`cells` 按行索引分组，二分出首/末行），不要每帧遍历 457 个；
-2. `syncWindow()` 只在**手势结束**（`endGestureSoon` / `flushPan`）与 `rAF` 合并后的帧边界上跑，拖动期间只更新 transform；
-3. 卸载时保留 1–2 行缓冲，避免边界抖动反复建销；
-4. 断言侧要同步改：`最小化释放` / `恢复` 里"墙上 >100 格"改成"挂载数 < 总数"，`平面尺寸与网格内容一致`、
-   `拖到任何位置都有内容` 需要按"窗口内"重算期望值。
-**结论**：窗口化的收益是确定的（节点 −90%、RSS −30%、帧率不变），但它与 5 条依赖 CSS 自动流的断言
-（正方形、平面宽度、聚焦排序、角点命中、release 后计数）以及网格行高语义强耦合。
-要落地必须**先**把 `.media-wall` 的网格规则改为显式行列（`grid-auto-rows` 关掉、行高由 template 决定），
-**再**按窗口化语义重写那 5 条断言；两步都要单独跑墙自检，不能一次改完再看。
+**已完成的地基（两个 commit）**
 
+· `9370356` 行列显式化：`computeCells()` + `placeAll()`，平面高度由 `grid-template-rows` 决定，DOM 不变；
+· `02f45b7` 行索引 + 二分窗口：`rowStarts[r]`（每行第一个格子下标）、`rowWindow()/rowWindowIndexes()`，
+  `wall.rows()` 返回 `{ total, window: [start, end), mounted }`，并新增断言「媒体墙：行索引与窗口区间」。
+
+**下一步（挂载切换）的精确改法** —— 只碰这三处，其余不动：
+
+1. `updateCulling()` 改成 `syncWindow()`：用 `rowWindowIndexes(2)` 拿 `[start, end)`，
+   再 + 按列区间过滤（`fit` 布局列全可见，`canvas` 布局才需要）；对 `tiles` 里 index 不在区间的删掉，
+   对区间内没有 tile 的 `mountTile(album, index)` 挂上；全程 O(窗口大小 + 增删数)。
+2. 调度：`writePan()` 里只 `scheduleWindow()`（120ms 合并），**不要**每帧跑；
+   `endGestureSoon()` / `settlePan()` / `applyFeatured()` / `applyLayout()` 里立即跑一次（保证松手即补齐）。
+3. 断言同步（三个 block，都在 `src/main/smoke.js` 媒体墙段）：
+   · 「最小化：释放媒体墙」与「恢复」里的 `wallTiles > 100` → 改成 `tiles > 6 && tiles < total`；
+   · 「平面尺寸与网格内容一致」→ 期望值改用 `cells` 算出来的平面尺寸，而不是 DOM 内容范围；
+   · 「拖到任何位置画面都有内容」→ 命中测试先 `settle` 到松手（窗口已补齐）再采样，或把 overscan 提到 3 行。
+
+**预期读数**（第二次尝试时实测，供下一步对表）：格子 457→40–58、`.wall-viewport` 节点 3752→**361**、
+renderer RSS 215–229→**151.5MB**、帧间隔 8.4ms 不变。
 ## 五、示波器空闲成本：**已落地**（降帧 + 停帧 + tint 缓存）
 
 **做法**：`--tint` 缓存（MutationObserver 失效，不再每帧 `getComputedStyle`）；播放时 **30fps** 绘制上限；

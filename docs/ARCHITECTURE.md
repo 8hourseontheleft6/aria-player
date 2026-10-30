@@ -1,3 +1,8 @@
+> 媒体墙的行列由 renderer 自己算：`media-wall.js` 的 `computeCells()` 按「行优先 + `%9===3` 与聚焦块 2×2」
+> 生成每张专辑的 `{row, col, span}`，`placeAll()` 写成 `grid-row/grid-column`，平面高度由 `grid-template-rows` 撑开；
+> `rowStarts` 提供行级索引，`rowWindowIndexes()` 用二分给出「当前应挂载的专辑下标区间」。
+> **当前仍全量挂载**（屏外格子只是 `visibility: hidden`），窗口化挂载尚未启用 —— 见 `docs/PERF.md` 第四节。
+
 # 项目结构
 
 这份文档回答两个问题：**东西在哪**、**想加功能该动哪**。
