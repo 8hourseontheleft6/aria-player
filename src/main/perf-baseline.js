@@ -172,6 +172,17 @@ async function runPerfBaseline ({ win, ctx }) {
   const playingOnce = async (label, visualizer) => {
     await evaluate(win, `
       window.__timeEvents = 0
+      window.__vizDraws = 0
+      if (!window.__clearRectWrapped) {
+        window.__clearRectWrapped = true
+        const proto = CanvasRenderingContext2D.prototype
+        const original = proto.clearRect
+        proto.clearRect = function (...args) {
+          if (window.__countViz) window.__vizDraws++
+          return original.apply(this, args)
+        }
+      }
+      window.__countViz = true
       window.__longTasks = 0
       if (window.__timeOff) window.__timeOff()
       window.__timeOff = window.__aria.bus.on(window.__aria.EVENTS.TIME, () => { window.__timeEvents++ })
@@ -185,14 +196,16 @@ async function runPerfBaseline ({ win, ctx }) {
     await evaluate(win, `
       const { store, actions } = window.__aria
       actions.setSetting({ visualizer: ${JSON.stringify(visualizer)} })
+      /* 示波器在"正在播放"面板里，不打开面板就等于没测 */
+      if (${JSON.stringify(visualizer)}) actions.openNowPlaying({ lyrics: false })
       const tracks = store.get().library.tracks
       const track = tracks.find((t) => Number(t.duration) > 120) || tracks[0]
       actions.playTrack(track)
       return true`)
     await sleep(30000)
-    const probe = await evaluate(win, 'return { timeEvents: window.__timeEvents || 0, longTasks: window.__longTasks || 0 }')
-    const sample = { byType: memoryByType(), main: mainMemory(), timeEvents: probe.timeEvents, timeHz: Math.round(probe.timeEvents / 30 * 10) / 10, longTasks: probe.longTasks }
-    console.log(`3) 播放 30 秒（示波器 ${visualizer ? '开' : '关'}）：TIME ${sample.timeHz}/秒，长任务 ${sample.longTasks} 个；` +
+    const probe = await evaluate(win, 'window.__countViz = false; return { timeEvents: window.__timeEvents || 0, longTasks: window.__longTasks || 0, vizDraws: window.__vizDraws || 0 }')
+    const sample = { byType: memoryByType(), main: mainMemory(), timeEvents: probe.timeEvents, timeHz: Math.round(probe.timeEvents / 30 * 10) / 10, longTasks: probe.longTasks, vizDraws: probe.vizDraws, vizFps: Math.round(probe.vizDraws / 30 * 10) / 10 }
+    console.log(`3) 播放 30 秒（示波器 ${visualizer ? '开' : '关'}）：TIME ${sample.timeHz}/秒，示波器 ${sample.vizFps} 帧/秒，长任务 ${sample.longTasks} 个；` +
       Object.entries(sample.byType).map(([type, value]) => `${type} ${value.rssMB}MB/${value.cpu}%`).join('  '))
     await evaluate(win, 'window.__aria.player.pause(); return true')
     return { visualizer, ...sample }
