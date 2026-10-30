@@ -181,6 +181,8 @@ contextBridge.exposeInMainWorld('aria', {
     pickFolders: () => ipcRenderer.invoke('library:pick-folders'),
     artwork: (trackId) => ipcRenderer.invoke('library:artwork', trackId),
     artworkStats: () => ipcRenderer.invoke('library:artwork-stats'),
+    /* 封面缓存清理：默认 dry-run（只统计不删） */
+    pruneArtwork: (options) => ipcRenderer.invoke('library:artwork-prune', options || {}),
     clearArtworkCache: () => ipcRenderer.invoke('library:clear-artwork-cache'),
     reveal: (filePath) => ipcRenderer.invoke('library:reveal', filePath),
     markPlayed: (id) => ipcRenderer.invoke('library:mark-played', id),

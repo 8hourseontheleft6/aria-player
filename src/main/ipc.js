@@ -116,6 +116,7 @@ function registerIpc (ctx) {
     'library:pick-folders': () => library.pickFolders(),
     'library:artwork': (_event, trackId) => library.getArtwork(trackId),
     'library:artwork-stats': () => library.getArtworkStats(),
+  'library:artwork-prune': (_event, options) => library.pruneArtworkCache(options || {}),
     'library:clear-artwork-cache': (_event, options) => library.clearArtworkCache(options || {}),
     'library:handle-drop': (_event, paths, options) => {
       /*

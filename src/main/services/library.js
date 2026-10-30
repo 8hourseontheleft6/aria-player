@@ -10,6 +10,7 @@ const { readMetadata, readEmbeddedArtwork } = require('./metadata')
 const { decodeTextBuffer } = require('../util/text')
 const { writeJsonAtomic } = require('../util/atomic-json')
 const { createPlayHistory } = require('./play-history')
+const { planPrune, applyPlan } = require('./artwork-cache')
 
 const CACHE_VERSION = 5 /* 5：曲目多了 firstSeen / lastPlayed（最近添加 / 最近播放） */
 const SCAN_CONCURRENCY = 6
@@ -495,6 +496,49 @@ function createLibraryService (ctx) {
     return result
   }
 
+  /**
+   * 封面磁盘缓存的清理（任务 3）：**默认 dry-run**，只返回计划，不删文件。
+   * 传 { dryRun: false } 才真删，且只删 planPrune 认定可重建的 .jpg（音乐/歌词/用户文件永不涉及）。
+   */
+  async function pruneArtworkCache ({ dryRun = true, maxBytes = 200 * 1024 * 1024, maxAgeMs = 0 } = {}) {
+    let names = []
+    try {
+      names = await fsp.readdir(artworkCacheDir)
+    } catch (error) {
+      if (error && error.code !== 'ENOENT') throw error
+      return { dryRun: true, total: 0, remove: [], keep: [], bytesBefore: 0, bytesAfter: 0, deleted: [], failed: [] }
+    }
+    const files = []
+    for (const name of names) {
+      try {
+        const stat = await fsp.stat(path.join(artworkCacheDir, name))
+        if (stat.isFile()) files.push({ name, size: stat.size, at: stat.atimeMs || stat.mtimeMs })
+      } catch {
+        /* 统计期间被删掉的文件直接跳过 */
+      }
+    }
+    const plan = planPrune({
+      files,
+      maxBytes,
+      maxAgeMs,
+      keepIds: tracks.map((track) => track.id)
+    })
+    const applied = await applyPlan(artworkCacheDir, plan, { fs: fsp, dryRun })
+    return {
+      dryRun,
+      total: files.length,
+      bytesBefore: plan.bytesBefore,
+      bytesAfter: plan.bytesAfter,
+      limit: plan.limit,
+      remove: plan.remove,
+      keep: plan.keep.length,
+      untouched: plan.untouched.length,
+      deleted: applied.deleted,
+      failed: applied.failed,
+      bytesFreed: applied.bytesFreed
+    }
+  }
+
   async function getArtworkStats () {
     const stats = { dir: artworkCacheDir, files: 0, bytes: 0, memory: artworkCache.size }
     try {
@@ -823,6 +867,8 @@ function createLibraryService (ctx) {
       return { ok: true, lastPlayed: now }
     },
     getPlayHistoryStats: () => playHistory.stats(),
+    /** 封面缓存清理：默认 dry-run，返回计划与账目 */
+    pruneArtworkCache,
     /** watcher 用的路径级增量刷新；fallback=true 时调用方走全量扫描 */
     refreshPaths,
     getIncrementalStats: () => ({ ...incStats }),
