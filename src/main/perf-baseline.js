@@ -334,6 +334,30 @@ async function runPerfBaseline ({ win, ctx }) {
   console.log(`7) 播放历史：连播 100 首 → 历史文件写入 ${(out.history.historyBytes / 1024).toFixed(1)} KB；` +
     `library-cache.json ${out.history.cacheRewritten ? '被重写 ✗' : '未改动 ✓'}（该文件 ${(cacheBytes / 1024).toFixed(0)} KB，改前约 ${(out.history.fullRewriteBytes / 1024 / 1024).toFixed(1)} MB）`)
 
+  /* ---------- 8. watcher 路径级增量（任务 4）---------- */
+  try {
+    const sample = library.getTracks()[0]
+    const startedInc = Date.now()
+    const inc = await library.refreshPaths([sample.path])
+    const incMs = Date.now() - startedInc
+    const startedFull = Date.now()
+    await library.scan({ reason: 'perf-watch-compare' })
+    const fullMs = Date.now() - startedFull
+    out.watcher = {
+      paths: 1,
+      incFilesStat: inc.filesStat,
+      incMetadataParsed: inc.metadataParsed,
+      incMs,
+      fullFiles: library.getStats().count,
+      fullMs,
+      fallback: inc.fallback === true
+    }
+    console.log(`8) 路径级增量：1 个路径 → stat ${inc.filesStat} / 解析 ${inc.metadataParsed}（${incMs}ms）` +
+      `；同库全量扫描 ${library.getStats().count} 首（${fullMs}ms）；fallback=${out.watcher.fallback}`)
+  } catch (error) {
+    console.log('8) 增量测量失败：' + error.message)
+  }
+
   /* 落一份 JSON，方便与改后对比 */
   const target = path.join(process.cwd(), '.tmp', `perf-baseline-${Date.now()}.json`)
   try {

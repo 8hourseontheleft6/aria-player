@@ -71,6 +71,74 @@ function createLibraryService (ctx) {
     }
   }
 
+  /**
+   * 路径级增量刷新（任务 4）。
+   *
+   * 只处理调用方点名的文件：stat 一次、必要时解析一次，不动其余 809 首。
+   * 任何无法安全判定的情况（文件不见了 / 读不出来 / 不是音频 / 正在扫描）都返回 fallback，
+   * 由 watcher 回退到原来的全量扫描。
+   */
+  const AUDIO_EXT = new Set(['.mp3', '.flac', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.wma', '.ape', '.alac', '.aiff', '.aif', '.dsf', '.dff'])
+  const incStats = { filesStat: 0, metadataParsed: 0, applied: 0, added: 0 }
+
+  async function refreshPaths (paths = []) {
+    const local = { filesStat: 0, metadataParsed: 0, applied: 0, added: 0 }
+    const targets = [...new Set((Array.isArray(paths) ? paths : []).filter((item) =>
+      typeof item === 'string' && AUDIO_EXT.has(path.extname(item).toLowerCase())))]
+    if (!targets.length) return { ...local, fallback: true, reason: 'no-audio-paths' }
+    if (scanningPromise) return { ...local, fallback: true, reason: 'scanning' }
+
+    const next = tracks.slice()
+    const touched = []
+    for (const file of targets) {
+      let stat = null
+      try {
+        stat = await fsp.stat(file)
+      } catch {
+        return { ...local, fallback: true, reason: 'missing-path' }
+      }
+      local.filesStat++
+      incStats.filesStat++
+      const existing = byPath.get(file)
+      if (existing && existing.size === stat.size && existing.mtimeMs === stat.mtimeMs) continue
+      try {
+        const track = await readMetadata(file, {
+          stat,
+          covers: true,
+          sidecarCover: await findNamedImage(path.dirname(file), path.basename(file, path.extname(file)))
+        })
+        track.firstSeen = existing && Number(existing.firstSeen) ? existing.firstSeen : Date.now()
+        track.lastPlayed = existing && Number(existing.lastPlayed) ? existing.lastPlayed : 0
+        track.lyricsPath = await resolveLyricsPath(track)
+        local.metadataParsed++
+        incStats.metadataParsed++
+        touched.push({ file, track, existing })
+      } catch (error) {
+        console.warn('[library] 增量解析失败，回退全量扫描:', error.message)
+        return { ...local, fallback: true, reason: 'parse-failed' }
+      }
+    }
+
+    for (const { track, existing } of touched) {
+      if (existing) {
+        const index = next.indexOf(existing)
+        if (index >= 0) next[index] = track
+        else next.push(track)
+      } else {
+        next.push(track)
+        local.added++
+        incStats.added++
+      }
+      local.applied++
+      incStats.applied++
+    }
+    if (local.applied) {
+      setTracks(next)
+      await saveCache().catch(() => {})
+    }
+    return { ...local, fallback: false, count: next.length }
+  }
+
   function setTracks (list) {
     tracks = list
     byId = new Map(list.map((track) => [track.id, track]))
@@ -755,6 +823,9 @@ function createLibraryService (ctx) {
       return { ok: true, lastPlayed: now }
     },
     getPlayHistoryStats: () => playHistory.stats(),
+    /** watcher 用的路径级增量刷新；fallback=true 时调用方走全量扫描 */
+    refreshPaths,
+    getIncrementalStats: () => ({ ...incStats }),
     getTracks: () => tracks,
     getTrackById: (id) => byId.get(id) || null,
     getTrackByPath: (p) => byPath.get(p) || null,

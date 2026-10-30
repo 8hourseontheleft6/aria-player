@@ -28,7 +28,7 @@ function createWatcherService (ctx) {
   let debounceMs = DEFAULT_DEBOUNCE
   let timer = null
   let pendingPaths = new Set()
-  let stats = { changes: 0, lastChangeAt: 0, lastPaths: [], rescans: 0, restarts: 0 }
+  let stats = { changes: 0, lastChangeAt: 0, lastPaths: [], rescans: 0, restarts: 0, incrementalApplied: 0, filesStat: 0, metadataParsed: 0, fullWalk: 0 }
   let lastRoots = []
 
   function relevant (filename) {
@@ -56,6 +56,32 @@ function createWatcherService (ctx) {
 
     const before = library.getTracks().length
     try {
+      /*
+       * 先试路径级增量（任务 4）：单文件改/新增只 stat+解析它自己，不动其余 809 首。
+       * 删除 / 改名 / 解析失败等无法安全判定的情况，refreshPaths 会返回 fallback，
+       * 这里就回退到原来的全量扫描（语义不变）。
+       */
+      const incremental = typeof library.refreshPaths === 'function'
+        ? await library.refreshPaths(paths)
+        : { fallback: true }
+      stats.filesStat += incremental.filesStat || 0
+      stats.metadataParsed += incremental.metadataParsed || 0
+      if (!incremental.fallback) {
+        stats.incrementalApplied++
+        console.log(`[watcher] 增量更新：${paths.length} 个路径 → stat ${incremental.filesStat} / 解析 ${incremental.metadataParsed} / 应用 ${incremental.applied}（新增 ${incremental.added}）`)
+        ctx.emit('library:watch-update', {
+          paths,
+          before,
+          after: incremental.count,
+          delta: incremental.count - before,
+          added: incremental.added,
+          removed: 0,
+          incremental: true,
+          scannedAt: library.getStats().scannedAt
+        })
+        return
+      }
+      stats.fullWalk++
       const summary = await library.scan({ reason: 'watch' })
       stats.rescans++
       // 记录到终端：出问题时能看出到底是哪个文件在动

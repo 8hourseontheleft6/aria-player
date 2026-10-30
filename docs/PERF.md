@@ -219,6 +219,28 @@ seek / 暂停 / 切歌的即时刷新语义不变，本体自检仍 **228/228**�
 
 **验证**：本体自检 **228/228**（最近添加 / 最近播放排序仍正确）。
 
+## 七、目录 watcher：路径级增量
+
+**问题**：任一音频/封面变化都会 `library.scan()` 全量遍历并 stat 全库（810 首）。
+
+**改法**
+· `library.refreshPaths(paths)`：只 stat 点名的那几个音频文件；mtime+size 没变就跳过解析，
+  变了才 `readMetadata` + `resolveLyricsPath`，并**保留 `firstSeen` / `lastPlayed`**（重扫不重置历史）。
+· 任何无法安全判定的情况（文件不存在=删除/改名、解析失败、正在扫描、路径不是音频）→ 返回
+  `fallback: true`，watcher 回退到原来的全量扫描，`added/removed` 语义不变。
+· watcher：4 秒防抖窗口不变，先试增量、fallback 才全量；新增 instrumentation
+  `incrementalApplied / filesStat / metadataParsed / fullWalk`，并打出 "增量更新：… stat N / 解析 M / 应用 K"。
+
+**实测（同一份 810 首，单路径变更）**
+
+| 指标 | 全量扫描（原来）| 路径级增量 |
+| --- | --- | --- |
+| `filesStat` | **810** | **1** |
+| `metadataParsed` | 0（全部命中缓存）| 0（该文件未变）|
+| 耗时 | 125 ms | 0 ms |
+
+**验证**：本体自检 **228/228**（含"目录监听能停能起"与"最小化恢复"两条）。
+
 ## 收口：P0 表的「改后」列## 收口：P0 表的「改后」列（2026-10-24，含续播修复 + P1-3）
 
 | 项目 | 改前（基线）| 改后 | 目标 | 结论 |
