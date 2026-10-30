@@ -9,6 +9,7 @@ const { walkFiles, findNamedImage, listDirIndex, invalidateDirIndex } = require(
 const { readMetadata, readEmbeddedArtwork } = require('./metadata')
 const { decodeTextBuffer } = require('../util/text')
 const { writeJsonAtomic } = require('../util/atomic-json')
+const { createPlayHistory } = require('./play-history')
 
 const CACHE_VERSION = 5 /* 5：曲目多了 firstSeen / lastPlayed（最近添加 / 最近播放） */
 const SCAN_CONCURRENCY = 6
@@ -25,6 +26,12 @@ const ARTWORK_JPEG_QUALITY = 82
 function createLibraryService (ctx) {
   const settings = ctx.get('settings')
   const cacheFile = path.join(app.getPath('userData'), 'library-cache.json')
+  /*
+   * 播放历史单独存小文件（任务 5）：以前 markPlayed 会重写整份 library-cache.json，
+   * 810 首的库每次切歌就是几百 KB 写盘。
+   */
+  const playHistory = createPlayHistory(ctx)
+  ctx.onCleanup(() => { playHistory.flush().catch(() => {}) })
 
   /** @type {Array<object>} */
   let tracks = []
@@ -45,6 +52,7 @@ function createLibraryService (ctx) {
       if (parsed.version !== CACHE_VERSION || !Array.isArray(parsed.tracks)) return false
       setTracks(parsed.tracks)
       scannedAt = parsed.scannedAt || 0
+      await playHistory.apply(parsed.tracks)
       return true
     } catch {
       return false
@@ -280,6 +288,7 @@ function createLibraryService (ctx) {
       for (const file of nextPaths) if (!previousPaths.has(file)) added++
       for (const file of previousPaths) if (!nextPaths.has(file)) removed++
 
+      await playHistory.apply(next)
       setTracks(next)
       scannedAt = Date.now()
       artworkCache.clear()
@@ -741,9 +750,11 @@ function createLibraryService (ctx) {
       if (Number(track.lastPlayed) && now - Number(track.lastPlayed) < 10000) return { ok: true, skipped: true }
       track.lastPlayed = now
       if (!track.firstSeen) track.firstSeen = now
-      saveCache().catch(() => {})
+      /* 只写历史小文件（防抖 + 原子写），不再重写整份 library-cache.json */
+      playHistory.mark(track.path, now).catch(() => {})
       return { ok: true, lastPlayed: now }
     },
+    getPlayHistoryStats: () => playHistory.stats(),
     getTracks: () => tracks,
     getTrackById: (id) => byId.get(id) || null,
     getTrackByPath: (p) => byPath.get(p) || null,

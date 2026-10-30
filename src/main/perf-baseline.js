@@ -308,6 +308,32 @@ async function runPerfBaseline ({ win, ctx }) {
     ` → 去歌曲页 10s 后 ${wallAway.nodes} 节点（renderer ${out.wallIdle.away.rendererMB}MB）` +
     ` → 回墙 ${wallBack.nodes} 节点，平移还原=${out.wallIdle.panRestored}`)
 
+  /* ---------- 7. 播放历史写盘（任务 5）---------- */
+  const cachePath = path.join(app.getPath('userData'), 'library-cache.json')
+  const statOf = (file) => { try { const st = fs.statSync(file); return { size: st.size, mtimeMs: st.mtimeMs } } catch { return null } }
+  const cacheBefore = statOf(cachePath)
+  const historyBefore = library.getPlayHistoryStats ? library.getPlayHistoryStats().bytesWritten : 0
+  await evaluate(win, `
+    const { remote, store } = window.__aria
+    const tracks = store.get().library.tracks.slice(0, 100)
+    for (const track of tracks) {
+      try { await remote.library.markPlayed(track.id) } catch (err) {}
+    }
+    return true`)
+  await sleep(2500)
+  const cacheAfter = statOf(cachePath)
+  const historyAfter = library.getPlayHistoryStats ? library.getPlayHistoryStats() : { bytesWritten: 0 }
+  const cacheBytes = cacheBefore ? cacheBefore.size : 0
+  out.history = {
+    switches: 100,
+    historyBytes: historyAfter.bytesWritten - historyBefore,
+    cacheRewritten: Boolean(cacheBefore && cacheAfter && cacheAfter.mtimeMs !== cacheBefore.mtimeMs),
+    cacheBytes,
+    fullRewriteBytes: cacheBytes * 100
+  }
+  console.log(`7) 播放历史：连播 100 首 → 历史文件写入 ${(out.history.historyBytes / 1024).toFixed(1)} KB；` +
+    `library-cache.json ${out.history.cacheRewritten ? '被重写 ✗' : '未改动 ✓'}（该文件 ${(cacheBytes / 1024).toFixed(0)} KB，改前约 ${(out.history.fullRewriteBytes / 1024 / 1024).toFixed(1)} MB）`)
+
   /* 落一份 JSON，方便与改后对比 */
   const target = path.join(process.cwd(), '.tmp', `perf-baseline-${Date.now()}.json`)
   try {
