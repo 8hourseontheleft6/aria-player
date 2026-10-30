@@ -6,7 +6,7 @@
  */
 
 const path = require('node:path')
-const { planPrune } = require(path.join(__dirname, '..', '..', 'src', 'main', 'services', 'artwork-cache'))
+const { planPrune, applyPlan } = require(path.join(__dirname, '..', '..', 'src', 'main', 'services', 'artwork-cache'))
 
 const problems = []
 function check (name, ok, detail = '') {
@@ -93,10 +93,46 @@ const id = (n) => n.toString(16).padStart(16, '0')
     `${out.bytesBefore} -> ${out.bytesAfter} / ${out.limit}`)
 }
 
-console.log('')
-if (problems.length) {
-  console.log(`封面缓存清理规划检查：${problems.length} 个问题`)
-  for (const item of problems) console.log('  · ' + item)
-  process.exit(1)
+/* ⑥ applyPlan：在临时目录里真跑一次（dry-run 不删、真删只删计划里的） */
+async function checkApply () {
+  const os = require('node:os')
+  const fsp = require('node:fs/promises')
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'aria-artwork-prune-'))
+  try {
+    const keepName = `${id(1)}.jpg`
+    const dropName = `${id(2)}.jpg`
+    const otherName = 'song.mp3'
+    await fsp.writeFile(path.join(dir, keepName), Buffer.alloc(10))
+    await fsp.writeFile(path.join(dir, dropName), Buffer.alloc(10))
+    await fsp.writeFile(path.join(dir, otherName), Buffer.alloc(10))
+    const plan = planPrune({ files: [file(keepName, 10), file(dropName, 10), file(otherName, 10)], maxBytes: 10_000, keepIds: [id(1)], now })
+
+    const dry = await applyPlan(dir, plan, { fs: fsp, dryRun: true })
+    const afterDry = (await fsp.readdir(dir)).sort()
+    check('applyPlan dry-run 不删文件', dry.dryRun === true && afterDry.length === 3 && dry.failed.length === 0,
+      `dir=${afterDry.join(',')}`)
+
+    const real = await applyPlan(dir, plan, { fs: fsp, dryRun: false })
+    const afterReal = (await fsp.readdir(dir)).sort()
+    check('applyPlan 真删只删计划里的', real.deleted.length === 1 && afterReal.length === 2 && !afterReal.includes(dropName),
+      `dir=${afterReal.join(',')}`)
+    check('非缓存文件没被删', afterReal.includes(otherName) && afterReal.includes(keepName))
+    check('统计释放字节', real.bytesFreed === 10, String(real.bytesFreed))
+
+    /* 路径穿越防护：计划里混入带分隔符的名字必须被拒 */
+    const evil = await applyPlan(dir, { remove: [{ name: '../evil.jpg', size: 1 }] }, { fs: fsp, dryRun: false })
+    check('拒绝带路径分隔符的文件名', evil.deleted.length === 0 && evil.failed.length === 1)
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true })
+  }
 }
-console.log('封面缓存清理规划检查：0 问题')
+checkApply().then(() => {
+  console.log('')
+  if (problems.length) {
+    console.log(`封面缓存清理规划检查：${problems.length} 个问题`)
+    for (const item of problems) console.log('  · ' + item)
+    process.exit(1)
+  }
+  console.log('封面缓存清理规划检查：0 问题')
+})
+

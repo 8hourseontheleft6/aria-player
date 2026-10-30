@@ -74,4 +74,33 @@ function planPrune ({ files = [], maxBytes = 0, maxAgeMs = 0, keepIds = null, no
   }
 }
 
-module.exports = { planPrune, JPEG_RE }
+/**
+ * 执行清理计划。fs 由调用方注入（Node 的 fs.promises 或测试替身），便于单测。
+ * 只删 plan.remove 里列出的文件名，其它一律不碰；单条失败不影响其它条（返回 failures）。
+ */
+async function applyPlan (dir, plan, { fs, dryRun = true } = {}) {
+  const result = { dryRun, deleted: [], failed: [], bytesFreed: 0 }
+  if (!plan || !Array.isArray(plan.remove)) return result
+  for (const item of plan.remove) {
+    const name = String(item && item.name || '')
+    /* 双重保险：只允许封面缓存文件名，绝不放行任何路径分隔符 */
+    if (!JPEG_RE.test(name)) {
+      result.failed.push({ name, message: 'not-artwork-cache' })
+      continue
+    }
+    if (dryRun) {
+      result.deleted.push(name)
+      continue
+    }
+    try {
+      await fs.unlink(require('node:path').join(dir, name))
+      result.deleted.push(name)
+      result.bytesFreed += Math.max(0, Number(item.size) || 0)
+    } catch (error) {
+      result.failed.push({ name, message: String(error && error.code || error && error.message || error) })
+    }
+  }
+  return result
+}
+
+module.exports = { planPrune, applyPlan, JPEG_RE }
