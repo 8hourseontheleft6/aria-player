@@ -143,7 +143,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   const scrollbar = createScrollIndicator(viewport, {
     label: '按首字母跳转',
     // 旋钮要「每组首字母 → 偏移量」才能定位；懒算（滚动/悬浮时才需要）
-    getMarks: () => marksFromTracks(tracks, ROW_HEIGHT)
+    getMarks: () => marksFromTracks(tracks, ROW_HEIGHT, sortField())
   })
   const element = h('div', { class: 'tracklist' }, head, selectionBar, viewport, scrollbar.element)
 
@@ -492,6 +492,22 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   }
 
   /* ---------------- 对外 API ---------------- */
+  /*
+   * 右侧圆环的字母要跟着排序走：按专辑排序时用专辑名首字母，按艺人排序时用艺人名。
+   * 其它情况（标题/时长/年份/加入时间/最近播放）仍用歌名 —— 那才是列表里一眼看到的东西。
+   */
+  function sortField () {
+    const key = store.get().ui.sort?.key
+    if (key === 'album') return 'album'
+    if (key === 'artist') return 'artist'
+    return 'title'
+  }
+
+  function refreshMarks () {
+    scrollbar.setMarks(marksFromTracks(tracks, ROW_HEIGHT, sortField()))
+    scrollbar.refresh()
+  }
+
   function setTracks (list) {
     tracks = Array.isArray(list) ? list : []
     canvas.style.height = `${tracks.length * ROW_HEIGHT}px`
@@ -501,8 +517,7 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
     syncSelection()
     schedule()
     // 列表变了：重算滚动比例与首字母索引
-    scrollbar.setMarks(marksFromTracks(tracks, ROW_HEIGHT))
-    scrollbar.refresh()
+    refreshMarks()
   }
 
   function scrollToIndex (index, { center = true } = {}) {
@@ -559,7 +574,11 @@ export function createTrackList ({ store, bus, player, artwork, actions, matchFo
   bus.on(EVENTS.TRACK_CHANGED, () => schedule())
   store.select((state) => `${state.playback.trackId}|${state.playback.status}|${state.settings.showRowArtwork}`,
     () => schedule())
-  store.select((state) => state.ui.sort, paintSortHeaders)
+  store.select((state) => state.ui.sort, () => {
+    paintSortHeaders()
+    /* 排序变了，圆环的字母分组也要跟着变 */
+    if (tracks.length) refreshMarks()
+  })
   // 选择 / 多选模式可能是别处改的（工具条、右键菜单、切视图时清空），统一在这里同步
   store.select((state) => state.ui.selection, syncSelection, {
     equals: (a, b) => a.length === b.length && a.every((id, index) => id === b[index])

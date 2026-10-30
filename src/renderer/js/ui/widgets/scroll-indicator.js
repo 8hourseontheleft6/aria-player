@@ -190,11 +190,16 @@ export function createScrollIndicator (scroller, { label = '滚动', getMarks = 
  * 不查拼音词典：直接取标题首字符 —— 中文歌是「爱」「时」这类字，英文歌是 A/B/C，
  * 和列表里看到的完全对得上（用户要的就是「页面上大部分歌曲的首字母」这种感觉）。
  */
-export function marksFromTracks (tracks, rowHeight) {
+export function marksFromTracks (tracks, rowHeight, field = 'title') {
   const out = []
   let current = null
   tracks.forEach((track, index) => {
-    const source = (track.title || track.artist || '#').trim()
+    /*
+     * 用哪个字段必须跟着**当前排序**走：按专辑排序时列表按专辑名排，
+     * 索引却按歌名首字母分组，两边对不上 —— 用户报的「圆环乱序」就是这个。
+     */
+    const primary = track[field]
+    const source = String(primary || track.title || track.artist || '#').trim()
     // 拼音首字母：中文歌也要能归到 A/B/C（排序也是按这个首字母分组的）
     const letter = initialOf(source)
     if (!current || current.letter !== letter) {
