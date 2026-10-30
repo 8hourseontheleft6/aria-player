@@ -166,6 +166,17 @@ seek / 暂停 / 切歌的即时刷新语义不变，本体自检仍 **228/228**�
 与 CSS 里 `.media-wall` 的自动行高/`grid-auto-rows` 叠加，普通格子被算成跨 2 行；
 `布局切换` 的 `fit` 平面宽度仍未对齐；`封面铺满格子` 有 1 个格子不符。
 
+
+**第三次尝试（只做第一步：显式行列、仍全量挂载）**：`computeCells()` + `placeAll()`（按算出的行列写
+`grid-row/grid-column`、`grid-template-rows` 显式撑高），DOM 数量不变 —— 目的是先把"行列由数据决定"这一步
+单独验证干净。结果：本体 **227/228**，只剩 `媒体墙聚焦块`（跨列 1 / `order=0`）一条。
+读数是"跨列 1"，说明聚焦块的 2×2 没被我的显式 span 覆盖住（`placeAll` 已改成以 `.is-big` / `.is-featured`
+class 为准，仍然跨列 1）；同时该断言仍在检查旧的 `order` 机制。按"同一根因最多修两次"的约定，
+这一步也回滚，产品代码保持原状。
+
+**下一步的准确入口**（比之前更具体）：`applyFeatured` 里 `featuredKey` 与 `albumList` 的 key 可能对不上
+（`featuredKey` 会被置空），导致 `computeCells()` 里 `featuredIndex === -1`；先在这里打点确认，
+再决定要不要让"聚焦块"继续用 CSS 的 `span 2` 而不是显式 span。
 **结论**：窗口化的收益是确定的（节点 −90%、RSS −30%、帧率不变），但它与 5 条依赖 CSS 自动流的断言
 （正方形、平面宽度、聚焦排序、角点命中、release 后计数）以及网格行高语义强耦合。
 要落地必须**先**把 `.media-wall` 的网格规则改为显式行列（`grid-auto-rows` 关掉、行高由 template 决定），
