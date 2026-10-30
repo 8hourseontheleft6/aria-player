@@ -303,9 +303,14 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
   function measureGeometry () {
     geometry.viewWidth = viewport.clientWidth
     geometry.viewHeight = viewport.clientHeight
-    // 平面尺寸就是网格自己的盒子（宽度是 max-content，高度由 17 行轨道撑开）
-    geometry.planeWidth = grid.offsetWidth
-    geometry.planeHeight = grid.offsetHeight
+    /*
+     * 平面尺寸用算术值（planeMetrics），**不读 DOM**：
+     * 这样"挂载/卸载了一批格子"本身不会迫使我们去量布局 —— 窗口化才可能便宜。
+     * 数值与 grid 盒子的偏差由自检「平面尺寸可由行列算出」守着（要求 ≤1px）。
+     */
+    const metrics = planeMetrics()
+    geometry.planeWidth = metrics.width
+    geometry.planeHeight = metrics.height
     cacheSlots()
 
     const scale = Math.min(
@@ -440,29 +445,19 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
   function cacheSlots () {
     slots.length = 0
     slotPitch = Math.max(1, tileSize + GAP)
-    slotRows = 0
     slotColumns = columns
-    let index = 0
-    for (const node of grid.children) {
-      const row = Math.max(0, Math.round((node.offsetTop - PAD) / slotPitch))
-      const column = Math.max(0, Math.round((node.offsetLeft - PAD) / slotPitch))
-      const rowSpan = Math.max(1, Math.round((node.offsetHeight + GAP) / slotPitch))
-      const columnSpan = Math.max(1, Math.round((node.offsetWidth + GAP) / slotPitch))
-      /*
-       * culled 必须从元素当前的类里读回来，不能一律当 false：
-       * 重算布局时（重建 / 改密度 / 聚焦块换位）元素上可能还留着上一次的 is-culled，
-       * 如果这里记成 false，updateCulling 会认为「状态没变」而不再写样式，
-       * 那些格子就永久隐藏了 —— 表现是拖回原点后画面里出现整条空带。
-       */
-      slots[index++] = {
-        node,
-        row,
-        column,
-        rowSpan,
-        columnSpan,
-        culled: node.classList.contains('is-culled')
-      }
-      slotRows = Math.max(slotRows, row + rowSpan)
+    slotRows = cellRows
+    for (const [key, entry] of tiles) {
+      const cell = cells[entry.index]
+      if (!cell) continue
+      slots.push({
+        node: entry.element,
+        row: cell.row,
+        column: cell.col,
+        rowSpan: cell.span,
+        columnSpan: cell.span,
+        culled: false
+      })
     }
   }
 
