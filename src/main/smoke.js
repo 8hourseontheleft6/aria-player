@@ -7100,6 +7100,22 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       return { ok, detail: `总行 ${total}，窗口 [${window[0]},${window[1]})，当前挂载 ${reading.tiles} 格（本步仍全量）` }
     })())
 
+    /* ---------- 媒体墙：平面尺寸可由行列算出（几何解耦前提）---------- */
+    const wallPlane = await evaluate(win, `
+      const { actions } = window.__aria
+      const wall = window.__aria.views.mediaWall
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 1500))
+      return wall.planeMetrics()
+    `)
+    record('媒体墙：平面尺寸可由行列算出（几何解耦前提）', (() => {
+      const reading = wallPlane || {}
+      const dw = Math.abs((reading.width || 0) - (reading.domWidth || 0))
+      const dh = Math.abs((reading.height || 0) - (reading.domHeight || 0))
+      const ok = reading.rows > 0 && dw <= 1 && dh <= 1
+      return { ok, detail: `算术 ${reading.width}×${reading.height}，盒子 ${reading.domWidth}×${reading.domHeight}（差 ${dw}/${dh}px）；${reading.columns} 列 × ${reading.rows} 行` }
+    })())
+
     /* ---------- 媒体墙：离开视图 5 秒后释放 ---------- */
     const wallIdleReading = await evaluate(win, `
       const { actions, store } = window.__aria

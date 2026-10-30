@@ -289,6 +289,17 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
   }
 
   /** 只在布局变化时调用：这里会读 DOM，属于少数几次可接受的强制重排 */
+  /**
+   * 用列数/行数直接算平面尺寸（**不读 DOM**）。
+   * 这是窗口化的前提：窗口增删会改变 grid 的盒子，但只要平面尺寸是算出来的，
+   * 就不必为了"量平面"而在每次挂载/卸载后跑一遍 measureGeometry（那里还有 cacheSlots + minimap）。
+   */
+  function planeMetrics () {
+    const width = PAD * 2 + columns * tileSize + Math.max(0, columns - 1) * GAP
+    const height = PAD * 2 + Math.max(1, cellRows) * tileSize + Math.max(0, cellRows - 1) * GAP
+    return { width, height, columns, rows: cellRows }
+  }
+
   function measureGeometry () {
     geometry.viewWidth = viewport.clientWidth
     geometry.viewHeight = viewport.clientHeight
@@ -1518,6 +1529,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     getPan: () => ({ x: pan.x, y: pan.y }),
     /* 自检用：行索引与当前窗口区间（窗口化落地后就是"该挂哪些格子"） */
     rows: () => ({ ...debugRows, window: [...debugRows.window] }),
+    /* 自检用：算术平面尺寸 vs 实际盒子（两者必须一致，否则窗口化不能摆脱量 DOM） */
+    planeMetrics: () => ({ ...planeMetrics(), domWidth: grid.offsetWidth, domHeight: grid.offsetHeight }),
     setPan: ({ x = 0, y = 0 } = {}) => {
       target.x = x
       target.y = y
