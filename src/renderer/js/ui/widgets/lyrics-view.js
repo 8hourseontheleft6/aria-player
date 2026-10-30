@@ -434,12 +434,38 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     aiProgressFill.style.width = Math.max(0, Math.min(100, percent)) + '%'
   }
 
+  /** 「在线歌词较慢」的补充提示定时器 */
+  let loadingHint = null
+
   function render () {
     const lyrics = store.get().lyrics
+    if (lyrics.status !== 'loading' && loadingHint) {
+      clearTimeout(loadingHint)
+      loadingHint = null
+    }
     element.style.setProperty('--lyric-scale', String(store.get().settings.lyricFontScale))
 
     if (lyrics.status === 'loading') {
-      showEmpty({ iconName: 'waveform', title: '正在载入歌词…', text: '正在这首歌曲所在目录里查找 .lrc 歌词文件' })
+      /*
+       * 本地没有 .lrc 的歌会去在线歌词源找，那一步可能要几秒（还看网络）。
+       * 以前这行只写"查找 .lrc"，用户会以为卡住了 —— 现在把"也会问在线"说清楚，
+       * 超过 1.5 秒再补一句"还在查"，让人知道它在动。
+       */
+      if (loadingHint) {
+        clearTimeout(loadingHint)
+        loadingHint = null
+      }
+      showEmpty({
+        iconName: 'waveform',
+        title: '正在载入歌词…',
+        text: '先找同目录的 .lrc；本地没有就去在线歌词源找（较慢时可能要等几秒）'
+      })
+      loadingHint = setTimeout(() => {
+        loadingHint = null
+        if (store.get().lyrics.status !== 'loading') return
+        const node = inner.querySelector('.lyrics-empty__text')
+        if (node) node.textContent = '在线歌词源响应较慢，仍在查找…（工具栏的「重新加载歌词」可以手动重试）'
+      }, 1500)
       return
     }
 
@@ -796,7 +822,15 @@ export function createLyricsView ({ className = 'lyrics-region', store, bus, pla
     alignToActive({ animated: false })
   })
 
-  store.select((state) => state.lyrics.status, () => render())
+  /*
+   * 只盯 status 不够：在线歌词可能先置 loading、内容稍后才补齐，
+   * 那种"状态没变但内容变了"的更新不会触发重绘 —— 这就是"要退出再进全屏才显示"的原因。
+   */
+  store.select(
+    (state) => state.lyrics.status + '|' + ((state.lyrics.lines && state.lyrics.lines.length) || 0) +
+      '|' + ((state.lyrics.plain && state.lyrics.plain.length) || 0),
+    () => render()
+  )
 
   const resizeObserver = new ResizeObserver(() => alignToActive({ animated: false }))
   resizeObserver.observe(scroller)
