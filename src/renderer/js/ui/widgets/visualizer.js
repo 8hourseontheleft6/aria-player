@@ -136,11 +136,21 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     context.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
-  /** 主色优先用专辑取色（--tint，由 artwork 写进 :root），没有就退回强调色 */
+  /*
+   * 主色优先用专辑取色（--tint，由 artwork 写进 :root），没有就退回强调色。
+   * 每帧 getComputedStyle 会强制一次样式解析 —— 缓存它，靠 :root 的 style 变更失效。
+   */
+  let tintCache = null
   function accent () {
+    if (tintCache !== null) return tintCache
     const root = getComputedStyle(document.documentElement)
-    return root.getPropertyValue('--tint').trim() ||
+    tintCache = root.getPropertyValue('--tint').trim() ||
       root.getPropertyValue('--accent').trim() || '#0a84ff'
+    return tintCache
+  }
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(() => { tintCache = null })
+      .observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
   }
 
   function drawBars (width, height) {
@@ -220,8 +230,43 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight)
   }
 
+  /* 30fps 上限：rAF 还是 60Hz，但只有到点才真正画 */
+  const MIN_DRAW_INTERVAL = 33
+  let lastDrawAt = 0
+
+  /** 该不该继续跑循环（隐藏 / 减少动画 / 样式 off 时彻底停帧，不只是跳过绘制） */
+  function shouldDraw () {
+    if (running !== true) return false
+    if (typeof document !== 'undefined' && document.hidden) return false
+    if (reduceMotion()) return false
+    return getStyle() !== 'off'
+  }
+
+  /** 状态变化后把停掉的循环叫醒 */
+  function wake () {
+    if (!running || frame) return
+    if (!shouldDraw()) return
+    frame = requestAnimationFrame(tick)
+  }
+
   function tick () {
     if (!running) return
+    if (!shouldDraw()) {
+      /*
+       * 彻底停帧：把 rAF 停掉，等状态变回来时由 wake() 重启。
+       * 停之前也要把 dataset 同步到当前样式 —— 否则"切到 off"之后 dataset 还停在上一个值，
+       * 界面（和自检）会以为样式没变。
+       */
+      frame = 0
+      const stopped = getStyle()
+      if (stopped !== lastStyle) {
+        lastStyle = stopped
+        strip.dataset.style = stopped
+        paintButton()
+      }
+      clear()
+      return
+    }
     frame = requestAnimationFrame(tick)
 
     // 「减少动画」开着：整条不画（只在状态切换的那一帧清一次，不是每帧都清）
@@ -240,8 +285,9 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
       strip.dataset.style = style
       paintButton()
       clear()
+      /* 换样式后立刻画一帧：别让 30fps 的节流把首帧推迟（截图/自检会读到空画布） */
+      lastDrawAt = 0
     }
-    // 关闭：不建接入点、不画
     if (style === 'off') return
 
     if (!ensureAnalyser()) return
@@ -255,9 +301,17 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
     analyser.getByteFrequencyData(freqData)
     analyser.getByteTimeDomainData(timeData)
 
-    // 暂停时降到 ~6 帧，别空转
+    // 播放时 30fps 上限；暂停时降到 ~6 帧，别空转
+    const now = performance.now()
     idleFrames++
-    if (!playing && idleFrames % 9 !== 0) return
+    if (playing) {
+      if (now - lastDrawAt < MIN_DRAW_INTERVAL) return
+      lastDrawAt = now
+    } else {
+      if (idleFrames % 9 !== 0) return
+      if (now - lastDrawAt < MIN_DRAW_INTERVAL * 3) return
+      lastDrawAt = now
+    }
 
     context.clearRect(0, 0, width, height)
     const color = accent()
@@ -291,6 +345,16 @@ export function createVisualizer ({ engine, store, bus, getStyle = () => 'bars',
   }
 
   on(window, 'resize', resize)
+  on(document, 'visibilitychange', () => {
+    if (document.hidden) return
+    /* 回到前台：补一次尺寸与首帧 */
+    resize()
+    wake()
+  })
+  if (typeof store.select === 'function') {
+    store.select((state) => state.settings.visualizer, () => wake())
+    store.select((state) => state.settings.reduceMotion === true, () => wake())
+  }
   const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => resize()) : null
   observer?.observe(canvas)
 

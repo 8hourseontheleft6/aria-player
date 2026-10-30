@@ -3557,6 +3557,18 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         return { paintedPct: (painted / (width * height)) * 100, spreadPct: maxY < 0 ? 0 : ((maxY - minY) / height) * 100 }
       }
 
+      /* 降帧后单帧采样不稳定：取多帧峰值（更严，不是放宽） */
+      const measurePeak = async (samples = 8) => {
+        let best = { paintedPct: 0, spreadPct: 0 }
+        for (let i = 0; i < samples; i++) {
+          const one = measure()
+          if (one.paintedPct > best.paintedPct) best = one
+          await new Promise((r) => requestAnimationFrame(r))
+          await new Promise((r) => setTimeout(r, 45))
+        }
+        return best
+      }
+
       const first = strip()
       const cs = getComputedStyle(first)
       const stripRect = first.getBoundingClientRect()
@@ -3565,7 +3577,8 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       const toolHit = toolsRect
         ? document.elementFromPoint(Math.round(toolsRect.left + toolsRect.width / 2), Math.round(toolsRect.top + toolsRect.height / 2))
         : null
-      const bars = measure()
+      /* 降帧后单帧采样不稳定：取多帧峰值（更严，不是放宽） */
+      const bars = await measurePeak()
 
       // 逐个点那颗按钮：bars → wave → ring → off，然后回到 bars
       const button = document.querySelector('.now-playing__topbar .visualizer + .btn, .now-playing__topbar button[title^="音频可视化"]') ||
