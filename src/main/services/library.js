@@ -33,6 +33,7 @@ function createLibraryService (ctx) {
    */
   const playHistory = createPlayHistory(ctx)
   ctx.onCleanup(() => { playHistory.flush().catch(() => {}) })
+  scheduleAutoPrune()
 
   /** @type {Array<object>} */
   let tracks = []
@@ -537,6 +538,29 @@ function createLibraryService (ctx) {
       failed: applied.failed,
       bytesFreed: applied.bytesFreed
     }
+  }
+
+  /*
+   * 启动 3 分钟后做一次**有上限**的封面缓存清理（容量 200MB / 30 天未访问）。
+   * 只清可重建的 .jpg；正常库（本机 689 张 ≈ 10MB）远低于上限，所以通常一个都不删。
+   * 放在 3 分钟后是为了不和首屏、扫描、预热抢 IO。
+   */
+  /* 用 var：scheduleAutoPrune 的调用点在声明之前，let 会触发 TDZ */
+  var autoPruneScheduled = false
+  function scheduleAutoPrune () {
+    if (autoPruneScheduled) return
+    autoPruneScheduled = true
+    const timer = setTimeout(() => {
+      pruneArtworkCache({ dryRun: false, maxBytes: 200 * 1024 * 1024, maxAgeMs: 30 * 24 * 3600 * 1000 })
+        .then((result) => {
+          if (result.deleted.length) {
+            console.log(`[library] 封面缓存清理：删除 ${result.deleted.length} 个（${Math.round(result.bytesFreed / 1024)}KB），当前 ${Math.round(result.bytesAfter / 1024)}KB`)
+          }
+        })
+        .catch((error) => console.warn('[library] 封面缓存清理失败（不影响使用）:', error.message))
+    }, 180000)
+    if (timer.unref) timer.unref()
+    ctx.onCleanup(() => clearTimeout(timer))
   }
 
   async function getArtworkStats () {
