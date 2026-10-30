@@ -9059,7 +9059,8 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       const featured = document.querySelector('.wall-tile.is-featured')
       const featuredStyle = featured ? getComputedStyle(featured) : null
       const featuredOrder = featuredStyle ? featuredStyle.order : null
-      const featuredColumn = featuredStyle ? featuredStyle.gridColumnStart : null
+      /* 读 gridColumnEnd：显式定位与旧写法都得到 span 2，两种实现都能判定 2×2 */
+      const featuredColumn = featuredStyle ? featuredStyle.gridColumnEnd : null
       const featuredRow = featuredStyle ? featuredStyle.gridRowStart : null
       const featuredRect = featured ? featured.getBoundingClientRect() : null
       const hero = featured?.querySelector('.wall-tile__hero')

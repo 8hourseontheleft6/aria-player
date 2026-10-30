@@ -244,6 +244,13 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
    * 聚焦块换位）量一次，之后平移途中只看缓存。
    */
   const slots = []                // 与 grid.children 同序
+  /*
+   * 每张专辑的行列由 computeCells() 算出来（纯计算）。
+   * 这一步**不减少 DOM**：只是把「行列」从 CSS 自动流手里接管过来，
+   * 平面尺寸也随之由 grid-template-rows 显式决定 —— 这是后面做窗口化的前提。
+   */
+  const cells = []
+  let cellRows = 0
   let slotPitch = 151             // 格子 + 间距
   let slotRows = 0
   let slotColumns = 0
@@ -324,6 +331,63 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
   /* ================================================================ */
   /* 屏幕外格子不参与绘制                                                */
   /* ================================================================ */
+
+  /** 算每张专辑的行列：按行填，index % 9 === 3 与"正在播放那张"占 2×2（与 CSS 规则一致） */
+  function computeCells () {
+    cells.length = 0
+    const total = albumList.length
+    const cols = Math.max(1, columns)
+    const featuredIndex = featuredKey ? albumList.findIndex((album) => album.key === featuredKey) : -1
+    const occupied = new Set()
+    let row = 0
+    let col = 0
+    for (let index = 0; index < total; index++) {
+      const wanted = (index % 9 === 3 || index === featuredIndex) ? 2 : 1
+      const span = Math.min(wanted, cols)
+      for (;;) {
+        if (col + span > cols) {
+          row++
+          col = 0
+          continue
+        }
+        let fits = true
+        for (let dr = 0; dr < span && fits; dr++) {
+          for (let dc = 0; dc < span; dc++) {
+            if (occupied.has((row + dr) * cols + (col + dc))) {
+              fits = false
+              break
+            }
+          }
+        }
+        if (fits) break
+        col++
+      }
+      for (let dr = 0; dr < span; dr++) {
+        for (let dc = 0; dc < span; dc++) occupied.add((row + dr) * cols + (col + dc))
+      }
+      cells.push({ row, col, span })
+      col += span
+    }
+    cellRows = cells.reduce((max, cell) => Math.max(max, cell.row + cell.span), 0)
+  }
+
+  /** 把已挂载的格子摆到算出来的行列上（索引来自 tile 缓存） */
+  function placeAll () {
+    let index = 0
+    for (const node of grid.children) {
+      const cell = cells[index++]
+      if (!cell) continue
+      /*
+       * 跨格以元素自身的 class 为准（.is-big / .is-featured 是 CSS 与用例共同认定的 2×2）——
+       * 只靠 index 推断会在"聚焦块刚换位、cells 还没更新"的一帧里算错。
+       */
+      const big = node.classList.contains('is-big') || node.classList.contains('is-featured')
+      const span = big ? Math.min(2, Math.max(1, columns)) : 1
+      node.style.gridRow = `${cell.row + 1} / span ${span}`
+      node.style.gridColumn = `${cell.col + 1} / span ${span}`
+    }
+    grid.style.gridTemplateRows = cellRows ? `repeat(${cellRows}, ${tileSize}px)` : 'none'
+  }
 
   /**
    * 量一遍每个格子的行列（只在布局变化后调用）。
@@ -763,6 +827,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     grid.style.setProperty('--wall-columns', String(columns))
     grid.style.setProperty('--wall-size', `${tileSize}px`)
     // 平面尺寸 / 格子行列都变了，几何缓存必须跟着刷新（这里的一次强制重排是必要开销）
+    computeCells()
+    placeAll()
     measureGeometry()
     updateCulling()
   }
@@ -1060,7 +1126,9 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
       // 当前专辑不在墙上（例如被文件夹 / 搜索过滤掉了），当作没有聚焦块
       featuredKey = null
     }
-    // 聚焦块占 2×2，会改变总槽位数 → 平面尺寸与位置指示器都要跟着刷新
+    // 聚焦块占 2×2，会改变总槽位数 → 行列要重算、重摆，平面尺寸与位置指示器跟着刷新
+    computeCells()
+    placeAll()
     measureGeometry()
   }
 
@@ -1341,6 +1409,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     lastScan = null
     featuredKey = null
     albumList = []
+    cells.length = 0
+    cellRows = 0
     return { tiles: released, nodes }
   }
 
