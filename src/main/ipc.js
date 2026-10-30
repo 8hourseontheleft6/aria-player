@@ -166,11 +166,11 @@ function registerIpc (ctx) {
     'ai:status': () => ({ configured: ai.configured() }),
 
     /* ---------- 在线音源（用户自己放进来的音源脚本） ---------- */
-    'sources:list': () => sources.list(),
+    'sources:list': async () => { await sources.ensureLoaded(); return sources.list() },
     'sources:reload': () => sources.load(),
-    'sources:stats': () => sources.getStats(),
-    'sources:set-enabled': (_event, id, enabled) => sources.setEnabled(String(id || ''), enabled),
-    'sources:set-all-enabled': (_event, enabled) => sources.setAllEnabled(Boolean(enabled)),
+    'sources:stats': async () => { await sources.ensureLoaded(); return sources.getStats() },
+    'sources:set-enabled': async (_event, id, enabled) => { await sources.ensureLoaded(); return sources.setEnabled(String(id || ''), enabled) },
+    'sources:set-all-enabled': async (_event, enabled) => { await sources.ensureLoaded(); return sources.setAllEnabled(Boolean(enabled)) },
     'sources:install': (_event, input) => sources.install(
       (input && input.text) || '',
       (input && input.name) || ''
@@ -180,7 +180,7 @@ function registerIpc (ctx) {
     'sources:search': (_event, input) => sources.search((input && input.query) || '', input || {}),
     'sources:resolve': (_event, input) => sources.resolveUrl(input || {}),
     'sources:lyrics': (_event, input) => sources.resolveLyrics(input || {}),
-    'sources:download-dir': () => sources.defaultDownloadDir(),
+    'sources:download-dir': async () => { await sources.ensureLoaded(); return sources.defaultDownloadDir() },
     'sources:pick-download-dir': async () => {
       const result = await dialog.showOpenDialog({
         title: '选择下载目录',

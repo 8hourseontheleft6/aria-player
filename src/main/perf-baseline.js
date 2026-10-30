@@ -116,7 +116,9 @@ async function runPerfBaseline ({ win, ctx }) {
    * 等最后一段出现再读数：firstUsableViewport 才是真正的「首屏可用」。
    * sourcesReady 可能比它更早（本地没装慢音源时），不能拿它当收尾条件。
    */
-  while (Date.now() < deadline && pageBoot && pageBoot.firstUsableViewport === undefined) {
+  /* 等到 sourcesReady 也出现（它可能明显晚于首屏：慢音源场景要 5–6 秒） */
+  /* 两种收尾条件都要满足：首屏已可用，且音源已有结论（跳过/完成/失败） */
+  while (Date.now() < deadline && pageBoot && (pageBoot.firstUsableViewport === undefined || pageBoot.sourcesReady === undefined)) {
     await sleep(300)
     pageBoot = await readMarks()
   }

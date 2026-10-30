@@ -613,6 +613,22 @@ function createMusicSourcesService (ctx) {
     return list()
   }
 
+  /**
+   * 懒加载入口（第二步：音源不再阻塞窗口启动）。
+   *
+   * 启动时只是「可能」装一下；真正保证 loaded 的是这里 —— 所有 sources:xxx IPC 先调它，
+   * 并发调用共用同一个 promise，不会重复装载。语义与原来的 init() 等价。
+   */
+  let loadPromise = null
+  async function ensureLoaded () {
+    if (loadedOnce) return list()
+    if (!loadPromise) {
+      loadPromise = load()
+        .finally(() => { loadPromise = null })
+    }
+    return loadPromise
+  }
+
   function list () {
     return [...loaded.values()].map(describe)
   }
@@ -1038,9 +1054,9 @@ function createMusicSourcesService (ctx) {
 
   return {
     async init () {
-      await load()
-      return list()
+      return ensureLoaded()
     },
+    ensureLoaded,
     load,
     list,
     setEnabled,

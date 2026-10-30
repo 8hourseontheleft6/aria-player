@@ -88,6 +88,32 @@ npm run perf:baseline     # 5 项全测，约 2.5 分钟；读数写到 .tmp/per
 sourcesReady 在这台机器上比 libraryReady 还早（本地只装了内置音源、无外部慢脚本），
 所以「音源拖慢启动」的收益只会在**装了慢音源**的用户身上出现 —— 这直接引出第三部分的临时慢音源验收。
 
+## 二、音源初始化移出启动关键路径
+
+**问题**：`main.js` 在 `createMainWindow()` 之前 `await musicSources.init()`。每个 LX 脚本最多等 8 秒、
+多个脚本还是串行 —— 装了慢音源的用户，窗口要晚好几秒才出来（这段时间是白屏）。
+
+**改法**
+· 窗口先建、首屏先出来；`did-finish-load` 之后延迟 1.2 秒再后台装载（`loadSourcesInBackground()`）。
+· `settings.onlineSources !== true` 时启动**完全不装**，首次调用 `sources:xxx` 时由 `ensureLoaded()` 兜住
+  （`list/stats/set-enabled/set-all-enabled/download-dir` 五个入口都接了；`search/resolve/lyrics` 原本就有懒加载）。
+· `ensureLoaded()` 并发安全（共用同一个 promise），`init()` 直接复用它。
+· 4 秒脚本执行超时、8 秒 LX 初始化等待、错误处理与热重载语义都没动。
+
+**三种场景实测（各 3 次，独立档案 `.tmp/perf-profile`，810 首）**
+
+| 场景 | shellBuilt | settingsReady | libraryReady | **firstUsableViewport** | **sourcesReady** |
+| --- | --- | --- | --- | --- | --- |
+| 无音源（onlineSources=false）| 217 ms | 342 ms | 490 ms | **824 ms** | 334 ms |
+| 正常音源（仅内置）| 205 ms | 321 ms | 433 ms | **803 ms** | 1526 ms |
+| 慢音源（两个 2.5s 脚本串行）| 239 ms | 369 ms | 525 ms | **860 ms** | **5551 ms** |
+
+**结论**：慢音源把 `sourcesReady` 推到 5.5 秒，但 `firstUsableViewport` 仍是 **860ms**（与无音源差 36ms，噪声内）——
+窗口和本地资料库不再被音源脚本拖住；也没有白屏/启动失败（首屏打点能正常产出）。
+
+**验收夹具**：`.tmp/fixtures/slow-source-a.js` / `slow-source-b.js`（各 2.5 秒后发 `inited`，串行 ≈5 秒），
+只在 `<userData>/music-sources` 里临时放，测完删除，不进仓库。
+
 ## 收口：P0 表的「改后」列（2026-10-24，含续播修复 + P1-3）
 
 | 项目 | 改前（基线）| 改后 | 目标 | 结论 |

@@ -361,14 +361,38 @@ globalThis.__ariaBoot.readyAt = Date.now()
   }
 
   const musicSources = optional('musicSources')
-  if (musicSources) {
-    try {
-      await musicSources.init()
-      notifySourcesReady('startup')
-    } catch (err) {
-      console.warn('[sources] 初始化失败', err)
-      notifySourcesReady('failed')
+
+  /*
+   * 音源脚本**不再阻塞窗口创建**。
+   *
+   * 以前是 `await musicSources.init()` 之后才 createMainWindow —— 每个 LX 脚本最多等 8 秒、
+   * 多个脚本还是串行，装了慢音源的用户要好幾秒才看到窗口（这段时间是白屏）。
+   *
+   * 现在：窗口先建、首屏先出来；等 did-finish-load 之后、首屏空闲时再后台装载。
+   * settings.onlineSources !== true 时启动**完全不装**，等首次调用 sources:xxx 时由
+   * ensureLoaded() 兜住（ipc 层已接好），不会出现"懒加载后列表为空"。
+   */
+  function loadSourcesInBackground (reason) {
+    if (!musicSources) return
+    const settingsNow = ctx.get('settings').get()
+    if (settingsNow.onlineSources !== true) {
+      console.log('[sources] onlineSources 关闭，启动时不装载脚本（首次用到时再装）')
+      notifySourcesReady('skipped:' + reason)
+      return
     }
+    setTimeout(() => {
+      const started = Date.now()
+      Promise.resolve()
+        .then(() => musicSources.ensureLoaded())
+        .then((loadedList) => {
+          console.log('[sources] 后台装载完成：' + loadedList.length + ' 个（' + (Date.now() - started) + 'ms）')
+          notifySourcesReady(reason)
+        })
+        .catch((err) => {
+          console.warn('[sources] 初始化失败', err)
+          notifySourcesReady('failed')
+        })
+    }, 1200)
   }
 
   const openedFiles = optional('openedFiles')
@@ -380,11 +404,15 @@ globalThis.__ariaBoot.readyAt = Date.now()
   registerIpc(ctx)
 
   const win = createMainWindow(ctx, profile, product)
-  if (sourcesReadyPayload) {
-    win.webContents.once('did-finish-load', () => {
-      if (!win.isDestroyed()) win.webContents.send('sources:ready', sourcesReadyPayload)
-    })
-  }
+  win.webContents.once('did-finish-load', () => {
+    if (win.isDestroyed()) return
+    if (sourcesReadyPayload) {
+      /* 已经装好了（懒加载先跑过）就只补发一次事件 */
+      win.webContents.send('sources:ready', sourcesReadyPayload)
+      return
+    }
+    loadSourcesInBackground('startup')
+  })
   const tray = optional('tray')
   if (tray) tray.sync()
   /*
