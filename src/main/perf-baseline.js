@@ -164,8 +164,20 @@ async function runPerfBaseline ({ win, ctx }) {
   /* ---------- 2. 空闲 RSS（静置 60 秒）---------- */
   await evaluate(win, `window.__aria.actions.setView('songs'); return true`)
   console.log('2) 空闲：静置 60 秒…')
+  const prewarmBefore = await evaluate(win, 'const p = window.__aria.prewarmer; return p && p.state ? { warmed: p.state.warmed, skipped: p.state.skipped, limit: p.state.limit, limitReached: !!p.state.limitReached } : null')
   await sleep(60000)
   out.idle = { byType: memoryByType(), main: mainMemory() }
+  const prewarmAfter = await evaluate(win, 'const p = window.__aria.prewarmer; return p && p.state ? { warmed: p.state.warmed, skipped: p.state.skipped, limit: p.state.limit, limitReached: !!p.state.limitReached } : null')
+  if (prewarmBefore && prewarmAfter) {
+    out.prewarm = {
+      before: prewarmBefore,
+      after: prewarmAfter,
+      warmedIn60s: prewarmAfter.warmed - prewarmBefore.warmed,
+      limit: prewarmAfter.limit,
+      limitReached: prewarmAfter.limitReached
+    }
+    console.log(`   预热：60 秒内新增 ${out.prewarm.warmedIn60s} 张（累计 ${prewarmAfter.warmed}），上限 ${prewarmAfter.limit}，已到上限=${prewarmAfter.limitReached}`)
+  }
   console.log(`   ${Object.entries(out.idle.byType).map(([type, value]) => `${type} ${value.rssMB}MB×${value.count}`).join('  ')}`)
 
   /* ---------- 3. 播放中（示波器关 / 开各一次）---------- */
