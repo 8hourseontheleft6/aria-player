@@ -249,7 +249,9 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
    * 这一步**不减少 DOM**：只是把「行列」从 CSS 自动流手里接管过来，
    * 平面尺寸也随之由 grid-template-rows 显式决定 —— 这是后面做窗口化的前提。
    */
+  let debugRows = { total: 0, window: [0, 0], mounted: 0 }
   const cells = []
+  const rowStarts = []
   let cellRows = 0
   let slotPitch = 151             // 格子 + 间距
   let slotRows = 0
@@ -369,6 +371,35 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
       col += span
     }
     cellRows = cells.reduce((max, cell) => Math.max(max, cell.row + cell.span), 0)
+    /*
+     * 行索引：rowStarts[r] = 第 r 行第一个格子的下标（cells 是行优先插入的，所以单调不减）。
+     * 窗口化时用二分找首/末行对应的下标区间，避免每帧遍历全部专辑。
+     */
+    rowStarts.length = cellRows + 1
+    let cursor = 0
+    for (let row = 0; row < cellRows; row++) {
+      while (cursor < cells.length && cells[cursor].row < row) cursor++
+      rowStarts[row] = cursor
+    }
+    rowStarts[cellRows] = cells.length
+  }
+
+  /**
+   * 当前位移下需要挂载的行范围 [first, last]（含一屏 overscan），O(log 行数)。
+   * 目前只用于读数与自检 —— 挂载策略仍是全量，但窗口化的"算窗口"这一步已经是常数级。
+   */
+  function rowWindow (margin = 2) {
+    if (!cellRows) return { first: 0, last: -1 }
+    const first = Math.max(0, Math.floor((-pan.y - PAD) / slotPitch) - margin)
+    const last = Math.min(cellRows - 1, Math.ceil((-pan.y + geometry.viewHeight - PAD) / slotPitch) + margin)
+    return { first, last: Math.max(first, last) }
+  }
+
+  /** 窗口对应的专辑下标区间 [start, end) */
+  function rowWindowIndexes (margin = 2) {
+    const range = rowWindow(margin)
+    if (range.last < range.first) return { start: 0, end: 0 }
+    return { start: rowStarts[range.first] || 0, end: rowStarts[range.last + 1] || cells.length }
   }
 
   /** 把已挂载的格子摆到算出来的行列上（索引来自 tile 缓存） */
@@ -1485,6 +1516,8 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     release,
     /* 离开视图释放前记下平移位置，回来重建后还原（不保留 DOM） */
     getPan: () => ({ x: pan.x, y: pan.y }),
+    /* 自检用：行索引与当前窗口区间（窗口化落地后就是"该挂哪些格子"） */
+    rows: () => ({ ...debugRows, window: [...debugRows.window] }),
     setPan: ({ x = 0, y = 0 } = {}) => {
       target.x = x
       target.y = y
@@ -1502,6 +1535,12 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
     get tileCount () { return tiles.size },
     /** 自检用：当前平面与平移状态 */
     debugState: () => {
+    const windowRange = rowWindowIndexes(2)
+    debugRows = {
+      total: cellRows,
+      window: [windowRange.start, windowRange.end],
+      mounted: tiles.size
+    }
       const limit = bounds()
       const featured = featuredKey ? tiles.get(featuredKey) : null
       let featuredOffset = null

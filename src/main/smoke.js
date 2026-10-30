@@ -7080,6 +7080,26 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
+    /* ---------- 媒体墙：行索引与窗口区间（窗口化地基）---------- */
+    const wallRows = await evaluate(win, `
+      const { actions } = window.__aria
+      const wall = window.__aria.views.mediaWall
+      actions.setView('wall')
+      await new Promise((r) => setTimeout(r, 1500))
+      return { rows: wall.rows(), tiles: wall.tileCount }
+    `)
+    record('媒体墙：行索引与窗口区间（窗口化地基）', (() => {
+      const reading = wallRows || {}
+      const rows = reading.rows || {}
+      const window = rows.window || [0, 0]
+      const total = rows.total || 0
+      const ok = total > 5 &&
+        window[1] > window[0] &&
+        window[0] >= 0 && window[1] <= total &&
+        reading.tiles === total
+      return { ok, detail: `总行 ${total}，窗口 [${window[0]},${window[1]})，当前挂载 ${reading.tiles} 格（本步仍全量）` }
+    })())
+
     /* ---------- 媒体墙：离开视图 5 秒后释放 ---------- */
     const wallIdleReading = await evaluate(win, `
       const { actions, store } = window.__aria
