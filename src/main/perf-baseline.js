@@ -171,6 +171,18 @@ async function runPerfBaseline ({ win, ctx }) {
   /* ---------- 3. 播放中（示波器关 / 开各一次）---------- */
   const playingOnce = async (label, visualizer) => {
     await evaluate(win, `
+      window.__timeEvents = 0
+      window.__longTasks = 0
+      if (window.__timeOff) window.__timeOff()
+      window.__timeOff = window.__aria.bus.on(window.__aria.EVENTS.TIME, () => { window.__timeEvents++ })
+      if (!window.__longObserver && 'PerformanceObserver' in window) {
+        try {
+          window.__longObserver = new PerformanceObserver((list) => { window.__longTasks += list.getEntries().length })
+          window.__longObserver.observe({ entryTypes: ['longtask'] })
+        } catch (err) { window.__longObserver = null }
+      }
+      return true`)
+    await evaluate(win, `
       const { store, actions } = window.__aria
       actions.setSetting({ visualizer: ${JSON.stringify(visualizer)} })
       const tracks = store.get().library.tracks
@@ -178,8 +190,9 @@ async function runPerfBaseline ({ win, ctx }) {
       actions.playTrack(track)
       return true`)
     await sleep(30000)
-    const sample = { byType: memoryByType(), main: mainMemory() }
-    console.log(`3) 播放 30 秒（示波器 ${visualizer ? '开' : '关'}）：` +
+    const probe = await evaluate(win, 'return { timeEvents: window.__timeEvents || 0, longTasks: window.__longTasks || 0 }')
+    const sample = { byType: memoryByType(), main: mainMemory(), timeEvents: probe.timeEvents, timeHz: Math.round(probe.timeEvents / 30 * 10) / 10, longTasks: probe.longTasks }
+    console.log(`3) 播放 30 秒（示波器 ${visualizer ? '开' : '关'}）：TIME ${sample.timeHz}/秒，长任务 ${sample.longTasks} 个；` +
       Object.entries(sample.byType).map(([type, value]) => `${type} ${value.rssMB}MB/${value.cpu}%`).join('  '))
     await evaluate(win, 'window.__aria.player.pause(); return true')
     return { visualizer, ...sample }

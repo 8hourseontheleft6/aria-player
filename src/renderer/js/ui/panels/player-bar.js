@@ -219,8 +219,14 @@ export function createPlayerBar ({ store, bus, player, artwork, actions }) {
     if (duration && progress.value !== duration) progress.setRange(0, duration)
     progress.setValue(time)
     progress.setBuffered(buffered)
-    progress.setTooltip(formatDuration(progress.dragging ? progress.value : time))
+    /* 字符串没变就不写 DOM（setTooltip 会碰 title 与 aria） */
+    const label = formatDuration(progress.dragging ? progress.value : time)
+    if (label !== lastTooltip) {
+      lastTooltip = label
+      progress.setTooltip(label)
+    }
   })
+  let lastTooltip = ''
 
   bus.on(EVENTS.TRACK_CHANGED, ({ track }) => {
     titleNode.textContent = track.title

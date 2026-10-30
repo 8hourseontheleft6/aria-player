@@ -15,6 +15,29 @@ const TIMED_LRC = /\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/
 export function createPlayerController ({ store, bus, engine, playlist, host, artwork }) {
   let modeId = store.get().settings.playbackMode || DEFAULT_MODE
   let ticker = null
+/*
+ * 进度事件节流（任务 2）。
+ *
+ * 原来每帧（~60Hz）都广播 TIME，播放条、正在播放页、歌词、媒体墙跟着每帧写样式。
+ * 改为：
+ *   · 普通：12Hz（约 83ms）—— 进度条看起来依然连续，写 DOM 次数降到 1/5；
+ *   · 卡拉 OK：只在「正在播放面板可见 + 当前行有逐字时间轴」时恢复逐帧，
+ *     面板一关立刻降回 12Hz；
+ *   · 暂停 / seek / 切歌 / 播完：仍调用 emitTimeNow() 立即刷新一次（不走节流）。
+ */
+const TIME_MIN_INTERVAL = 83
+let lastTimeEmitAt = 0
+
+/** 当前是否需要逐帧精度（只有卡拉 OK 需要） */
+function needsFineGrainedTime () {
+  const state = store.get()
+  if (state.ui.nowPlayingOpen !== true) return false
+  const lines = state.lyrics.lines
+  if (!lines || !lines.length) return false
+  const index = lastActiveIndex
+  const line = index >= 0 ? lines[index] : null
+  return Boolean(line && Array.isArray(line.words) && line.words.length > 1)
+}
   let lyricsToken = 0
   /** 当前歌词原文，用于调整偏移后重新解析 */
   let currentLyrics = null
@@ -553,6 +576,7 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
 
   /** 立即广播一次播放位置（不依赖 rAF 循环） */
   function emitTimeNow () {
+    lastTimeEmitAt = performance.now()
     const time = engine.getTime()
     const duration = engine.getDuration() || store.get().playback.duration
     const buffered = engine.getBufferedEnd()
@@ -602,6 +626,9 @@ export function createPlayerController ({ store, bus, engine, playlist, host, ar
   function startTicker () {
     if (ticker?.running) return
     ticker = ticker || raf(() => {
+      const now = performance.now()
+      if (!needsFineGrainedTime() && now - lastTimeEmitAt < TIME_MIN_INTERVAL) return
+      lastTimeEmitAt = now
       emitTimeNow()
     })
     ticker.start()
