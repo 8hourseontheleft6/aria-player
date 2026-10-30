@@ -8,7 +8,24 @@
  * 只预热磁盘缓存，不去碰渲染层的 blob 缓存，避免占着几百个 blob URL。
  */
 
+/*
+ * 预热是后台顺手做的事，不该无界跑完整个曲库（任务 3）：
+ *  · 每轮只预热前 MAX_WARM 张（reset 之后重新计数）；
+ *  · 用 requestIdleCallback 排程，没有这个 API 时回退 setTimeout；
+ *  · 到上限后停止排程，不再每 220ms 醒一次。
+ */
+const MAX_WARM = 200
 const IDLE_INTERVAL = 220
+const hasIdle = typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function'
+function idleSchedule (fn, timeout) {
+  if (hasIdle) return window.requestIdleCallback(fn, { timeout })
+  return setTimeout(fn, timeout)
+}
+function idleCancel (handle) {
+  if (handle == null) return
+  if (hasIdle) window.cancelIdleCallback(handle)
+  else clearTimeout(handle)
+}
 const BUSY_RETRY = 900
 const IDLE_RETRY = 1500
 
@@ -21,7 +38,9 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
   let stopped = false
   /** 最小化等场景下临时让路：与 paused（界面正忙）分开记，语义不同 */
   let suspended = false
-  const stats = { warmed: 0, skipped: 0, failed: 0, startedAt: 0 }
+  const stats = { warmed: 0, skipped: 0, failed: 0, startedAt: 0, limit: MAX_WARM, limitReached: false }
+  /* 本轮已用预算：reset（缓存被清空 / 自检重跑）后清零，stats.warmed 仍是累计值 */
+  let budget = 0
 
   function enabled () {
     return settings.get().prewarmArtwork !== false
@@ -29,8 +48,13 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
 
   function schedule (delay) {
     if (stopped || suspended) return
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(tick, delay)
+    if (budget >= stats.limit) {
+      /* 到上限了：彻底停下，不要再定时醒来 */
+      stats.limitReached = true
+      return
+    }
+    if (timer) idleCancel(timer)
+    timer = idleSchedule(tick, Math.max(0, delay))
   }
 
   function busy () {
@@ -42,6 +66,10 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
   async function tick () {
     timer = null
     if (stopped || !enabled()) return
+    if (budget >= stats.limit) {
+      stats.limitReached = true
+      return
+    }
 
     // 界面正在要封面 —— 让路，别和用户抢
     if (busy()) {
@@ -58,6 +86,7 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
     }
 
     warmed.add(album.key)
+    budget++
     const track = album.artworkTrack
     if (!track?.id) {
       stats.skipped++
@@ -87,7 +116,7 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
   function suspend () {
     suspended = true
     if (timer) {
-      clearTimeout(timer)
+      idleCancel(timer)
       timer = null
     }
   }
@@ -101,7 +130,7 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
   function stop () {
     stopped = true
     if (timer) {
-      clearTimeout(timer)
+      idleCancel(timer)
       timer = null
     }
   }
@@ -114,6 +143,8 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
    * 设置页清空缓存时会发这个事件（自检里也用它来验证预热真的会重做）。
    */
   function reset () {
+    budget = 0
+    stats.limitReached = false
     warmed.clear()
     if (!stopped && enabled()) schedule(IDLE_INTERVAL)
   }
@@ -140,7 +171,10 @@ export function createArtworkPrewarmer ({ bus, remote, settings, actions, lazy, 
         warmed: stats.warmed,
         failed: stats.failed,
         skipped: stats.skipped,
-        tracked: warmed.size
+        tracked: warmed.size,
+        budget,
+        limit: stats.limit,
+        limitReached: stats.limitReached
       }
     }
   }
