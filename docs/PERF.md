@@ -380,8 +380,30 @@ renderer RSS 215–229→**151.5MB**、帧间隔 8.4ms 不变。
 根因是预算用了**累计**值（`stats.warmed`），自检里调 `prewarmer.reset()` 之后仍然超限、不再预热。
 改成按轮预算（`budget`，reset 清零）后该断言恢复正常；本体 **228/228** 通过。
 
-**未做**：artwork-cache / online-cache 的容量上限、访问时间与孤儿清理（dry-run、设置页占用显示）——
-这一部分涉及主进程磁盘清扫与设置界面，本轮未动，保持现状。
+**缓存收尾（已落地，见「九」）**：`artwork-cache` 与 `online-cache` 的容量上限、孤儿/超龄清理、
+dry-run 与设置页占用显示都在 0.2.x 补齐了；下面第九节是改法与验收。
+
+## 九、缓存收尾：占用显示 + dry-run 清理（**已落地**）
+
+### 封面缓存（`userData/artwork-cache`）
+
+- **统计**：`library.getArtworkStats()` 返回 `files / bytes / limit / lastPrune`；
+  设置页「封面缓存」那一行显示「N 个文件 · X MB / 上限 200 MB」与「上次清理：删除 N 个 · 释放 X」。
+- **清理**：`library.pruneArtworkCache({ dryRun })`，IPC `library:artwork-prune`，**默认 dry-run**。
+  设置页的「检查可清理」只空跑并显示"将删除多少 / 可释放多少"；用户点「确认清理」才 `dryRun: false`。
+- **范围**：只认 `artwork-cache/<id>.jpg`（含 `thumb-` 前缀）。音频、歌词、用户文件不在候选里；
+  自动清理仍放在启动 3 分钟后（200MB / 30 天），不和首屏抢 IO。
+
+### 在线缓存（`userData/online-cache`）
+
+- **容量上限 128MB**，按"最近访问"从旧到新淘汰；同一张封面的 `.bin` 与 `.json` 成组删除。
+- **只清封面 / 艺人头像**（`covers`、`artists*` 目录）；`lyrics` 缓存、音频与用户文件一个都不碰，
+  执行前还会对目录名与文件名再做一次白名单校验（带路径分隔符一律拒绝）。
+- **原子写**：`writeFileAtomic()`（同目录临时文件 + rename）。之前"图片与元数据两次写之间被杀"
+  会留下有 json 没 bin 的半截缓存，读的时候表现为封面永远加载失败且不自愈。
+- **dry-run**：`online.pruneCache({ dryRun: true })` 只返回计划；设置页同样是"检查可清理 → 确认清理"。
+- **自检**：新增 `npm run check:online-cache`（覆盖白名单、成组删除、容量淘汰、dry-run、真删时歌词/音频不动、
+  路径穿越拒绝、原子写不留临时文件、IPC/preload/设置页接线），已接进 `npm run check`。
 
 ## 收口：P0 表的「改后」列## 收口：P0 表的「改后」列（2026-10-24，含续播修复 + P1-3）
 

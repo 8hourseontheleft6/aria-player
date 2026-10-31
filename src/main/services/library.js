@@ -403,6 +403,10 @@ function createLibraryService (ctx) {
    * 之后只读一个小文件即可。缓存按源文件 mtime 判断是否过期。
    */
   const artworkCacheDir = path.join(app.getPath('userData'), 'artwork-cache')
+  /** 封面磁盘缓存的容量上限（与自动清理共用；设置页会显示） */
+  const ARTWORK_CACHE_LIMIT_BYTES = 200 * 1024 * 1024
+  /** 最近一次清理结果（dry-run 与真清理都记，设置页显示"上次清理"） */
+  let lastArtworkPrune = null
 
   function artworkCacheFile (track) {
     return path.join(artworkCacheDir, `${track.id}.jpg`)
@@ -501,7 +505,7 @@ function createLibraryService (ctx) {
    * 封面磁盘缓存的清理（任务 3）：**默认 dry-run**，只返回计划，不删文件。
    * 传 { dryRun: false } 才真删，且只删 planPrune 认定可重建的 .jpg（音乐/歌词/用户文件永不涉及）。
    */
-  async function pruneArtworkCache ({ dryRun = true, maxBytes = 200 * 1024 * 1024, maxAgeMs = 0 } = {}) {
+  async function pruneArtworkCache ({ dryRun = true, maxBytes = ARTWORK_CACHE_LIMIT_BYTES, maxAgeMs = 0 } = {}) {
     let names = []
     try {
       names = await fsp.readdir(artworkCacheDir)
@@ -525,6 +529,17 @@ function createLibraryService (ctx) {
       keepIds: tracks.map((track) => track.id)
     })
     const applied = await applyPlan(artworkCacheDir, plan, { fs: fsp, dryRun })
+    lastArtworkPrune = {
+      at: Date.now(),
+      dryRun,
+      candidates: plan.remove.length,
+      removed: applied.deleted.length,
+      bytesPlanned: plan.remove.reduce((sum, item) => sum + (Number(item.size) || 0), 0),
+      bytesFreed: applied.bytesFreed,
+      bytesAfter: plan.bytesAfter,
+      limit: plan.limit,
+      failed: applied.failed.length
+    }
     return {
       dryRun,
       total: files.length,
@@ -536,7 +551,8 @@ function createLibraryService (ctx) {
       untouched: plan.untouched.length,
       deleted: applied.deleted,
       failed: applied.failed,
-      bytesFreed: applied.bytesFreed
+      bytesFreed: applied.bytesFreed,
+      lastPrune: lastArtworkPrune
     }
   }
 
@@ -551,7 +567,7 @@ function createLibraryService (ctx) {
     if (autoPruneScheduled) return
     autoPruneScheduled = true
     const timer = setTimeout(() => {
-      pruneArtworkCache({ dryRun: false, maxBytes: 200 * 1024 * 1024, maxAgeMs: 30 * 24 * 3600 * 1000 })
+      pruneArtworkCache({ dryRun: false, maxBytes: ARTWORK_CACHE_LIMIT_BYTES, maxAgeMs: 30 * 24 * 3600 * 1000 })
         .then((result) => {
           if (result.deleted.length) {
             console.log(`[library] 封面缓存清理：删除 ${result.deleted.length} 个（${Math.round(result.bytesFreed / 1024)}KB），当前 ${Math.round(result.bytesAfter / 1024)}KB`)
@@ -564,7 +580,15 @@ function createLibraryService (ctx) {
   }
 
   async function getArtworkStats () {
-    const stats = { dir: artworkCacheDir, files: 0, bytes: 0, memory: artworkCache.size }
+    const stats = {
+      dir: artworkCacheDir,
+      files: 0,
+      bytes: 0,
+      memory: artworkCache.size,
+      /* 设置页要显示"上限"和"最近清理结果" */
+      limit: ARTWORK_CACHE_LIMIT_BYTES,
+      lastPrune: lastArtworkPrune
+    }
     try {
       const entries = await fsp.readdir(artworkCacheDir, { withFileTypes: true })
       for (const entry of entries) {

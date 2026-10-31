@@ -160,6 +160,8 @@ function registerIpc (ctx) {
       'online:artist': (_event, payload) => online.fetchArtist(payload || {}),
     'online:clear-cache': () => online.clearCache(),
     'online:stats': () => online.getStats(),
+    /* 默认 dry-run：只返回计划；传 { dryRun: false } 才真删（设置页二次确认后才这么调） */
+    'online:prune-cache': (_event, options) => online.pruneCache(options || {}),
 
     /* ---------- 外部模型（用户自填 API，走主进程发请求） ---------- */
     'ai:chat': (_event, payload) => ai.chat(payload || {}),

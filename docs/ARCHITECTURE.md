@@ -26,6 +26,8 @@ aria-player/
 │   │   │   ├── id3-lite.js         轻量 ID3 解析（无依赖兜底）
 │   │   │   ├── lyrics.js           .lrc 定位与解析
 │   │   │   ├── online.js           LRCLIB / iTunes 在线补全（默认关闭）
+│   │   │   ├── artwork-cache.js    封面磁盘缓存的清理规划（纯逻辑，dry-run 优先）
+│   │   │   ├── online-cache.js     在线封面/头像缓存的上限、原子写与清理规划
 │   │   │   ├── music-sources.js    音源宿主：脚本沙箱 / LX 兼容层 / 外部搜索器 / remote:// 代理
 │   │   │   ├── source-runtime.js   音源工作线程生命周期、请求取消与调用截止时间
 │   │   │   ├── watcher.js          目录监听（防抖 + 扩展名过滤）

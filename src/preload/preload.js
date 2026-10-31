@@ -212,7 +212,9 @@ contextBridge.exposeInMainWorld('aria', {
     cover: (track) => ipcRenderer.invoke('online:cover', track),
     artist: (payload) => ipcRenderer.invoke('online:artist', payload),
     clearCache: () => ipcRenderer.invoke('online:clear-cache'),
-    stats: () => ipcRenderer.invoke('online:stats')
+    stats: () => ipcRenderer.invoke('online:stats'),
+    /* 默认 dry-run；传 { dryRun: false } 才真删（只删封面/头像缓存） */
+    pruneCache: (options) => ipcRenderer.invoke('online:prune-cache', options || {})
   },
 
   /* 在线音源：脚本由用户自己放进 <userData>/music-sources，这里只做管理 / 搜索 / 解析 */

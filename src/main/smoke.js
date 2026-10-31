@@ -10192,6 +10192,30 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `输入「封面缓存」→ 命中分组 ${groupSearchCheck.groups} 个、行 ${groupSearchCheck.rows} 行、计数「${groupSearchCheck.count}」；` +
       `清空后残留高亮 ${groupSearchCheck.cleared} 处（应为 0）`)
 
+    /* 封面 / 在线缓存：占用、上限、最近清理结果与"先检查再确认"两颗按钮都在设置页 */
+    const cacheUiCheck = await evaluate(win, `
+      const settle = async (ms = 300) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions } = window.__aria
+      actions.setView('settings')
+      await settle(700)
+      const nav = [...document.querySelectorAll('.settings-nav__item')].find((item) => item.textContent === '在线与扩展')
+      nav?.click()
+      await settle(800)
+      return {
+        values: [...document.querySelectorAll('.settings__row-value')].map((node) => node.textContent),
+        notes: [...document.querySelectorAll('.settings__row-note')].map((node) => node.textContent),
+        buttons: [...document.querySelectorAll('.settings button')].map((node) => node.textContent.trim())
+      }
+    `)
+    const hasArtworkUsage = cacheUiCheck.values.some((text) => /上限 200 MB/.test(text))
+    const hasOnlineUsage = cacheUiCheck.values.some((text) => /上限 128 MB/.test(text))
+    record('设置页显示封面/在线缓存占用、上限与最近清理结果',
+      hasArtworkUsage && hasOnlineUsage && cacheUiCheck.notes.length >= 2 &&
+      cacheUiCheck.notes.every((text) => /最近清理|上次清理|上次检查/.test(text)) &&
+      cacheUiCheck.buttons.includes('检查可清理') && cacheUiCheck.buttons.includes('确认清理'),
+      `数值：${cacheUiCheck.values.join(' | ')}；说明：${cacheUiCheck.notes.join(' | ')}；` +
+      `按钮含「检查可清理」=${cacheUiCheck.buttons.includes('检查可清理')}、「确认清理」=${cacheUiCheck.buttons.includes('确认清理')}`)
+
     /* 说明文字也要能搜到（它存在 ⓘ 的 aria-label 里，不在行的 textContent 里） */
     const tipSearchCheck = await evaluate(win, `
       const settle = async (ms = 250) => { await new Promise((r) => setTimeout(r, ms)) }
@@ -10915,6 +10939,33 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
     const cacheStats = await online.getStats()
     record('在线缓存落盘', cacheStats.files > 0,
       `${cacheStats.files} 个文件 · ${Math.round(cacheStats.size / 1024)} KB · ${cacheStats.cacheRoot}`)
+
+    /*
+     * 缓存清理默认 dry-run：只出计划，磁盘上一个文件都不该少；
+     * 在线缓存只允许清 covers / artists*，歌词（lyrics 目录）连候选都不进。
+     */
+    const cacheDryRun = await (async () => {
+      const beforeArtwork = await artworkService.getArtworkStats()
+      const artworkPlan = await artworkService.pruneArtworkCache({ dryRun: true })
+      const afterArtwork = await artworkService.getArtworkStats()
+      const beforeOnline = await online.getStats()
+      const onlinePlan = await online.pruneCache({ dryRun: true })
+      const afterOnline = await online.getStats()
+      return { beforeArtwork, artworkPlan, afterArtwork, beforeOnline, onlinePlan, afterOnline }
+    })()
+    record('封面/在线缓存清理默认 dry-run（不删文件）',
+      cacheDryRun.artworkPlan.dryRun === true &&
+      cacheDryRun.artworkPlan.limit === 200 * 1024 * 1024 &&
+      Array.isArray(cacheDryRun.artworkPlan.remove) &&
+      cacheDryRun.beforeArtwork.files === cacheDryRun.afterArtwork.files &&
+      cacheDryRun.onlinePlan.dryRun === true &&
+      cacheDryRun.onlinePlan.limit === 128 * 1024 * 1024 &&
+      cacheDryRun.onlinePlan.remove.every((item) => /^(?:covers|artists\d*)$/.test(item.folder)) &&
+      cacheDryRun.beforeOnline.files === cacheDryRun.afterOnline.files,
+      `封面 ${cacheDryRun.beforeArtwork.files}→${cacheDryRun.afterArtwork.files} 个文件` +
+      `（计划清理 ${cacheDryRun.artworkPlan.remove.length} 个，上限 ${Math.round(cacheDryRun.artworkPlan.limit / 1024 / 1024)}MB）；` +
+      `在线 ${cacheDryRun.beforeOnline.files}→${cacheDryRun.afterOnline.files} 个文件` +
+      `（计划清理 ${cacheDryRun.onlinePlan.remove.length} 个，上限 ${Math.round(cacheDryRun.onlinePlan.limit / 1024 / 1024)}MB）`)
 
     // 渲染层插件链路：扩展点是否真的接到了在线服务（用同一首曲目，命中刚才的缓存）
     const providerResult = await evaluate(win, `

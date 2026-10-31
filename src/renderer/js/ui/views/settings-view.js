@@ -1180,41 +1180,119 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     /* ---------- 在线功能 ---------- */
     const onlineOn = Boolean(settings.onlineFeatures)
     const cacheLabel = h('span', { class: 'settings__row-value', text: '—' })
-    remote.online.stats().then((info) => {
-      if (!info) return
-      cacheLabel.textContent = info.files
-        ? `${info.files} 个文件 · ${formatBytes(info.size)}`
-        : '暂无缓存'
-    }).catch(() => { cacheLabel.textContent = '—' })
+    const onlinePruneNote = h('span', { class: 'settings__row-note', text: '' })
+    const refreshOnlineCache = async () => {
+      const info = await remote.online.stats().catch(() => null)
+      if (!info) { cacheLabel.textContent = '—'; return }
+      cacheLabel.textContent =
+        `${info.files || 0} 个文件 · ${formatBytes(info.size || 0)} / 上限 ${formatBytes(info.limit || 0)}`
+      const last = info.lastPrune
+      if (!last) { onlinePruneNote.textContent = '最近清理：还没运行过'; return }
+      const when = new Date(last.at).toLocaleString('zh-CN', { hour12: false })
+      onlinePruneNote.textContent = last.dryRun
+        ? `上次检查：可清理 ${last.candidates ?? last.removed} 个 · 可释放 ${formatBytes(last.bytesPlanned || 0)}（${when}）`
+        : `上次清理：删除 ${last.removed} 个 · 释放 ${formatBytes(last.bytesFreed || 0)}（${when}）`
+    }
+    refreshOnlineCache()
 
     const artworkCacheLabel = h('span', { class: 'settings__row-value', text: '—' })
-    remote.library.artworkStats().then((info) => {
-      if (!info) return
-      artworkCacheLabel.textContent = info.files
-        ? `${info.files} 张 · ${formatBytes(info.bytes)}`
-        : '暂无缓存'
-    }).catch(() => { artworkCacheLabel.textContent = '—' })
+    const artworkPruneNote = h('span', { class: 'settings__row-note', text: '' })
+
+    /*
+     * 封面缓存：占用（文件数 / 总字节 / 上限）+ 最近一次清理结果。
+     * 「检查可清理」只做 dry-run，把"将删除多少、能释放多少"摆出来；
+     * 用户点「确认清理」才真删，且只删可重建的 .jpg（音频 / 歌词 / 用户文件不参与）。
+     */
+    const refreshArtworkCache = async () => {
+      const info = await remote.library.artworkStats().catch(() => null)
+      if (!info) { artworkCacheLabel.textContent = '—'; return }
+      artworkCacheLabel.textContent =
+        `${info.files ?? 0} 个文件 · ${formatBytes(info.bytes || 0)} / 上限 ${formatBytes(info.limit || 0)}`
+      const last = info.lastPrune
+      if (!last) {
+        artworkPruneNote.textContent = '最近清理：还没运行过'
+        return
+      }
+      const when = new Date(last.at).toLocaleString('zh-CN', { hour12: false })
+      artworkPruneNote.textContent = last.dryRun
+        ? `上次检查：可清理 ${last.candidates ?? last.removed} 个 · 可释放 ${formatBytes(last.bytesPlanned || 0)}（${when}）`
+        : `上次清理：删除 ${last.removed} 个 · 释放 ${formatBytes(last.bytesFreed || 0)}（${when}）`
+    }
+
+    const artworkConfirmButton = h('button', {
+      class: 'btn btn--sm btn--destructive',
+      type: 'button',
+      hidden: true
+    }, '确认清理')
+
+    const artworkPruneButton = h('button', {
+      class: 'btn btn--sm',
+      type: 'button',
+      title: '先空跑一次：算出可清理多少、能释放多少，不会删除任何文件',
+      onClick: async () => {
+        const plan = await remote.library.pruneArtwork({ dryRun: true }).catch(() => null)
+        if (!plan) {
+          toast({ message: '检查失败：主进程没有响应', type: 'error' })
+          return
+        }
+        const count = plan.remove?.length || 0
+        if (!count) {
+          artworkPruneNote.textContent = `本次检查：没有可清理的项（${plan.total ?? 0} 个文件都在用）`
+          artworkConfirmButton.hidden = true
+          return
+        }
+        artworkPruneNote.textContent =
+          `本次检查：可清理 ${count} 个 · 可释放 ${formatBytes((plan.bytesBefore || 0) - (plan.bytesAfter || 0))}（尚未删除）`
+        artworkConfirmButton.hidden = false
+      }
+    }, '检查可清理')
+
+    artworkConfirmButton.addEventListener('click', async () => {
+      const result = await remote.library.pruneArtwork({ dryRun: false }).catch(() => null)
+      if (!result) {
+        toast({ message: '清理失败：主进程没有响应', type: 'error' })
+        return
+      }
+      const deleted = result.deleted?.length || 0
+      toast({
+        message: deleted
+          ? `已清理 ${deleted} 个封面缓存 · 释放 ${formatBytes(result.bytesFreed || 0)}`
+          : '没有需要清理的项',
+        type: 'success'
+      })
+      artworkConfirmButton.hidden = true
+      await refreshArtworkCache()
+    })
+
+    const artworkClearButton = h('button', {
+      class: 'btn btn--sm btn--destructive',
+      type: 'button',
+      onClick: async () => {
+        const result = await remote.library.clearArtworkCache()
+        toast({
+          message: result?.ok ? '封面缓存已清空' : `清理失败：${result?.message || '未知错误'}`,
+          type: result?.ok ? 'success' : 'error'
+        })
+        await refreshArtworkCache()
+        // 告诉预热器：记账作废，重新补一遍（否则它会以为缓存还在，一直不再预热）
+        if (result?.ok) bus.emit('artwork:cache-cleared')
+      }
+    }, '清空')
+
+    refreshArtworkCache()
 
     scroll.appendChild(group('封面缓存', [
       row({
         title: '磁盘封面缓存',
-        sub: '首次读取内嵌封面时会缩到 480px 并存到本地，之后打开专辑或媒体墙只读小文件（源文件变化后自动失效）',
-        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
-        artworkCacheLabel,
-        h('button', {
-          class: 'btn btn--sm btn--destructive',
-          type: 'button',
-          onClick: async () => {
-            const result = await remote.library.clearArtworkCache()
-            toast({
-              message: result?.ok ? '封面缓存已清空' : `清理失败：${result?.message || '未知错误'}`,
-              type: result?.ok ? 'success' : 'error'
-            })
-            artworkCacheLabel.textContent = '暂无缓存'
-            // 告诉预热器：记账作废，重新补一遍（否则它会以为缓存还在，一直不再预热）
-            if (result?.ok) bus.emit('artwork:cache-cleared')
-          }
-        }, '清空'))
+        sub: '首次读取内嵌封面时会缩到 480px 并存到本地，之后打开专辑或媒体墙只读小文件（源文件变化后自动失效）。'
+          + '清理只删可重建的 .jpg：音频、歌词与用户文件永远不在候选里。',
+        control: h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            artworkCacheLabel,
+            artworkPruneButton,
+            artworkConfirmButton,
+            artworkClearButton),
+          artworkPruneNote)
       }),
       row({
         title: '空闲时预热封面',
@@ -1306,21 +1384,59 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
       })(),
       row({
         title: '在线缓存',
-        sub: '命中的歌词与封面会缓存在本地，未命中的结果 24 小时内不会重复请求',
-        control: h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
-        cacheLabel,
-        h('button', {
-          class: 'btn btn--sm btn--destructive',
-          type: 'button',
-          onClick: async () => {
-            const result = await remote.online.clearCache()
-            toast({
-              message: result?.ok ? '在线缓存已清空' : `清理失败：${result?.message || '未知错误'}`,
-              type: result?.ok ? 'success' : 'error'
-            })
-            cacheLabel.textContent = '暂无缓存'
-          }
-        }, '清空'))
+        sub: '命中的歌词与封面会缓存在本地，未命中的结果 24 小时内不会重复请求。'
+          + '容量清理只针对封面 / 艺人头像（.bin + 元数据），歌词缓存与用户文件一个都不碰。',
+        control: h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            cacheLabel,
+            h('button', {
+              class: 'btn btn--sm',
+              type: 'button',
+              title: '先空跑一次：算出可清理多少、能释放多少，不会删除任何文件',
+              onClick: async () => {
+                const plan = await remote.online.pruneCache({ dryRun: true }).catch(() => null)
+                if (!plan) {
+                  toast({ message: '检查失败：主进程没有响应', type: 'error' })
+                  return
+                }
+                const count = plan.remove?.length || 0
+                onlinePruneNote.textContent = count
+                  ? `本次检查：可清理 ${count} 个 · 可释放 ${formatBytes((plan.bytesBefore || 0) - (plan.bytesAfter || 0))}（尚未删除）`
+                  : `本次检查：没有可清理的项（封面缓存 ${plan.total ?? 0} 个文件）`
+              }
+            }, '检查可清理'),
+            h('button', {
+              class: 'btn btn--sm btn--destructive',
+              type: 'button',
+              onClick: async () => {
+                const result = await remote.online.pruneCache({ dryRun: false }).catch(() => null)
+                if (!result) {
+                  toast({ message: '清理失败：主进程没有响应', type: 'error' })
+                  return
+                }
+                const deleted = result.deleted?.length || 0
+                toast({
+                  message: deleted
+                    ? `已清理 ${deleted} 个在线封面缓存 · 释放 ${formatBytes(result.bytesFreed || 0)}`
+                    : '没有需要清理的项',
+                  type: 'success'
+                })
+                await refreshOnlineCache()
+              }
+            }, '确认清理'),
+            h('button', {
+              class: 'btn btn--sm btn--destructive',
+              type: 'button',
+              onClick: async () => {
+                const result = await remote.online.clearCache()
+                toast({
+                  message: result?.ok ? '在线缓存已清空' : `清理失败：${result?.message || '未知错误'}`,
+                  type: result?.ok ? 'success' : 'error'
+                })
+                await refreshOnlineCache()
+              }
+            }, '清空')),
+          onlinePruneNote)
       })
     ]))
 

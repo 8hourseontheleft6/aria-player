@@ -31,6 +31,7 @@ function createStub () {
       artwork: unavailable('读取封面'),
       artworkStats: unavailable('封面缓存统计'),
       clearArtworkCache: unavailable('清理封面缓存'),
+      pruneArtwork: unavailable('检查封面缓存可清理项'),
       reveal: unavailable('在文件夹中显示'),
       handleDrop: unavailable('处理拖入的文件'),
       searchLyrics: unavailable('搜索歌词'),
@@ -44,7 +45,8 @@ function createStub () {
       lyrics: unavailable('在线歌词'),
       cover: unavailable('在线封面'),
       clearCache: unavailable('清理在线缓存'),
-      stats: unavailable('在线缓存统计')
+      stats: unavailable('在线缓存统计'),
+      pruneCache: unavailable('检查在线缓存可清理项')
     },
     /* 在线音源：脚本由用户自己放在 <userData>/music-sources，这里只是管理 / 搜索 / 解析 */
     sources: {

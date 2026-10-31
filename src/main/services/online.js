@@ -16,10 +16,13 @@ const { app, net } = require('electron')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const { planPrune, applyPlan, writeFileAtomic, isCoverFolder, isCoverFile } = require('./online-cache')
 
 const USER_AGENT = 'Aria/0.0.0-dev (local music player; https://github.com/)'
 const NEGATIVE_TTL = 24 * 60 * 60 * 1000
 const MIN_INTERVAL = 350
+/** 在线封面 / 头像缓存的容量上限（歌词缓存不参与清理，所以单独算） */
+const CACHE_LIMIT_BYTES = 128 * 1024 * 1024
 
 function hashKey (...parts) {
   return crypto.createHash('sha1').update(parts.join('\u0000')).digest('hex').slice(0, 24)
@@ -161,7 +164,7 @@ function createOnlineService (ctx) {
     try {
       const dir = path.join(cacheRoot, folder)
       await fsp.mkdir(dir, { recursive: true })
-      await fsp.writeFile(path.join(dir, `${key}.json`), JSON.stringify(value), 'utf8')
+      await writeFileAtomic(path.join(dir, `${key}.json`), JSON.stringify(value), { fs: fsp })
     } catch (err) {
       console.warn('[online] 缓存写入失败:', err.message)
     }
@@ -172,9 +175,9 @@ function createOnlineService (ctx) {
       const dir = path.join(cacheRoot, folder)
       await fsp.mkdir(dir, { recursive: true })
       const file = `${key}.bin`
-      await fsp.writeFile(path.join(dir, file), buffer)
-      await fsp.writeFile(path.join(dir, `${key}.json`),
-        JSON.stringify({ file, mime, at: Date.now() }), 'utf8')
+      await writeFileAtomic(path.join(dir, file), buffer, { fs: fsp })
+      await writeFileAtomic(path.join(dir, `${key}.json`),
+        JSON.stringify({ file, mime, at: Date.now() }), { fs: fsp })
     } catch (err) {
       console.warn('[online] 封面缓存写入失败:', err.message)
     }
@@ -472,6 +475,115 @@ function createOnlineService (ctx) {
     }
   }
 
+  /* ---------------- 磁盘缓存：统计与容量清理 ---------------- */
+
+  /** 最近一次清理结果（dry-run 与真清理都记；设置页要显示"最近清理结果"） */
+  let lastPrune = null
+
+  /**
+   * 扫一遍 online-cache。
+   *
+   * 只把封面 / 艺人头像目录里的 .bin/.json 当成"可清理的条目"；
+   * lyrics 目录只计入总数（展示用），绝不进入清理计划。
+   */
+  async function scanCache () {
+    const result = { files: 0, bytes: 0, coverFiles: 0, coverBytes: 0, entries: [] }
+    let folders = []
+    try {
+      folders = await fsp.readdir(cacheRoot, { withFileTypes: true })
+    } catch {
+      return result
+    }
+    for (const folder of folders) {
+      if (!folder.isDirectory()) continue
+      let files = []
+      try {
+        files = await fsp.readdir(path.join(cacheRoot, folder.name), { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const entry of files) {
+        if (!entry.isFile()) continue
+        let stat
+        try {
+          stat = await fsp.stat(path.join(cacheRoot, folder.name, entry.name))
+        } catch {
+          continue
+        }
+        result.files++
+        result.bytes += stat.size
+        if (!isCoverFolder(folder.name) || !isCoverFile(entry.name)) continue
+        result.coverFiles++
+        result.coverBytes += stat.size
+        result.entries.push({
+          folder: folder.name,
+          name: entry.name,
+          size: stat.size,
+          at: stat.atimeMs || stat.mtimeMs
+        })
+      }
+    }
+    return result
+  }
+
+  /**
+   * 封面 / 头像缓存的容量清理。**默认 dry-run**，只返回计划；
+   * 传 { dryRun: false } 才真的删，且只删计划里的封面缓存（.bin + 配套 .json）。
+   */
+  async function pruneCache ({ dryRun = true, maxBytes = CACHE_LIMIT_BYTES } = {}) {
+    const scan = await scanCache()
+    const plan = planPrune({ entries: scan.entries, maxBytes })
+    const applied = await applyPlan(cacheRoot, plan, { fs: fsp, dryRun })
+    lastPrune = {
+      at: Date.now(),
+      dryRun,
+      candidates: plan.remove.length,
+      removed: applied.deleted.length,
+      bytesPlanned: plan.remove.reduce((sum, item) => sum + (Number(item.size) || 0), 0),
+      bytesFreed: applied.bytesFreed,
+      bytesAfter: plan.bytesAfter,
+      failed: applied.failed.length,
+      limit: plan.limit
+    }
+    return {
+      dryRun,
+      total: scan.entries.length,
+      bytesBefore: plan.bytesBefore,
+      bytesAfter: plan.bytesAfter,
+      limit: plan.limit,
+      remove: plan.remove,
+      keep: plan.keep.length,
+      untouched: plan.untouched.length,
+      deleted: applied.deleted,
+      failed: applied.failed,
+      bytesFreed: applied.bytesFreed,
+      lastPrune
+    }
+  }
+
+  /*
+   * 启动 3 分钟后做一次有上限的在线缓存清理（默认 128MB）。
+   * 只清封面/头像，歌词缓存与用户文件一个都不碰；正常库远低于上限，通常什么都不删。
+   * 放在 3 分钟后，避开首屏与在线补全自己的请求。
+   */
+  var autoPruneScheduled = false
+  function scheduleAutoPrune () {
+    if (autoPruneScheduled) return
+    autoPruneScheduled = true
+    const timer = setTimeout(() => {
+      pruneCache({ dryRun: false })
+        .then((result) => {
+          if (result.deleted.length) {
+            console.log(`[online] 缓存清理：删除 ${result.deleted.length} 个文件（释放 ${Math.round(result.bytesFreed / 1024)}KB），当前 ${Math.round(result.bytesAfter / 1024)}KB`)
+          }
+        })
+        .catch((error) => console.warn('[online] 缓存清理失败（不影响使用）:', error.message))
+    }, 180000)
+    if (timer.unref) timer.unref()
+    if (typeof ctx.onCleanup === 'function') ctx.onCleanup(() => clearTimeout(timer))
+  }
+  scheduleAutoPrune()
+
   /* ---------------- 维护接口 ---------------- */
 
   async function clearCache () {
@@ -484,28 +596,21 @@ function createOnlineService (ctx) {
   }
 
   async function getStats () {
-    const result = { cacheRoot, ...stats, size: 0, files: 0, enabled: enabled('lyrics') || enabled('covers') }
-    try {
-      const walk = async (dir) => {
-        const entries = await fsp.readdir(dir, { withFileTypes: true })
-        for (const entry of entries) {
-          const full = path.join(dir, entry.name)
-          if (entry.isDirectory()) await walk(full)
-          else {
-            const stat = await fsp.stat(full)
-            result.size += stat.size
-            result.files++
-          }
-        }
-      }
-      await walk(cacheRoot)
-    } catch {
-      // 缓存目录还没建
+    const scan = await scanCache()
+    return {
+      cacheRoot,
+      ...stats,
+      size: scan.bytes,
+      files: scan.files,
+      coverFiles: scan.coverFiles,
+      coverBytes: scan.coverBytes,
+      limit: CACHE_LIMIT_BYTES,
+      lastPrune,
+      enabled: enabled('lyrics') || enabled('covers')
     }
-    return result
   }
 
-  return { fetchLyrics, fetchArtist, fetchCover, clearCache, getStats }
+  return { fetchLyrics, fetchArtist, fetchCover, clearCache, getStats, pruneCache }
 }
 
 module.exports = { createOnlineService }

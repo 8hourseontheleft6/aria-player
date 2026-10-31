@@ -161,6 +161,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 缓存统计下面那行小字（上限 / 最近一次清理结果）：只做信息，不抢主数值的层级 */
+.settings__row-note {
+  font-size: var(--text-caption);
+  color: var(--label-4);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 /* 顶部分区导航（跳转到设置里的一大块） */
 .settings-nav {
   display: flex;
