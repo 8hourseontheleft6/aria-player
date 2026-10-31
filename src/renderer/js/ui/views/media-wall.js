@@ -1768,7 +1768,25 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
       // 但这里问的是「看不看得见」，所以临时摘掉这个类，测完恢复
       const wasPanning = viewport.classList.contains('is-panning')
       if (wasPanning) viewport.classList.remove('is-panning')
-      const result = { tile: 0, empty: 0, culled: 0, other: 0, samples: [] }
+      /*
+       * 某个屏幕点是否落在「平面上真实存在格子」的位置。
+       *
+       * 平面最后一行/最后一列不一定填满（457 张 ÷ 29 列），格子之间还有 3px 缝 ——
+       * 这些位置本来就该是背景色，命中不到格子不算失败。之前把它们算进命中率，
+       * 于是同一份实现会因为窗口宽 1px、采样点正好压到最后一行的空位而忽红忽绿。
+       */
+      const coveredByCell = (x, y) => {
+        const planeX = x - box.left - pan.x
+        const planeY = y - box.top - pan.y
+        for (const cell of cells) {
+          const left = PAD + cell.col * slotPitch
+          const top = PAD + cell.row * slotPitch
+          const size = cell.span * tileSize + (cell.span - 1) * GAP
+          if (planeX >= left && planeX <= left + size && planeY >= top && planeY <= top + size) return true
+        }
+        return false
+      }
+      const result = { tile: 0, empty: 0, culled: 0, other: 0, outside: 0, samples: [] }
       for (let i = 1; i <= columns; i++) {
         for (let j = 1; j <= rows; j++) {
           const x = Math.round(box.left + (box.width * i) / (columns + 1))
@@ -1780,10 +1798,10 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
             result.tile++
             if (tile.classList.contains('is-culled')) result.culled++
           } else if (node === viewport || node === grid) {
+            if (!coveredByCell(x, y)) { result.outside++; continue }
             result.empty++
             if (result.samples.length < 3) {
-              // 这个点上几何上到底有没有格子、它可见吗
-              // （采样点可能正好落在 3px 的格子缝里，那属于正常情况）
+              // 这个点上几何上确实有格子却没命中 —— 这才是真失败
               const covering = slots.filter((slot) => {
                 const rect = slot.node.getBoundingClientRect()
                 return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
@@ -1793,7 +1811,7 @@ export function createMediaWall ({ store, bus, player, actions, lazy, artwork, i
                 `，该点上有 ${covering.length} 个格子` +
                 (covering.length
                   ? `（第 ${covering[0].row} 行第 ${covering[0].column} 列，visibility=${getComputedStyle(covering[0].node).visibility}）`
-                  : '（落在格子缝或平面边缘，正常）')
+                  : '（格子没挂上？）')
               )
             }
           } else {

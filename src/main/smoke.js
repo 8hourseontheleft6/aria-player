@@ -1264,6 +1264,21 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       hasLyricsButton: false
     }
 
+    /*
+     * 「翻译目标语言」只在有 AI 字幕能力时渲染（本体没有 remote.aiSubtitles），
+     * 所以这条只能在 player 套件里查：行必须存在，且控件是真实可见的 .pill-select，
+     * 不是 createPillSelect(...) 对象被 h() 串成的 [object Object]。
+     */
+    const titleOf = (node) => (node.querySelector(".settings__row-title > span") || {}).textContent || ""
+    const translateRow = rows.find((node) => titleOf(node).includes("翻译目标语言"))
+    const translatePill = translateRow ? translateRow.querySelector(".pill-select") : null
+    const translateRect = translatePill ? translatePill.getBoundingClientRect() : null
+    out.translatePillVisible = Boolean(translatePill && translateRect.width > 0 && translateRect.height > 0 &&
+      translatePill.getClientRects().length > 0)
+    out.translateValue = translatePill ? translatePill.textContent.trim() : ""
+    out.settingsRowCount = rows.length
+    out.objectLeak = ((document.querySelector(".settings") || {}).innerText || "").includes("[object Object]")
+
     /* 打开开关 → 歌词页空状态应出现 AI 入口 */
     if (toggle) {
       toggle.click()
@@ -1314,6 +1329,10 @@ async function runPlayerShellSmoke ({ win, ctx, profile, record, raiseInfo }) {
       `诊断：lyrics.status=${aiUi.diagLyricsStatus}、lines=${aiUi.diagLines}、` +
       `空状态动作区=${aiUi.diagEmptyActions}、AI 块=${aiUi.diagAiBlock}、开关=${aiUi.diagEnabledFlag}、API=${aiUi.diagHasApi}、` +
       `空状态文字「${aiUi.diagEmptyText}」`)
+  record('设置页的翻译目标语言是可见下拉，且不出现 [object Object]',
+    aiUi.translatePillVisible === true && aiUi.objectLeak === false && aiUi.settingsRowCount > 20,
+    `设置页 ${aiUi.settingsRowCount} 行；翻译目标语言下拉可见=${aiUi.translatePillVisible}` +
+    `（当前「${aiUi.translateValue}」）；正文含 [object Object]=${aiUi.objectLeak}`)
 
   /*
    * 用户报的 bug：AI 识别「完成」了，但歌词页还是「未找到歌词」什么也不显示。
@@ -9546,19 +9565,27 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       return { stops, total: wall.tileCount, albums: window.__aria.actions.albums().length, culledAtOrigin: wall.debugState().culled }`)
 
     const hitStops = hitCheck.stops
-    const hitRate = Math.min(...hitStops.map((stop) => stop.hit.tile / stop.hit.total))
+    /*
+     * 分母只算「平面上确实有格子」的采样点：最后一行/最后一列没填满、格子之间 3px 缝
+     * 本来就该是背景色。把它们算进命中率，会让同一种实现因为窗口宽 1px 就忽红忽绿。
+     */
+    const hitRate = Math.min(...hitStops.map((stop) => {
+      const inside = Math.max(1, stop.hit.total - (stop.hit.outside || 0))
+      return stop.hit.tile / inside
+    }))
     const hitCulled = hitStops.reduce((sum, stop) => sum + stop.hit.culled, 0)
     const hitDrift = Math.max(...hitStops.map((stop) => stop.slotDrift))
     /*
-     * 阈值 0.75 而不是 1：格子之间有 3px 缝，采样点落在缝里（或平面边缘）是正常的，
-     * 24 个点里偶尔差一两个命中不代表画面有问题。
-     * 而真正出问题时的量级完全不同 —— 被裁掉那一版实测命中率是 0。
+     * 阈值 0.75 而不是 1：格子有圆角，采样点压在圆角上也可能命中不到；而真出问题
+     * （窗口没补齐/被裁掉）时是成片空白，命中率会掉到 0 附近。
      */
     record('拖到任何位置画面都有内容',
       hitRate >= 0.75 && hitCulled === 0 && hitDrift === 0,
       `${hitStops.length} 个停靠点（含四角）各取 24 个点做命中测试：最差命中率 ${Math.round(hitRate * 100)}%，` +
       `命中的格子里有 ${hitCulled} 个是隐藏的（应为 0），行列缓存错位 ${hitDrift} 个（应为 0）；` +
-      `各点命中 ${hitStops.map((stop) => stop.hit.tile).join('/')}，各点挂载 ${hitStops.map((stop) => stop.mounted).join('/')} 格` +
+      `各点命中 ${hitStops.map((stop) => stop.hit.tile).join('/')}，` +
+      `各点落在平面空位/格缝的点 ${hitStops.map((stop) => stop.hit.outside || 0).join('/')}，` +
+      `各点挂载 ${hitStops.map((stop) => stop.mounted).join('/')} 格` +
       `${hitStops.some((stop) => stop.hit.samples.length) ? `；未命中的例子 ${hitStops.find((stop) => stop.hit.samples.length).hit.samples.join('；')}` : ''}`)
     /*
      * 平面尺寸与舞台：窗口化之后"网格内容范围"已经没有意义（舞台只有一屏），
@@ -10192,6 +10219,93 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `输入「封面缓存」→ 命中分组 ${groupSearchCheck.groups} 个、行 ${groupSearchCheck.rows} 行、计数「${groupSearchCheck.count}」；` +
       `清空后残留高亮 ${groupSearchCheck.cleared} 处（应为 0）`)
 
+    /*
+     * 设置页控件回归：`createPillSelect()` 返回的是 { element, ... } 对象，
+     * 直接塞进 row.control 会被 h() 当成字符串 → 页面上出现 [object Object]。
+     * 这里一次盯三件事：正文里不许有那串、音量归一化是能切档的真下拉、
+     * 翻译目标语言也是可见的真下拉。
+     */
+    const settingsPillCheck = await evaluate(win, `
+      const settle = async (ms = 250) => { await new Promise((r) => setTimeout(r, ms)) }
+      const { actions, store } = window.__aria
+      actions.setView('settings')
+      await settle(900)
+
+      /* 行的标题是「<span>标题</span> + ⓘ 图标（textContent 里带一个 i）」，只能读 span */
+      const titleOf = (row) => (row.querySelector('.settings__row-title > span') || {}).textContent || ''
+      /* 用 includes 而不是全等：标题可能带后缀（例如「（ReplayGain）」），语义不变 */
+      const rowByTitle = (needle) => [...document.querySelectorAll('.settings__row')]
+        .find((node) => titleOf(node).includes(needle)) || null
+      const pillOf = (title) => {
+        const row = rowByTitle(title)
+        if (!row) return null
+        row.scrollIntoView({ block: 'center' })
+        const pill = row.querySelector('.pill-select')
+        if (!pill) return null
+        const rect = pill.getBoundingClientRect()
+        return {
+          text: pill.textContent.trim(),
+          visible: rect.width > 0 && rect.height > 0 && pill.getClientRects().length > 0 &&
+            rect.top < window.innerHeight && rect.bottom > 0,
+          inRow: true
+        }
+      }
+      const before = store.get().settings.replayGain || 'off'
+      const replayInitial = pillOf('音量归一化')
+
+      const pick = async (label) => {
+        const row = rowByTitle('音量归一化')
+        row?.scrollIntoView({ block: 'center' })
+        row?.querySelector('.pill-select')?.click()
+        await settle(300)
+        const option = [...document.querySelectorAll('.popover .pill-menu .pill')]
+          .find((node) => node.textContent.trim() === label)
+        option?.click()
+        await settle(350)
+        return { label, exists: Boolean(option), value: store.get().settings.replayGain || 'off' }
+      }
+      const toTrack = await pick('单曲')
+      const toAlbum = await pick('专辑')
+      const toOff = await pick('关')
+      // 还原进入这条检查前的值，避免影响后面的 ReplayGain 检查
+      const labels = { off: '关', track: '单曲', album: '专辑' }
+      const restored = before === 'off' ? null : await pick(labels[before] || '关')
+
+      const bodyText = document.querySelector('.settings')?.innerText || ''
+      return {
+        bodyText,
+        titles: [...document.querySelectorAll('.settings__row-title > span')].map((node) => node.textContent),
+        targetTitles: [...document.querySelectorAll('.settings__row-title > span')]
+          .map((node) => node.textContent)
+          .filter((text) => /翻译|目标|音量|归一/.test(text)),
+        rowCount: document.querySelectorAll('.settings__row').length,
+        before,
+        restored,
+        replayInitial,
+        toTrack,
+        toAlbum,
+        toOff
+      }
+    `)
+    const settingsText = settingsPillCheck.bodyText || ''
+    const leakIndex = settingsText.indexOf('[object Object]')
+    const hasReplayTitle = (settingsPillCheck.titles || []).some((text) => text.includes('音量归一化'))
+    record('设置页正文不出现 [object Object]',
+      leakIndex === -1 && (settingsPillCheck.titles || []).length > 15 && hasReplayTitle,
+      leakIndex === -1
+        ? `设置页正文 ${settingsText.length} 字符、${settingsPillCheck.rowCount} 行（${(settingsPillCheck.titles || []).length} 个标题），没有出现 [object Object]；` +
+          `音量归一化行=${hasReplayTitle}；相关标题 ${JSON.stringify(settingsPillCheck.targetTitles)}`
+        : `出现在第 ${leakIndex} 个字符附近：「${settingsText.slice(Math.max(0, leakIndex - 40), leakIndex + 30)}」`)
+    record('音量归一化是真实下拉，且能切 off / track / album',
+      Boolean(settingsPillCheck.replayInitial?.visible) &&
+      settingsPillCheck.toTrack.exists && settingsPillCheck.toTrack.value === 'track' &&
+      settingsPillCheck.toAlbum.exists && settingsPillCheck.toAlbum.value === 'album' &&
+      settingsPillCheck.toOff.exists && settingsPillCheck.toOff.value === 'off' &&
+      (settingsPillCheck.before === 'off' || settingsPillCheck.restored?.value === settingsPillCheck.before),
+      `行内 .pill-select=${settingsPillCheck.replayInitial?.visible}（当前「${settingsPillCheck.replayInitial?.text}」）；` +
+      `点「单曲」→ ${settingsPillCheck.toTrack.value}、点「专辑」→ ${settingsPillCheck.toAlbum.value}、点「关」→ ${settingsPillCheck.toOff.value}；` +
+      `检查前=${settingsPillCheck.before}，已还原=${settingsPillCheck.restored ? settingsPillCheck.restored.value : '（本来就是 off）'}`)
+
     /* 封面 / 在线缓存：占用、上限、最近清理结果与"先检查再确认"两颗按钮都在设置页 */
     const cacheUiCheck = await evaluate(win, `
       const settle = async (ms = 300) => { await new Promise((r) => setTimeout(r, ms)) }
@@ -10201,9 +10315,19 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       const nav = [...document.querySelectorAll('.settings-nav__item')].find((item) => item.textContent === '在线与扩展')
       nav?.click()
       await settle(800)
+      const buttonByText = (text) => [...document.querySelectorAll('.settings button')]
+        .filter((node) => node.textContent.trim() === text)
+      /* 「确认清理」在检查之前必须是隐藏的（.btn 的 display 会盖掉 [hidden]，所以看 hidden 属性） */
+      const confirmHiddenBefore = buttonByText('确认清理').length >= 2 &&
+        buttonByText('确认清理').every((node) => node.hidden)
+      const notesBeforeClick = [...document.querySelectorAll('.settings__row-note')].map((node) => node.textContent)
+      buttonByText('检查可清理')[0]?.click()
+      await settle(900)
       return {
         values: [...document.querySelectorAll('.settings__row-value')].map((node) => node.textContent),
-        notes: [...document.querySelectorAll('.settings__row-note')].map((node) => node.textContent),
+        notes: notesBeforeClick,
+        notesAfterCheck: [...document.querySelectorAll('.settings__row-note')].map((node) => node.textContent),
+        confirmHiddenBefore,
         buttons: [...document.querySelectorAll('.settings button')].map((node) => node.textContent.trim())
       }
     `)
@@ -10215,6 +10339,10 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       cacheUiCheck.buttons.includes('检查可清理') && cacheUiCheck.buttons.includes('确认清理'),
       `数值：${cacheUiCheck.values.join(' | ')}；说明：${cacheUiCheck.notes.join(' | ')}；` +
       `按钮含「检查可清理」=${cacheUiCheck.buttons.includes('检查可清理')}、「确认清理」=${cacheUiCheck.buttons.includes('确认清理')}`)
+    record('缓存清理先检查后确认（dry-run），不点检查时“确认清理”是隐藏的',
+      cacheUiCheck.confirmHiddenBefore === true &&
+      cacheUiCheck.notesAfterCheck.some((text) => text.includes('本次检查')),
+      `检查前「确认清理」隐藏=${cacheUiCheck.confirmHiddenBefore}；点「检查可清理」后：${cacheUiCheck.notesAfterCheck.join(' | ')}`)
 
     /* 说明文字也要能搜到（它存在 ⓘ 的 aria-label 里，不在行的 textContent 里） */
     const tipSearchCheck = await evaluate(win, `

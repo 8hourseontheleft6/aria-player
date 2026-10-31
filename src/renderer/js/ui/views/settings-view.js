@@ -848,7 +848,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
           value: settings.replayGain || 'off',
           title: '音量归一化',
           onPick: (value) => actions.setReplayGain(value)
-        })
+        }).element
       }),
       row({
         title: '当前曲目的增益',
@@ -1195,6 +1195,32 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
     }
     refreshOnlineCache()
 
+    /*
+     * 「确认清理」默认隐藏：先点「检查可清理」看过计划（dry-run）之后才出现。
+     * 在线缓存与封面缓存是同一套两步语义，用户不会一不小心就删了东西。
+     */
+    const onlineConfirmButton = h('button', {
+      class: 'btn btn--sm btn--destructive',
+      type: 'button',
+      hidden: true,
+      onClick: async () => {
+        const result = await remote.online.pruneCache({ dryRun: false }).catch(() => null)
+        if (!result) {
+          toast({ message: '清理失败：主进程没有响应', type: 'error' })
+          return
+        }
+        const deleted = result.deleted?.length || 0
+        toast({
+          message: deleted
+            ? `已清理 ${deleted} 个在线封面缓存 · 释放 ${formatBytes(result.bytesFreed || 0)}`
+            : '没有需要清理的项',
+          type: 'success'
+        })
+        onlineConfirmButton.hidden = true
+        await refreshOnlineCache()
+      }
+    }, '确认清理')
+
     const artworkCacheLabel = h('span', { class: 'settings__row-value', text: '—' })
     const artworkPruneNote = h('span', { class: 'settings__row-note', text: '' })
 
@@ -1400,30 +1426,13 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
                   return
                 }
                 const count = plan.remove?.length || 0
+                onlineConfirmButton.hidden = count === 0
                 onlinePruneNote.textContent = count
                   ? `本次检查：可清理 ${count} 个 · 可释放 ${formatBytes((plan.bytesBefore || 0) - (plan.bytesAfter || 0))}（尚未删除）`
                   : `本次检查：没有可清理的项（封面缓存 ${plan.total ?? 0} 个文件）`
               }
             }, '检查可清理'),
-            h('button', {
-              class: 'btn btn--sm btn--destructive',
-              type: 'button',
-              onClick: async () => {
-                const result = await remote.online.pruneCache({ dryRun: false }).catch(() => null)
-                if (!result) {
-                  toast({ message: '清理失败：主进程没有响应', type: 'error' })
-                  return
-                }
-                const deleted = result.deleted?.length || 0
-                toast({
-                  message: deleted
-                    ? `已清理 ${deleted} 个在线封面缓存 · 释放 ${formatBytes(result.bytesFreed || 0)}`
-                    : '没有需要清理的项',
-                  type: 'success'
-                })
-                await refreshOnlineCache()
-              }
-            }, '确认清理'),
+            onlineConfirmButton,
             h('button', {
               class: 'btn btn--sm btn--destructive',
               type: 'button',
@@ -1938,7 +1947,7 @@ export function createSettingsView ({ store, bus, player, actions, host }) {
             value: exportKeepKey ? 'yes' : 'no',
             title: '导出时是否包含密钥',
             onPick: (value) => { exportKeepKey = value === 'yes' }
-          }),
+          }).element,
           h('button', {
             class: 'btn btn--sm',
             type: 'button',

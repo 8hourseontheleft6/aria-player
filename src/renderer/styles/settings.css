@@ -169,6 +169,14 @@
   text-align: right;
 }
 
+/*
+ * hidden 必须真的隐藏：.btn 自带 display，会盖过 UA 的 [hidden] 规则 ——
+ * 「确认清理」在还没检查时也会显示，原因就是它（与歌词页「取消」同一个坑）。
+ */
+.settings .btn[hidden] {
+  display: none !important;
+}
+
 /* 顶部分区导航（跳转到设置里的一大块） */
 .settings-nav {
   display: flex;
