@@ -380,20 +380,6 @@
 
 /* ------------------------------ 媒体墙 ------------------------------ */
 
-/**
- * 媒体墙的平面。
- *
- * 平移作用在这个元素上（transform），它本身是「整面墙」那么大（4684×2415 CSS px
- * ≈ 8200×4200 设备像素）。直接平移一块这么大的平面，浏览器每帧要为它重新栅格化，
- * 实测只有 9fps —— 但如果把它的盒子裁成视口大小，裁剪域会跟着 transform 一起移动，
- * 于是只有左上角那一屏能看见，拖到别处整片空白（真的这么错过一次）。
- *
- * 所以这一版换了个思路：**不裁剪，改成让屏幕外的格子不参与绘制**。
- * 每个格子上加 .is-culled（visibility: hidden）——
- *   · 与 display:none 不同，它不影响布局，网格不会重排；
- *   · 又和裁剪一样省掉绘制，绘制量只跟可见的那一片有关。
- * 可见范围的判定用「格子行列 + 当前位移」直接算，不读 DOM。
- */
 .wall-viewport {
   flex: 1;
   min-height: 0;
@@ -419,35 +405,24 @@
   -webkit-backdrop-filter: none;
 }
 
+/**
+ * 媒体墙的舞台。
+ *
+ * 它**只有视口那么大**，而且**永远不动** —— 平移由每个格子自己的 transform 完成。
+ * 为什么不再平移整面平面：平面是 4382×3325 CSS px（设备 7669×5819），
+ * 之前把 translate3d 打在它上面，浏览器每帧都会把这整块重新栅格化：
+ * 实测 68–73ms/帧，而 JS 只有 0.01ms；把裁剪与绘制限制到一屏后立刻回到 8.4ms。
+ *
+ * 所以这里：
+ *   · 舞台固定为视口尺寸（inset: 0）；
+ *   · contain: strict + overflow: hidden 把绘制范围钉死在一屏；
+ *   · 逻辑坐标（平面尺寸、行列、minimap、命中测试）仍由几何数据算，与 DOM 盒子解耦。
+ */
 .media-wall {
   position: absolute;
-  left: 0;
-  top: 0;
-  display: grid;
-  grid-template-columns: repeat(var(--wall-columns, 6), var(--wall-size, 148px));
-  /*
-   * dense：跨格瓦片（2×2 / 2×1 / 1×2）后面本来会留下填不满的空洞 ——
-   * 用户反馈「切换歌曲、改布局时会出现空白格子」就是这个。
-   * dense 会让后面的小瓦片回填这些洞，墙面才连成一片（代价是瓦片顺序略有重排）。
-   */
-  grid-auto-flow: dense;
-  /*
-   * 行尺寸必须显式给：网格有确定高度时，auto 行会被压缩去填满容器 ——
-   * 实测 17 行各被压成 32px，普通格子靠 aspect-ratio 仍高 148px 于是逐行重叠，
-   * 聚焦块（跨 2 行、aspect-ratio:auto）高度塌成 67px，封面被裁成一条。
-   */
-  grid-auto-rows: var(--wall-size, 148px);
-  align-content: start;
-  justify-content: start;
-  gap: 3px;
-  padding: 3px;
-  width: max-content;
-  will-change: transform;
-}
-
-/* 屏幕外的格子：保留布局，但不参与绘制（这是拖动帧率的关键） */
-.wall-tile.is-culled {
-  visibility: hidden;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
 }
 
 /* 右下角位置指示器：内容比视口大时才显示 */
@@ -484,18 +459,29 @@
 }
 
 .wall-tile {
-  position: relative;
-  aspect-ratio: 1 / 1;
+  position: absolute;
+  left: 0;
+  top: 0;
+  /*
+   * 位置由 JS 写成 transform: translate3d(平面坐标 + pan)。
+   * 宽高也由 JS 按行列跨度写死（1×1 / 2×2），所以不再用 aspect-ratio 撑高。
+   *
+   * will-change 是**为了把"移动"留在合成器上**：一个格子一个层（40–80 个很小的层），
+   * 平移时只改 transform，不触发重绘；舞台本身不动，绘制范围永远是一屏。
+   * 之前恰好相反：整面墙一层、每帧整块重新栅格化（68ms/帧）。
+   */
+  will-change: transform;
   overflow: hidden;
   border-radius: var(--radius-2xs);
   background: var(--fill-quaternary);
   cursor: default;
-  transition: box-shadow var(--dur) var(--ease-ios);
-  /*
-   * 只留 layout 隔离（实测 12.1ms/帧 → 10.9ms/帧）。
-   * 不能用 contain:paint：格子本身已经有 overflow:hidden 负责裁剪，
-   * 再加一层绘制隔离只会让每帧多出一层绘制根，拖动时白白变慢。
-   */
+  /* 注意：transform 是定位用的，绝不能参与过渡，否则平移会被动画拖住 */
+  transition:
+    translate var(--dur) var(--ease-ios),
+    scale var(--dur) var(--ease-ios),
+    rotate var(--dur) var(--ease-ios),
+    box-shadow var(--dur) var(--ease-ios),
+    filter var(--dur) var(--ease-ios);
   contain: layout;
 }
 
@@ -504,20 +490,23 @@
   animation: wall-in var(--dur-slow) var(--ease-out) backwards;
 }
 
+/*
+ * 入场动画用独立的 scale 属性，不能写 transform ——
+ * 格子的 transform 是定位（translate3d），两者会互相覆盖，格子会集体闪到左上角。
+ */
 @keyframes wall-in {
   from {
     opacity: 0;
-    transform: scale(0.92);
+    scale: 0.92;
   }
   to {
     opacity: 1;
-    transform: none;
+    scale: 1;
   }
 }
 
-/* FLIP 进行中：交给 transform 动画，别再叠加悬停效果 */
+/* FLIP 进行中：动画走 translate/scale 独立属性，与定位用的 transform 叠加 */
 .wall-tile.is-flipping {
-  will-change: transform;
   z-index: 1;
 }
 
@@ -565,24 +554,24 @@
  * 悬停：整块明显抬起（用户希望更夸张一点）。
  * 位移/放大都比全局的 --lift 更大，缓动拉长到 --dur 让「抬起」这个过程看得见；
  * 阴影用 elev-3 才有离开墙面的感觉。减少动画时下面那条规则会把这些静态位移全部关掉。
+ *
+ * 用独立的 translate/scale/rotate：格子的 transform 是"平面定位"，被悬停覆盖掉的话
+ * 一格就会跳回舞台左上角。独立属性会与 transform 叠加，正好各管各的。
  */
-.wall-tile {
-  transition:
-    transform var(--dur) var(--ease-ios),
-    box-shadow var(--dur) var(--ease-ios),
-    filter var(--dur) var(--ease-ios);
-}
-
 .wall-tile:hover {
-  transform: translateY(-7px) scale(1.055) rotate(-0.4deg);
+  translate: 0 -7px;
+  scale: 1.055;
+  rotate: -0.4deg;
   box-shadow: var(--elev-3);
   filter: saturate(1.06) brightness(1.04);
   z-index: 2;
 }
 
-/* 减少动画时静态位移与阴影要显式关掉：只把时长归零是挡不住 transform 的 */
+/* 减少动画时静态位移与阴影要显式关掉：只把时长归零是挡不住的 */
 html[data-reduce-motion="true"] .wall-tile:hover {
-  transform: none;
+  translate: none;
+  scale: none;
+  rotate: none;
   box-shadow: none;
 }
 
@@ -662,19 +651,16 @@ html[data-reduce-motion="true"] .wall-tile:hover {
 /**
  * 尺寸花样：只有偶发的 2×2（见 media-wall.js 的 createTile）。
  * 2 列 × 2 行，仍是正方形、封面照样铺满，和「正在播放那张」同一种形状。
- * aspect-ratio: auto 是必须的：否则高度按「宽 = 高」算，撑不下自己那两行。
- * 声明在 .is-featured 之前，所以正在播放那张永远覆盖成 2×2。
+ * 宽高由 JS 按「跨度 × 格子 + (跨度-1) × 间距」写死（窗口化后不再依赖网格自动流），
+ * 这里的 class 只负责视觉；声明在 .is-featured 之前，正在播放那张仍覆盖成 2×2。
  */
-.wall-tile.is-big { grid-column: span 2; grid-row: span 2; aspect-ratio: auto; }
+.wall-tile.is-big { border-radius: var(--radius-sm); }
 
 /**
  * 正在播放的那张专辑：就在原地放大成 2×2，后面的格子顺延让路。
  * （早先是 order:-1 固定排到首位，平移到别处再播放时会「跳」到左上角，很难受。）
  */
 .wall-tile.is-featured {
-  grid-column: span 2;
-  grid-row: span 2;
-  aspect-ratio: auto;
   border-radius: var(--radius-lg);
   overflow: hidden;
   z-index: 2;
@@ -914,11 +900,14 @@ html[data-reduce-motion="true"] .wall-tile:hover {
   color: rgba(255, 255, 255, 0.42);
 }
 
-/* 窗口太窄时聚焦块退回单列，避免撑破网格 */
+/*
+ * 窗口太窄时聚焦块退回单列高度。尺寸仍然由 JS 写（2 列 × 2 行 =
+ * 2*格子+间距，窄窗时格子本身会变小），这里只是把圆角收回一点，
+ * 避免小屏上 2×2 显得过圆。
+ */
 @media (max-width: 620px) {
   .wall-tile.is-featured {
-    grid-column: span 1;
-    grid-row: span 3;
+    border-radius: var(--radius-sm);
   }
 }
 

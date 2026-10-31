@@ -174,6 +174,19 @@ export function createLazyArtwork (artwork, { root = null, rootMargin = '320px',
       if (!suspended) observer.observe(node)
     },
 
+    /**
+     * 忘掉一个节点（媒体墙窗口化时，格子被卸载就要停止观察）。
+     *
+     * 不摘的话 pending 会一直留着已脱离文档的节点：scan() 每次都要遍历它们，
+     * IntersectionObserver 也还挂着几百个再也看不见的目标 —— 正是窗口化要省掉的那部分。
+     */
+    forget (node) {
+      if (!node) return
+      pending.delete(node)
+      observer.unobserve(node)
+      wanted.delete(node)
+    },
+
     /** 拖动期间暂停观察与加载，省掉每帧的相交性重算 */
     suspend () {
       if (suspended) return

@@ -1,4 +1,4 @@
-﻿'use strict'
+'use strict'
 
 /**
  * 自检（smoke test）：在真实 Electron 环境里跑一遍完整链路。
@@ -4885,8 +4885,8 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       const { actions, player, views, prewarmer, store } = window.__aria
       actions.setView('wall')
       await new Promise((r) => setTimeout(r, 1500))
-      // 等到墙真的建出来为止（正常情况下重建只要 ~100ms）
-      for (let i = 0; i < 40 && views.mediaWall.tileCount < 100; i++) {
+      // 等到墙真的建出来为止（窗口化后"建好"= 挂上视口附近那几十格）
+      for (let i = 0; i < 40 && views.mediaWall.tileCount < 24; i++) {
         await new Promise((r) => setTimeout(r, 200))
       }
       await player.play()
@@ -4895,6 +4895,7 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         wallTiles: views.mediaWall.tileCount,
         wallNodes: document.querySelectorAll('.wall-tile').length,
         nodes: document.getElementsByTagName('*').length,
+        albumTotal: actions.albums().length,
         covers: document.querySelectorAll('img[src^="blob:"]').length,
         prewarmSuspended: prewarmer.state.suspended,
         status: store.get().playback.status,
@@ -4935,6 +4936,7 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         resumes: background.state.resumes,
         prewarmSuspended: prewarmer.state.suspended,
         wallTiles: views.mediaWall.tileCount,
+        albumTotal: actions.albums().length,
         wallNodes: document.querySelectorAll('.wall-tile').length,
         status: store.get().playback.status
       }
@@ -4948,17 +4950,24 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
     await sleep(1200)
     const watcherResumed = ctx.get('watcher').getStats().watching
 
+    /*
+     * 窗口化语义：墙上的 DOM 只有"视口附近的那几十格"，所以下面这些阈值
+     * 从"全部 400+ 格"改成"一屏窗口的量"。这不是放宽标准 ——
+     * 同时要求它必须**小于专辑总数**（证明窗口化真的生效，不是偷偷全量挂回来）。
+     */
+    const windowTiles = (value) => value >= 24 && value <= 240
     record('最小化：释放媒体墙与封面缓存（回来能恢复）',
-      releaseBefore.wallTiles > 100 &&
-      releaseBefore.wallNodes > 100 &&
+      windowTiles(releaseBefore.wallTiles) &&
+      releaseBefore.wallTiles < releaseBefore.albumTotal &&
+      releaseBefore.wallNodes >= 24 &&
       releasedState.released === true &&
       releasedState.lastRelease &&
-      releasedState.lastRelease.wallTiles >= 100 &&
+      releasedState.lastRelease.wallTiles >= 24 &&
       releasedState.lastRelease.covers > 0 &&
       releasedState.lastRelease.gc === true &&
       releasedState.wallNodes === 0 &&
-      // 整页节点数要明显掉下来（只掉几十个说明墙又被重建回去了）
-      releaseBefore.nodes - releasedState.nodes > 1000 &&
+      // 整页节点数要明显掉下来（窗口化后墙只占几百个节点，掉 300+ 才算真的释放）
+      releaseBefore.nodes - releasedState.nodes > 300 &&
       releasedState.prewarmSuspended === true &&
       mainRelease &&
       mainRelease.savedKB > 0 &&
@@ -4977,13 +4986,14 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       resumedState.released === false &&
       resumedState.resumes >= 1 &&
       resumedState.prewarmSuspended === false &&
-      resumedState.wallTiles > 100 &&
-      resumedState.wallNodes > 100 &&
+      windowTiles(resumedState.wallTiles) &&
+      resumedState.wallTiles < resumedState.albumTotal &&
+      resumedState.wallNodes >= 24 &&
       resumedState.status === 'playing' &&
       watcherBefore > 0 &&
       watcherPaused === 0 &&
       watcherResumed === watcherBefore,
-      `恢复后：预热挂起=${resumedState.prewarmSuspended}，媒体墙重建 ${resumedState.wallTiles} 个格子 / ${resumedState.wallNodes} 个节点；` +
+      `恢复后：预热挂起=${resumedState.prewarmSuspended}，媒体墙重建 ${resumedState.wallTiles} 个格子（窗口化，专辑共 ${resumedState.albumTotal}）/ ${resumedState.wallNodes} 个节点；` +
       `目录监听 ${watcherBefore} → 停止后 ${watcherPaused} → 恢复后 ${watcherResumed}；播放仍是 ${resumedState.status}`)
 
     /* ---------- 自建播放列表：新建 / 加歌 / 播放 / 移除 / 删除 ---------- */
@@ -7080,7 +7090,7 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       }
     })())
 
-    /* ---------- 媒体墙：行索引与窗口区间（窗口化地基）---------- */
+    /* ---------- 媒体墙：行索引与窗口区间（窗口化挂载）---------- */
     const wallRows = await evaluate(win, `
       const { actions } = window.__aria
       const wall = window.__aria.views.mediaWall
@@ -7088,33 +7098,50 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       await new Promise((r) => setTimeout(r, 1500))
       return { rows: wall.rows(), tiles: wall.tileCount }
     `)
-    record('媒体墙：行索引与窗口区间（窗口化地基）', (() => {
+    record('媒体墙：行索引与窗口区间（窗口化挂载）', (() => {
       const reading = wallRows || {}
       const rows = reading.rows || {}
-      const window = rows.window || [0, 0]
-      const total = rows.total || 0
-      const ok = total > 5 &&
-        window[1] > window[0] &&
-        window[0] >= 0 && window[1] <= total &&
-        reading.tiles === total
-      return { ok, detail: `总行 ${total}，窗口 [${window[0]},${window[1]})，当前挂载 ${reading.tiles} 格（本步仍全量）` }
-    })())
+      const indexes = rows.window || [0, 0]
+      const rowsRange = rows.rowWindow || [0, -1]
+      /*
+       * 窗口化语义：墙上只挂"视口附近的那几十格"，不再是全部专辑。
+       * 这里同时校验 ① 行索引是单调且有效的 ② 行窗口落在这个区间里
+       * ③ 挂载数是真子集（否则说明窗口化根本没生效）。
+       */
+      return rows.totalRows > 5 &&
+        indexes[1] > indexes[0] && indexes[0] >= 0 && indexes[1] <= rows.cells &&
+        rowsRange[0] >= 0 && rowsRange[1] >= rowsRange[0] && rowsRange[1] < rows.totalRows &&
+        reading.tiles > 0 && reading.tiles < rows.cells && reading.tiles === rows.mounted
+    })(), `总行 ${wallRows?.rows?.totalRows}，行窗口 [${wallRows?.rows?.rowWindow?.join(',')}]，` +
+      `下标窗口 [${wallRows?.rows?.window?.join(',')}) / 共 ${wallRows?.rows?.cells} 格，` +
+      `当前挂载 ${wallRows?.tiles} 格（窗口化，不是全量 ${wallRows?.rows?.cells}）`)
 
-    /* ---------- 媒体墙：平面尺寸可由行列算出（几何解耦前提）---------- */
+    /* ---------- 媒体墙：舞台只有一屏、平面尺寸可由行列算出 ---------- */
     const wallPlane = await evaluate(win, `
       const { actions } = window.__aria
       const wall = window.__aria.views.mediaWall
       actions.setView('wall')
       await new Promise((r) => setTimeout(r, 1500))
-      return wall.planeMetrics()
+      return { metrics: wall.planeMetrics(), bounds: wall.debugState().bounds }
     `)
     record('媒体墙：平面尺寸可由行列算出（几何解耦前提）', (() => {
       const reading = wallPlane || {}
-      const dw = Math.abs((reading.width || 0) - (reading.domWidth || 0))
-      const dh = Math.abs((reading.height || 0) - (reading.domHeight || 0))
-      const ok = reading.rows > 0 && dw <= 1 && dh <= 1
-      return { ok, detail: `算术 ${reading.width}×${reading.height}，盒子 ${reading.domWidth}×${reading.domHeight}（差 ${dw}/${dh}px）；${reading.columns} 列 × ${reading.rows} 行` }
-    })())
+      const metrics = reading.metrics || {}
+      const boundsData = reading.bounds || {}
+      /*
+       * 窗口化之后舞台盒子 = 视口（绘制范围永远是一屏），而"平面"只存在于几何数据里。
+       * 所以判据从"算术平面 = DOM 盒子"改成两件更有意义的事：
+       *   ① 舞台盒子与视口一致（证明被平移的层只有一屏）；
+       *   ② 平移边界用的平面尺寸 = 算术平面尺寸（逻辑坐标与 DOM 已解耦）。
+       */
+      const stageMatches = Math.abs(metrics.stageWidth - metrics.viewWidth) <= 1 &&
+        Math.abs(metrics.stageHeight - metrics.viewHeight) <= 1
+      const planeMatches = Math.abs(metrics.width - boundsData.width) <= 1 &&
+        Math.abs(metrics.height - boundsData.height) <= 1
+      return metrics.rows > 0 && stageMatches && planeMatches
+    })(), `算术 ${wallPlane?.metrics?.width}×${wallPlane?.metrics?.height}，` +
+      `舞台 ${wallPlane?.metrics?.stageWidth}×${wallPlane?.metrics?.stageHeight}（视口 ${wallPlane?.metrics?.viewWidth}×${wallPlane?.metrics?.viewHeight}），` +
+      `${wallPlane?.metrics?.columns} 列 × ${wallPlane?.metrics?.rows} 行`)
 
     /* ---------- 媒体墙：离开视图 5 秒后释放 ---------- */
     const wallIdleReading = await evaluate(win, `
@@ -9097,6 +9124,8 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       const featuredOrder = featuredStyle ? featuredStyle.order : null
       /* 读 gridColumnEnd：显式定位与旧写法都得到 span 2，两种实现都能判定 2×2 */
       const featuredColumn = featuredStyle ? featuredStyle.gridColumnEnd : null
+      /* 窗口化后格子是绝对定位，网格属性不再存在；跨度以几何数据（cells）为准 */
+      const featuredSpan = featured ? window.__aria.views.mediaWall.debugState().featuredSpan : null
       const featuredRow = featuredStyle ? featuredStyle.gridRowStart : null
       const featuredRect = featured ? featured.getBoundingClientRect() : null
       const hero = featured?.querySelector('.wall-tile__hero')
@@ -9165,7 +9194,7 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         flippingRightAfter, flippingAfter, animated, settleMs,
         hasFeatured: Boolean(featured),
         featuredKey, currentAlbumKey,
-        featuredOrder, featuredColumn, featuredRow,
+        featuredOrder, featuredColumn, featuredRow, featuredSpan,
         featuredRectFromOrigin: featuredRect && gridRect0
           ? { left: Math.round(featuredRect.left - gridRect0.left), top: Math.round(featuredRect.top - gridRect0.top) }
           : null,
@@ -9185,8 +9214,9 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       `格子 ${wallView.sizeBefore}→${wallView.sizeAfter}，列数 ${wallView.columnsBefore}→${wallView.columnsAfter}`)
     record('媒体墙聚焦块',
       wallView.hasFeatured && wallView.featuredKey === wallView.currentAlbumKey &&
-      wallView.featuredColumn === 'span 2' && wallView.featuredOrder === '0',
-      `聚焦块跨列 ${wallView.featuredColumn}、order=${wallView.featuredOrder}（不再被强制排到首位），距平面原点 ${JSON.stringify(wallView.featuredRectFromOrigin)}`)
+      wallView.featuredSpan === 2 && wallView.featuredOrder === '0',
+      `聚焦块的几何跨度 ${wallView.featuredSpan}×2（窗口化后按 cells 数据判定；网格属性 gridColumnEnd=${wallView.featuredColumn} 已不参与布局）、` +
+      `order=${wallView.featuredOrder}（不再被强制排到首位），距平面原点 ${JSON.stringify(wallView.featuredRectFromOrigin)}`)
     record('聚焦块内容',
       wallView.heroTitle.length > 0 && wallView.heroControls === 3 && wallView.hasExpandButton &&
       wallView.heroLines > 0 && wallView.heroActive === 1,
@@ -9223,7 +9253,15 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         const rect = node.getBoundingClientRect()
         return { w: Math.round(rect.width), h: Math.round(rect.height), top: Math.round(rect.top), left: Math.round(rect.left) }
       }
-      const normal = tiles.filter((tile) => !tile.classList.contains('is-featured')).slice(0, 60)
+      /*
+       * normal 里既有 1×1 也有偶发 2×2（.is-big）。正方形与"封面铺满"对两者都成立，
+       * 但"标称尺寸"只对 1×1 有意义 —— 所以 normalBox 必须从 singles 里取：
+       * 窗口化之后 DOM 顺序由挂载窗口决定，第一个挂上的可能就是 2×2。
+       * 另外**排除鼠标正悬停的那一格**：悬停会把封面放大到 1.16 并旋转 -0.4deg，
+       * 那是动画中间态，不属于"静止几何"（这条检查的本意就写着"悬停缩放不参与"）。
+       */
+      const normal = tiles.filter((tile) => !tile.classList.contains('is-featured') && !tile.matches(':hover'))
+      const singles = normal.filter((tile) => !tile.classList.contains('is-big'))
       const featured = document.querySelector('.wall-tile.is-featured')
 
       // 行节奏：同一列里相邻两行的纵向间距应当等于 格子 + 间距。
@@ -9255,28 +9293,36 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         return Math.abs(i.w - t.w) > 2 || Math.abs(i.h - t.h) > 2
       }).length
 
-      const rows = getComputedStyle(grid).gridTemplateRows.split(' ')
-      const rowSizes = rows.map((value) => Math.round(Number.parseFloat(value))).filter((value) => Number.isFinite(value))
+      /*
+       * 行节奏的"数据侧"校验：舞台已经不是网格了（窗口化后格子绝对定位），
+       * 所以不再读 grid-template-rows，而是验证算术平面高度 = 行数 × 格子 + 行距 + 内边距。
+       * 这与原来"每一行都等于格子尺寸"的意图等价，而且直接盯着真正在用的几何。
+       */
+      const plane = { width: Math.round(state.bounds.width), height: Math.round(state.bounds.height) }
+      const expectPlaneHeight = state.rowCount * size + (state.rowCount - 1) * gap + 6
       return {
         size,
         gap,
         squares: normal.every((tile) => { const rect = box(tile); return Math.abs(rect.w - rect.h) <= 1 }),
-        normalBox: normal.length ? box(normal[0]) : null,
+        normalBox: singles.length ? box(singles[0]) : (normal.length ? box(normal[0]) : null),
         featuredBox: featured ? box(featured) : null,
         pitch,
         expectPitch: size + gap,
-        rowSizes,
-        rowCount: rowSizes.length,
-        rowsMatch: rowSizes.every((value) => Math.abs(value - size) <= 1),
+        rowCount: state.rowCount,
+        plane,
+        expectPlaneHeight,
+        planeMatchesRows: Math.abs(plane.height - expectPlaneHeight) <= 2,
         artMismatch
       }`)
     const expectFeatured = tileGeometry.size * 2 + tileGeometry.gap
     record('媒体墙格子是正方形',
       tileGeometry.squares && tileGeometry.normalBox &&
       Math.abs(tileGeometry.normalBox.w - tileGeometry.size) <= 1 &&
-      Math.abs(tileGeometry.normalBox.h - tileGeometry.size) <= 1,
+      Math.abs(tileGeometry.normalBox.h - tileGeometry.size) <= 1 &&
+      tileGeometry.planeMatchesRows,
       `普通格子 ${tileGeometry.normalBox?.w}×${tileGeometry.normalBox?.h}，标称 ${tileGeometry.size}px；` +
-      `行尺寸 ${tileGeometry.rowCount} 行，${tileGeometry.rowsMatch ? '全部等于格子尺寸' : `异常：${tileGeometry.rowSizes.slice(0, 4).join('/')}`}`)
+      `平面高 ${tileGeometry.plane?.height}px = ${tileGeometry.rowCount} 行 × ${tileGeometry.size} + 行距 + 内边距` +
+      `（应为 ${tileGeometry.expectPlaneHeight}px，${tileGeometry.planeMatchesRows ? '一致' : '不一致'}）`)
     record('聚焦块正好是 2×2 格',
       tileGeometry.featuredBox &&
       Math.abs(tileGeometry.featuredBox.w - expectFeatured) <= 2 &&
@@ -9476,14 +9522,28 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
           hit: wall.debugHitTest({ columns: 6, rows: 4 }),
           slotDrift: wall.debugSlotDrift().drift,
           culled: state.culled,
-          planeScroll: state.planeScroll,
+          /*
+           * 窗口化语义：舞台盒子只有一屏，平面尺寸只存在于几何数据里。
+           * 所以这里按"列数/行数 → 平面尺寸"的算术重新算一遍，和 bounds 对表。
+           */
           plane: { width: Math.round(state.bounds.width), height: Math.round(state.bounds.height) },
+          expected: {
+            width: 6 + state.columns * state.tileSize + (state.columns - 1) * 3,
+            height: 6 + state.rowCount * state.tileSize + (state.rowCount - 1) * 3
+          },
+          stage: {
+            width: document.querySelector('.media-wall').clientWidth,
+            height: document.querySelector('.media-wall').clientHeight,
+            viewWidth: state.bounds.viewWidth,
+            viewHeight: state.bounds.viewHeight
+          },
+          mounted: state.mounted,
           tileCount: state.tileCount ?? null
         })
       }
       wall.debugApplyPan(0, 0)
       await new Promise((r) => requestAnimationFrame(r))
-      return { stops, total: wall.tileCount, culledAtOrigin: wall.debugState().culled }`)
+      return { stops, total: wall.tileCount, albums: window.__aria.actions.albums().length, culledAtOrigin: wall.debugState().culled }`)
 
     const hitStops = hitCheck.stops
     const hitRate = Math.min(...hitStops.map((stop) => stop.hit.tile / stop.hit.total))
@@ -9498,17 +9558,28 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       hitRate >= 0.75 && hitCulled === 0 && hitDrift === 0,
       `${hitStops.length} 个停靠点（含四角）各取 24 个点做命中测试：最差命中率 ${Math.round(hitRate * 100)}%，` +
       `命中的格子里有 ${hitCulled} 个是隐藏的（应为 0），行列缓存错位 ${hitDrift} 个（应为 0）；` +
-      `各点命中 ${hitStops.map((stop) => stop.hit.tile).join('/')}，裁掉的格子数 ${hitStops.map((stop) => stop.culled).join('/')}` +
+      `各点命中 ${hitStops.map((stop) => stop.hit.tile).join('/')}，各点挂载 ${hitStops.map((stop) => stop.mounted).join('/')} 格` +
       `${hitStops.some((stop) => stop.hit.samples.length) ? `；未命中的例子 ${hitStops.find((stop) => stop.hit.samples.length).hit.samples.join('；')}` : ''}`)
+    /*
+     * 平面尺寸与舞台：窗口化之后"网格内容范围"已经没有意义（舞台只有一屏），
+     * 真正要守的是两件事：
+     *   ① 平移边界用的平面尺寸 = 由列数/行数算出来的尺寸（逻辑坐标没漂）；
+     *   ② 舞台盒子 = 视口（被合成/绘制的层只有一屏，这正是拖动能到 120fps 的原因）。
+     */
     const planeDrift = Math.max(...hitStops.flatMap((stop) => [
-      Math.abs(stop.planeScroll.width - stop.plane.width),
-      Math.abs(stop.planeScroll.height - stop.plane.height)
+      Math.abs(stop.expected.width - stop.plane.width),
+      Math.abs(stop.expected.height - stop.plane.height)
     ]))
-    record('平面尺寸与网格内容一致',
-      planeDrift <= 8,
-      `网格盒子 ${hitStops[0].plane.width}×${hitStops[0].plane.height}，` +
-      `内容范围 ${hitStops[0].planeScroll.width}×${hitStops[0].planeScroll.height}（相差 ${planeDrift}px）；` +
-      `共 ${hitCheck.total} 个格子，回到原点时裁掉 ${hitCheck.culledAtOrigin} 个`)
+    const stageDrift = Math.max(...hitStops.flatMap((stop) => [
+      Math.abs(stop.stage.width - stop.stage.viewWidth),
+      Math.abs(stop.stage.height - stop.stage.viewHeight)
+    ]))
+    record('平面尺寸与行列一致（窗口化后舞台只有一屏）',
+      planeDrift <= 2 && stageDrift <= 1 && hitStops.every((stop) => stop.mounted > 0 && stop.mounted < hitCheck.albums),
+      `由 ${hitStops[0].mounted} 格 / ${hitStops[0].expected.width}×${hitStops[0].expected.height}（按行列算）对表：` +
+      `实际平面 ${hitStops[0].plane.width}×${hitStops[0].plane.height}（相差 ${planeDrift}px）；` +
+      `舞台 ${hitStops[0].stage.width}×${hitStops[0].stage.height} vs 视口 ${hitStops[0].stage.viewWidth}×${hitStops[0].stage.viewHeight}（差 ${stageDrift}px）；` +
+      `共 ${hitCheck.total} 个格子（窗口化挂载，不再全量）`)
 
     /* ---------- 平移后新露出的格子要补加载封面 ----------
      *
@@ -9634,6 +9705,12 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
         stage.style.transform = 'translate3d(' + (-i) + 'px,' + (-i) + 'px,0)'
       }
       const domElapsed = performance.now() - domStarted
+      /*
+       * 必须还原：窗口化之后舞台自己**不该**有 transform（平移在格子上）。
+       * 这里留着上一次的 translate3d(-99px,-99px) 会让舞台整体偏移一个格子，
+       * 后面的「切回媒体墙定位到正在播放」就会量到偏了 99px 的中心 —— 真踩过。
+       */
+      stage.style.transform = ''
 
       return {
         rounds,
@@ -9773,6 +9850,12 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
       const albums = actions.albums()
       const snapshot = (label) => {
         const state = wall.debugState()
+        const rectOf = (el) => {
+          if (!el) return null
+          const r = el.getBoundingClientRect()
+          return { left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }
+        }
+        const featuredEl = document.querySelector('.wall-tile.is-featured')
         return {
           label,
           layout: state.layout,
@@ -9788,7 +9871,14 @@ async function runSmoke ({ win, ctx, profile, product, raiseInfo }) {
           featuredKey: (wall.featuredKey || '').slice(0, 10),
           featuredOffset: state.featuredOffset,
           center: state.tileCenterInViewport,
-          viewportCenter: state.viewportCenter
+          viewportCenter: state.viewportCenter,
+          /* 出问题时能一眼看出：是格子没尺寸、还是舞台与视口错位 */
+          rects: {
+            tile: rectOf(featuredEl),
+            grid: rectOf(document.querySelector('.media-wall')),
+            viewport: rectOf(document.querySelector('.wall-viewport'))
+          },
+          tileStyle: featuredEl ? [featuredEl.style.width, featuredEl.style.height, featuredEl.style.transform] : null
         }
       }
 

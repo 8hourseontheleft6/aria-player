@@ -14,6 +14,24 @@
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * 各进程的常驻内存（MB）。
+ *
+ * 拖动帧率与 RSS 是两件事：窗口化能同时降两者，但如果只盯着帧间隔，
+ * 可能拿"少挂 DOM 但层还是那么大"的方案当成功。所以每轮墙测量都带上 RSS。
+ */
+function rssByType () {
+  const { app } = require('electron')
+  const out = {}
+  for (const metric of app.getAppMetrics()) {
+    const type = metric.type === 'Tab' ? 'renderer' : metric.type === 'GPU' ? 'gpu'
+      : metric.type === 'Utility' ? 'utility' : metric.type === 'Browser' ? 'main' : metric.type
+    const mb = (metric.memory?.workingSetSize || 0) / 1024
+    out[type] = Math.round((out[type] || 0) + mb)
+  }
+  return out
+}
+
 async function evaluate (win, expression) {
   return win.webContents.executeJavaScript(`(async () => { ${expression} })()`, true)
 }
@@ -224,9 +242,12 @@ async function runPerf ({ win, ctx }) {
         nodes: document.querySelectorAll('*').length,
         layerCss: [Math.round(layer.width), Math.round(layer.height)],
         layerDevice: [Math.round(layer.width * devicePixelRatio), Math.round(layer.height * devicePixelRatio)],
-        planeCss: [Math.round(plane.width), Math.round(plane.height)]
+        planeCss: [Math.round(plane.width), Math.round(plane.height)],
+        viewportNodes: viewport.querySelectorAll('*').length,
+        wallTiles: document.querySelectorAll('.wall-tile').length
       }
     `)
+    result.rss = rssByType()
     console.log(
       `  ${label.padEnd(24)} 平均 ${String(result.average).padStart(7)}ms  ` +
       `中位 ${String(result.median).padStart(7)}ms  最差 ${String(result.worst).padStart(7)}ms  ` +
@@ -234,28 +255,22 @@ async function runPerf ({ win, ctx }) {
       `JS ${String(result.handlerMs).padStart(6)}ms  ` +
       `被平移层 ${result.layerCss.join('×')}（设备 ${result.layerDevice.join('×')}，平面 ${result.planeCss.join('×')}）`
     )
+    console.log(
+      `  ${''.padEnd(24)} 格子 ${result.wallTiles} 个  .wall-viewport 内节点 ${result.viewportNodes}  ` +
+      `renderer RSS ${result.rss.renderer ?? '?'}MB  GPU ${result.rss.gpu ?? '?'}MB`
+    )
     return result
   }
 
   /*
-   * 对照实验说明：
-   * 平移直接作用在整面墙上，省绘制靠「屏幕外的格子 visibility: hidden」。
-   * 把这条 CSS 关掉，就等于让浏览器每帧栅格化全部 474 个格子 ——
-   * 那正是 9fps 的成因，也是这一整套裁剪手段存在的理由。
+   * 拖动路径：窗口化之后舞台只有一屏、格子各自平移，
+   * 所以这里量的是「真实手感」而不是某条 CSS 开关 —— 同一轮里连续量三次，
+   * 中间复位一次，用来区分「首轮冷」和「实现本身慢」。
    */
-  const noCulling = `
-    document.getElementById('perf-override')?.remove()
-    {
-      const style = document.createElement('style')
-      style.id = 'perf-override'
-      style.textContent = '.wall-tile.is-culled { visibility: visible !important; }'
-      document.head.appendChild(style)
-    }`
-
   console.log('\n  ── 拖动路径对照 ──')
   results.wallPan = await panProbe('拖动（当前实现）', override(''))
-  results.wallPanNoCulling = await panProbe('拖动（对照：不裁剪屏幕外格子）', noCulling)
   results.wallPanRestored = await panProbe('拖动（复位后复测）', override(''))
+  results.wallPanAgain = await panProbe('拖动（第三次）', override(''))
 
   /*
    * 首次打开媒体墙：清掉封面缓存（含磁盘），切走再切回来，量封面涌入那几秒的帧间隔。
