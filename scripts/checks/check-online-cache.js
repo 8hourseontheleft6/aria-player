@@ -80,7 +80,9 @@ const entry = (folder, name, size, ageMs = 0) => ({ folder, name, size, at: now 
 {
   const input = {
     entries: [entry('covers', `${key(1)}.bin`, 100), entry('covers', `${key(9)}.bin`, 100)],
-    maxBytes: 100
+    maxBytes: 100,
+    /* 固定 now：计划里会带上 now，调用时若各取 Date.now() 会差 1ms，CI 上就会误报不可复现 */
+    now
   }
   const snapshot = JSON.stringify(input.entries)
   const first = planPrune(input)
